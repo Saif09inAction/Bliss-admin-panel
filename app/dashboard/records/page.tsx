@@ -165,7 +165,7 @@ export default function RecordsPage() {
             onClick={() => setTab(t)}
             className={`rounded-full px-4 py-1.5 text-sm font-semibold capitalize ${tab === t ? "bg-navy text-white" : "bg-slate-200"}`}
           >
-            {t}
+            {t === "approvals" ? "Approvals" : t}
           </button>
         ))}
       </div>
