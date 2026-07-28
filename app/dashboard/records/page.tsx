@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import type { KaarigerOrder, OrderApprovalRecord, PickupRecord, ReturnRecord } from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 type Tab = "kaariger" | "approvals" | "pickups" | "returns";
 
@@ -15,6 +16,7 @@ export default function RecordsPage() {
   const [approvals, setApprovals] = useState<OrderApprovalRecord[]>([]);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -152,10 +154,58 @@ export default function RecordsPage() {
     }
   }
 
+  const q = search.trim().toLowerCase();
+  const filteredOrders = useMemo(() => {
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
+        o.productName.toLowerCase().includes(q) ||
+        o.kaarigerName.toLowerCase().includes(q) ||
+        o.status.toLowerCase().includes(q)
+    );
+  }, [orders, q]);
+
+  const filteredApprovals = useMemo(() => {
+    if (!q) return approvals;
+    return approvals.filter(
+      (a) =>
+        a.productName.toLowerCase().includes(q) ||
+        a.kaarigerName.toLowerCase().includes(q) ||
+        a.verifiedByName.toLowerCase().includes(q)
+    );
+  }, [approvals, q]);
+
+  const filteredPickups = useMemo(() => {
+    if (!q) return pickups;
+    return pickups.filter(
+      (p) =>
+        p.productName.toLowerCase().includes(q) ||
+        p.partner.toLowerCase().includes(q) ||
+        p.staffName.toLowerCase().includes(q)
+    );
+  }, [pickups, q]);
+
+  const filteredReturns = useMemo(() => {
+    if (!q) return returns;
+    return returns.filter(
+      (r) =>
+        r.productName.toLowerCase().includes(q) ||
+        r.partner.toLowerCase().includes(q) ||
+        r.staffName.toLowerCase().includes(q) ||
+        r.returnType.toLowerCase().includes(q)
+    );
+  }, [returns, q]);
+
   return (
     <div className="space-y-4">
       <PageToolbar
         actions={<button className="btn-secondary" onClick={exportCsv}>Export CSV</button>}
+      />
+
+      <AdminSearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Search records..."
       />
 
       <div className="flex flex-wrap gap-2">
@@ -163,7 +213,7 @@ export default function RecordsPage() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`rounded-full px-4 py-1.5 text-sm font-semibold capitalize ${tab === t ? "bg-navy text-white" : "bg-slate-200"}`}
+            className={`filter-pill ${tab === t ? "filter-pill-active" : ""}`}
           >
             {t === "approvals" ? "Approvals" : t}
           </button>
@@ -185,7 +235,7 @@ export default function RecordsPage() {
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => (
+              {filteredOrders.map((o) => (
                 <tr key={o.id} className="border-b border-slate-100">
                   <td className="py-3 pr-3">{o.productName}</td>
                   <td className="py-3 pr-3">{o.kaarigerName}</td>
@@ -211,7 +261,7 @@ export default function RecordsPage() {
               </tr>
             </thead>
             <tbody>
-              {approvals.map((a) => (
+              {filteredApprovals.map((a) => (
                 <tr key={a.id} className="border-b border-slate-100">
                   <td className="py-3 pr-3">{a.productName}</td>
                   <td className="py-3 pr-3">{a.kaarigerName}</td>
@@ -236,7 +286,7 @@ export default function RecordsPage() {
               </tr>
             </thead>
             <tbody>
-              {pickups.map((p) => (
+              {filteredPickups.map((p) => (
                 <tr key={p.id} className="border-b border-slate-100">
                   <td className="py-3 pr-3">{p.productName} ({p.color})</td>
                   <td className="py-3 pr-3">{p.partner}</td>
@@ -261,7 +311,7 @@ export default function RecordsPage() {
               </tr>
             </thead>
             <tbody>
-              {returns.map((r) => (
+              {filteredReturns.map((r) => (
                 <tr key={r.id} className="border-b border-slate-100">
                   <td className="py-3 pr-3">{r.productName} ({r.color})</td>
                   <td className="py-3 pr-3">{r.returnType}</td>

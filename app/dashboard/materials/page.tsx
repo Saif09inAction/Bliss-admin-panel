@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   deleteDoc,
@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 import type { RawMaterial } from "@/lib/types";
 import { uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 export default function MaterialsPage() {
   const { session } = useAuth();
@@ -26,6 +27,7 @@ export default function MaterialsPage() {
     minimumStock: "",
     supplier: "",
   });
+  const [search, setSearch] = useState("");
 
   async function load() {
     const snap = await getDocs(collection(getDb(), "raw_materials"));
@@ -89,6 +91,17 @@ export default function MaterialsPage() {
     load();
   }
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return materials;
+    return materials.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.unit.toLowerCase().includes(q) ||
+        m.supplier.toLowerCase().includes(q)
+    );
+  }, [materials, search]);
+
   return (
     <div className="space-y-4">
       <PageToolbar
@@ -104,6 +117,12 @@ export default function MaterialsPage() {
             {showForm ? "Cancel" : "Add Material"}
           </button>
         }
+      />
+
+      <AdminSearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Search materials by name, unit, supplier..."
       />
 
       {showForm && (
@@ -145,7 +164,7 @@ export default function MaterialsPage() {
             </tr>
           </thead>
           <tbody>
-            {materials.map((m) => {
+            {filtered.map((m) => {
               const low = m.quantity <= m.minimumStock;
               return (
                 <tr key={m.id} className={`border-b border-slate-100 ${low ? "bg-red-50" : ""}`}>
@@ -163,6 +182,11 @@ export default function MaterialsPage() {
           </tbody>
         </table>
         </div>
+        {filtered.length === 0 && (
+          <p className="py-6 text-center text-sm text-slate-500">
+            {search ? "No materials match your search." : "No materials yet."}
+          </p>
+        )}
       </div>
     </div>
   );

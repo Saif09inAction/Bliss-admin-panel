@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import { todayStr } from "@/lib/csv";
 import { useAuth } from "@/lib/auth-context";
 import { ADMIN_MODULES, greeting } from "@/lib/navigation";
 import { ModuleRow, SectionHeader, StatCard } from "@/components/admin/DashboardCards";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 export default function DashboardPage() {
   const { session } = useAuth();
@@ -17,6 +18,7 @@ export default function DashboardPage() {
     pendingDues: "₹0",
     pendingOrders: 0,
   });
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -63,6 +65,14 @@ export default function DashboardPage() {
     load();
   }, []);
 
+  const filteredModules = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ADMIN_MODULES;
+    return ADMIN_MODULES.filter(
+      (m) => m.title.toLowerCase().includes(q) || m.description.toLowerCase().includes(q)
+    );
+  }, [search]);
+
   return (
     <div className="space-y-5">
       <div className="admin-hero">
@@ -96,10 +106,18 @@ export default function DashboardPage() {
       )}
 
       <SectionHeader title="Quick Access" subtitle="All management modules in one place" />
+      <AdminSearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Search modules..."
+      />
       <div className="module-list">
-        {ADMIN_MODULES.map((m) => (
+        {filteredModules.map((m) => (
           <ModuleRow key={m.href} title={m.title} description={m.description} href={m.href} icon={m.icon} />
         ))}
+        {filteredModules.length === 0 && (
+          <p className="py-4 text-center text-sm text-slate-500">No modules match your search.</p>
+        )}
       </div>
     </div>
   );

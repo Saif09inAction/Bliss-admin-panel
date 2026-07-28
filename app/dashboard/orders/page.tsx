@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   doc,
@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth-context";
 import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, RawMaterial } from "@/lib/types";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 export default function OrdersPage() {
   const { session } = useAuth();
@@ -24,6 +25,7 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [payments, setPayments] = useState<KaarigerPayment[]>([]);
   const [paymentForm, setPaymentForm] = useState({ amount: "", remarks: "" });
+  const [search, setSearch] = useState("");
 
   const [form, setForm] = useState({
     kaarigerId: "",
@@ -222,6 +224,23 @@ export default function OrdersPage() {
     });
   }
 
+  const inStockMaterials = useMemo(
+    () => materials.filter((m) => m.quantity > 0),
+    [materials]
+  );
+
+  const filteredOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
+        o.productName.toLowerCase().includes(q) ||
+        o.kaarigerName.toLowerCase().includes(q) ||
+        o.status.toLowerCase().includes(q) ||
+        o.color.toLowerCase().includes(q)
+    );
+  }, [orders, search]);
+
   const previewTotal = (() => {
     const qty = Number(form.targetQuantity) || 0;
     const amt = Number(form.totalDealAmount) || 0;
@@ -238,6 +257,12 @@ export default function OrdersPage() {
             {showForm ? "Cancel" : "Create Order"}
           </button>
         }
+      />
+
+      <AdminSearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Search orders by product, kaariger, status..."
       />
 
       {showForm && (
@@ -282,42 +307,52 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <label className="label mb-0">Raw Materials</label>
-              <button type="button" className="text-xs font-semibold text-navy-light" onClick={addMaterialRow}>+ Add material</button>
-            </div>
-            {form.selectedMaterials.map((row, i) => (
-              <div key={i} className="mb-2 grid grid-cols-2 gap-2">
-                <select
-                  className="input"
-                  value={row.materialId}
-                  onChange={(e) => {
-                    const next = [...form.selectedMaterials];
-                    next[i] = { ...next[i], materialId: e.target.value };
-                    setForm({ ...form, selectedMaterials: next });
-                  }}
-                >
-                  <option value="">Material</option>
-                  {materials.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  placeholder="Qty"
-                  value={row.quantity}
-                  onChange={(e) => {
-                    const next = [...form.selectedMaterials];
-                    next[i] = { ...next[i], quantity: e.target.value };
-                    setForm({ ...form, selectedMaterials: next });
-                  }}
-                />
+          {inStockMaterials.length > 0 ? (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="label mb-0">Raw Materials (in stock only)</label>
+                <button type="button" className="text-xs font-semibold text-[var(--bliss-green)]" onClick={addMaterialRow}>
+                  + Add material
+                </button>
               </div>
-            ))}
-          </div>
+              {form.selectedMaterials.map((row, i) => (
+                <div key={i} className="mb-2 grid grid-cols-2 gap-2">
+                  <select
+                    className="input"
+                    value={row.materialId}
+                    onChange={(e) => {
+                      const next = [...form.selectedMaterials];
+                      next[i] = { ...next[i], materialId: e.target.value };
+                      setForm({ ...form, selectedMaterials: next });
+                    }}
+                  >
+                    <option value="">Material</option>
+                    {inStockMaterials.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.quantity} {m.unit} available)
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    placeholder="Qty"
+                    value={row.quantity}
+                    onChange={(e) => {
+                      const next = [...form.selectedMaterials];
+                      next[i] = { ...next[i], quantity: e.target.value };
+                      setForm({ ...form, selectedMaterials: next });
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              No raw materials in stock. Add stock under Raw Materials before assigning materials to an order.
+            </p>
+          )}
 
           <div>
             <label className="label">Notes</label>
@@ -340,7 +375,7 @@ export default function OrdersPage() {
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => (
+              {filteredOrders.map((o) => (
                 <tr
                   key={o.id}
                   className={`cursor-pointer border-b border-slate-100 ${selectedOrder === o.id ? "bg-ice/30" : ""}`}
@@ -358,6 +393,11 @@ export default function OrdersPage() {
             </tbody>
           </table>
           </div>
+          {filteredOrders.length === 0 && (
+            <p className="py-6 text-center text-sm text-slate-500">
+              {search ? "No orders match your search." : "No orders yet."}
+            </p>
+          )}
         </div>
 
         {selectedOrder && (

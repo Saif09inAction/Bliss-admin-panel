@@ -11,6 +11,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 type FormMode = "closed" | "staff" | "kaariger" | "edit";
 
@@ -200,12 +201,10 @@ export default function WorkersPage() {
             </button>
           </div>
         </div>
-        <input
-          className="search-input"
-          type="search"
-          placeholder="Search by name or mobile..."
+        <AdminSearchBar
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={setSearch}
+          placeholder="Search by name or mobile..."
         />
         <div className="flex flex-wrap gap-2">
           {(["ALL", "STAFF", "KAARIGER"] as const).map((f) => (

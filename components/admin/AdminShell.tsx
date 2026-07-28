@@ -44,6 +44,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <TopAppBar
             title={meta.title}
             subtitle={subtitle}
+            showBack={pathname !== "/dashboard"}
+            onBackClick={() => router.push("/dashboard")}
             onMenuClick={() => setDrawerOpen(true)}
           />
         </div>

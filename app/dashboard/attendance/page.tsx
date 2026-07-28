@@ -16,6 +16,7 @@ import {
   statusLabel,
 } from "@/lib/attendance-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 export default function AttendancePage() {
   const [date, setDate] = useState(todayStr());
@@ -169,11 +170,10 @@ export default function AttendancePage() {
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex-1">
             <label className="label">Search Staff</label>
-            <input
-              className="input"
-              placeholder="Search by name or mobile..."
+            <AdminSearchBar
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={setSearch}
+              placeholder="Search by name or mobile..."
             />
           </div>
           <div className="sm:w-48">
