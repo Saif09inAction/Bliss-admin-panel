@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
@@ -41,15 +40,8 @@ export default function LoginPage() {
       <div className="login-frame">
         <div className="login-scroll">
           <div className="flex flex-col items-center bg-[var(--bliss-cream)] px-6 pb-8 pt-14">
-            <Image
-              src="/bliss-logo.png"
-              alt="Bliss Bombay"
-              width={112}
-              height={112}
-              className="mb-4 h-28 w-28 object-contain"
-              priority
-            />
-            <h1 className="text-2xl font-black tracking-[0.25em] text-[var(--bliss-lime)] drop-shadow-sm">
+            <div className="bb-monogram" aria-hidden />
+            <h1 className="mt-4 text-2xl font-black tracking-[0.25em] text-[var(--bliss-green-light)]">
               BLISS
             </h1>
             <p className="text-xs font-bold tracking-[0.45em] text-[var(--bliss-gold)]">BOMBAY</p>
@@ -91,7 +83,7 @@ export default function LoginPage() {
               {error && <p className="text-sm text-red-300">{error}</p>}
               <button
                 type="submit"
-                className="w-full rounded-full bg-[var(--bliss-lime)] py-3.5 text-base font-black tracking-wide text-[var(--bliss-black)] transition active:scale-[0.98] hover:brightness-95 disabled:opacity-50"
+                className="w-full rounded-full bg-[var(--bliss-green)] py-3.5 text-base font-black tracking-wide text-white transition active:scale-[0.98] hover:brightness-95 disabled:opacity-50"
                 disabled={submitting}
               >
                 {submitting ? "Signing in..." : "Login as Admin"}

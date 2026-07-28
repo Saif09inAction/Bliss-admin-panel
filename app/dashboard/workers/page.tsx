@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   deleteDoc,
@@ -11,7 +11,6 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
-import PageToolbar from "@/components/admin/PageToolbar";
 
 type FormMode = "closed" | "staff" | "kaariger" | "edit";
 
@@ -26,6 +25,7 @@ const emptyForm = {
 export default function WorkersPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<"ALL" | Role>("ALL");
+  const [search, setSearch] = useState("");
   const [formMode, setFormMode] = useState<FormMode>("closed");
   const [editingPhone, setEditingPhone] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -158,7 +158,19 @@ export default function WorkersPage() {
     load();
   }
 
-  const filtered = employees.filter((e) => filter === "ALL" || e.role === filter);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return employees.filter((e) => {
+      const matchFilter = filter === "ALL" || e.role === filter;
+      const matchSearch =
+        !q ||
+        e.name.toLowerCase().includes(q) ||
+        e.phone.includes(q) ||
+        e.role.toLowerCase().includes(q);
+      return matchFilter && matchSearch;
+    });
+  }, [employees, filter, search]);
+
   const staffCount = employees.filter((e) => e.role === "STAFF").length;
   const kaarigerCount = employees.filter((e) => e.role === "KAARIGER").length;
 
@@ -173,44 +185,63 @@ export default function WorkersPage() {
 
   return (
     <div className="space-y-4">
-      <PageToolbar
-        meta={`${staffCount} staff · ${kaarigerCount} kaarigers`}
-        actions={
-          <>
-            <button className="btn-primary" onClick={openStaffForm}>
+      <div className="page-toolbar">
+        <div className="page-toolbar-row">
+          <p className="page-toolbar-meta">
+            <span className="font-bold text-[var(--bliss-green-dark)]">{staffCount}</span> staff ·{" "}
+            <span className="font-bold text-[var(--bliss-green-dark)]">{kaarigerCount}</span> kaarigers
+          </p>
+          <div className="page-toolbar-actions">
+            <button type="button" className="btn-primary" onClick={openStaffForm}>
               + Staff
             </button>
-            <button
-              className="rounded-xl bg-navy-light px-4 py-2.5 text-sm font-semibold text-white active:scale-[0.98]"
-              onClick={openKaarigerForm}
-            >
+            <button type="button" className="btn-gold" onClick={openKaarigerForm}>
               + Kaariger
             </button>
-          </>
-        }
-      />
+          </div>
+        </div>
+        <input
+          className="search-input"
+          type="search"
+          placeholder="Search by name or mobile..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="flex flex-wrap gap-2">
+          {(["ALL", "STAFF", "KAARIGER"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={`filter-pill ${filter === f ? "filter-pill-active" : ""}`}
+            >
+              {f === "ALL" ? "All" : f === "STAFF" ? "Staff" : "Kaarigers"}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {formMode !== "closed" && (
-        <form onSubmit={saveEmployee} className="card space-y-4">
+        <form onSubmit={saveEmployee} className="card space-y-4 panel-slide">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-navy">{formTitle}</h2>
-            <button type="button" className="text-sm text-slate-500 hover:text-slate-700" onClick={closeForm}>
+            <h2 className="text-lg font-bold text-[var(--bliss-dark)]">{formTitle}</h2>
+            <button type="button" className="text-sm text-slate-500" onClick={closeForm}>
               Cancel
             </button>
           </div>
 
           {formMode === "kaariger" && (
-            <p className="rounded-lg bg-ice/40 px-3 py-2 text-sm text-navy">
-              Kaariger will login in the app using <strong>Kaariger</strong> tab with this mobile number and password.
+            <p className="rounded-xl bg-[var(--bliss-green-surface)] px-3 py-2 text-sm text-[var(--bliss-green-dark)]">
+              Kaariger logs in via the <strong>Kaariger</strong> tab in the mobile app.
             </p>
           )}
           {formMode === "staff" && (
-            <p className="rounded-lg bg-ice/40 px-3 py-2 text-sm text-navy">
-              Staff will login in the app using <strong>Staff</strong> tab with this mobile number and password.
+            <p className="rounded-xl bg-[var(--bliss-green-surface)] px-3 py-2 text-sm text-[var(--bliss-green-dark)]">
+              Staff logs in via the <strong>Staff</strong> tab in the mobile app.
             </p>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3">
             <div>
               <label className="label">Full Name</label>
               <input
@@ -235,7 +266,7 @@ export default function WorkersPage() {
             </div>
             <div>
               <label className="label">
-                {formMode === "edit" ? "New Password (leave blank to keep current)" : "Password"}
+                {formMode === "edit" ? "New Password (optional)" : "Password"}
               </label>
               <input
                 className="input"
@@ -272,69 +303,66 @@ export default function WorkersPage() {
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <button type="submit" className="btn-primary" disabled={saving}>
+          <button type="submit" className="btn-primary w-full" disabled={saving}>
             {saving ? "Saving..." : formMode === "edit" ? "Update Worker" : formMode === "kaariger" ? "Create Kaariger" : "Create Staff"}
           </button>
         </form>
       )}
 
-      <div className="mb-4 flex gap-2">
-        {(["ALL", "STAFF", "KAARIGER"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`rounded-full px-3 py-1 text-xs font-semibold ${filter === f ? "bg-navy text-white" : "bg-slate-200 text-slate-700"}`}
-          >
-            {f === "ALL" ? "All" : f === "STAFF" ? "Staff" : "Kaarigers"}
-          </button>
-        ))}
-      </div>
-
-      <div className="card !p-0">
-        <div className="scroll-table">
-          <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b text-slate-500">
-              <th className="py-2 pr-4">Name</th>
-              <th className="py-2 pr-4">Mobile (Login)</th>
-              <th className="py-2 pr-4">Role</th>
-              <th className="py-2 pr-4">Salary</th>
-              <th className="py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((e) => (
-              <tr key={e.phone} className="border-b border-slate-100">
-                <td className="py-3 pr-4 font-medium">{e.name}</td>
-                <td className="py-3 pr-4">{e.phone}</td>
-                <td className="py-3 pr-4">
+      <div className="flex flex-col gap-3">
+        {filtered.map((e) => (
+          <div key={e.phone} className="worker-card">
+            <div className="flex items-start gap-3">
+              <div className="worker-avatar">{e.name.charAt(0).toUpperCase()}</div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-bold capitalize text-[var(--bliss-dark)]">{e.name}</p>
+                    <p className="mt-0.5 text-sm text-slate-500">{e.phone}</p>
+                  </div>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      e.role === "KAARIGER" ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800"
+                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                      e.role === "KAARIGER"
+                        ? "bg-purple-100 text-purple-800"
+                        : "bg-[var(--bliss-green-surface)] text-[var(--bliss-green-dark)]"
                     }`}
                   >
                     {e.role === "KAARIGER" ? "Kaariger" : "Staff"}
                   </span>
-                </td>
-                <td className="py-3 pr-4">{e.role === "KAARIGER" ? "—" : `₹${e.monthlySalary}`}</td>
-                <td className="py-3 space-x-3">
-                  <button className="text-navy-light text-xs font-semibold" onClick={() => openEdit(e)}>
-                    Edit / Reset Password
-                  </button>
-                  <button className="text-red-600 text-xs font-semibold" onClick={() => removeEmployee(e.phone)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                  <p className="text-xs text-slate-500">
+                    {e.role === "KAARIGER" ? "Production worker" : `Salary: ₹${e.monthlySalary.toLocaleString("en-IN")}`}
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      className="text-xs font-bold text-[var(--bliss-green)]"
+                      onClick={() => openEdit(e)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-bold text-red-600"
+                      onClick={() => removeEmployee(e.phone)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
         {filtered.length === 0 && (
-          <p className="py-6 text-center text-slate-500">
-            No workers yet. Use &quot;+ Staff&quot; or &quot;+ Kaariger&quot; above.
-          </p>
+          <div className="card py-10 text-center">
+            <p className="text-sm text-slate-500">
+              {search ? "No workers match your search." : "No workers yet. Add staff or kaariger above."}
+            </p>
+          </div>
         )}
-        </div>
       </div>
     </div>
   );

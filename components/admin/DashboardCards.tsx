@@ -12,48 +12,61 @@ export function StatCard({
 }) {
   return (
     <div className="stat-card">
-      <div className="flex items-start justify-between">
-        <p className="text-sm font-medium text-slate-500">{title}</p>
-        <NavIcon name={icon} className="h-5 w-5 text-[var(--bliss-gold)]" />
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+        <NavIcon name={icon} className="h-5 w-5 shrink-0 text-[var(--bliss-gold)]" />
       </div>
-      <p className="mt-2 text-xl font-bold text-[var(--bliss-dark)]">{value}</p>
+      <p className="stat-card-value">{value}</p>
     </div>
   );
 }
 
-export function ModuleCard({
+export function ModuleRow({
   title,
   description,
   href,
-  gradient,
   icon,
 }: {
   title: string;
   description: string;
   href: string;
-  gradient: string;
   icon: string;
 }) {
   return (
-    <Link
-      href={href}
-      className={`module-card bg-gradient-to-br ${gradient} text-white shadow-md transition hover:scale-[1.02] hover:shadow-lg`}
-      style={{ borderColor: "rgba(212, 175, 55, 0.35)" }}
-    >
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-[var(--bliss-gold)]/30 bg-[var(--bliss-lime)]/10">
-        <NavIcon name={icon} className="h-5 w-5 text-[var(--bliss-lime)]" />
+    <Link href={href} className="module-row">
+      <div className="module-row-icon">
+        <NavIcon name={icon} className="h-6 w-6" />
       </div>
-      <p className="font-bold">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-white/75">{description}</p>
+      <div className="min-w-0 flex-1">
+        <p className="module-row-title">{title}</p>
+        <p className="module-row-desc">{description}</p>
+      </div>
+      <NavIcon name="chevron" className="h-5 w-5 shrink-0 text-[var(--bliss-green)]" />
     </Link>
   );
 }
 
 export function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <div className="mb-4">
-      <h2 className="text-lg font-bold text-[var(--bliss-dark)]">{title}</h2>
-      {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
+    <div className="mb-3 mt-1">
+      <h2 className="section-title">{title}</h2>
+      {subtitle && <p className="section-sub">{subtitle}</p>}
     </div>
   );
+}
+
+/** @deprecated use ModuleRow */
+export function ModuleCard({
+  title,
+  description,
+  href,
+  icon,
+}: {
+  title: string;
+  description: string;
+  href: string;
+  gradient?: string;
+  icon: string;
+}) {
+  return <ModuleRow title={title} description={description} href={href} icon={icon} />;
 }

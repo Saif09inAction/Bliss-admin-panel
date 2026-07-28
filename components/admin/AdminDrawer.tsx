@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { DRAWER_NAV } from "@/lib/navigation";
 import { NavIcon } from "./NavIcon";
@@ -30,15 +29,15 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
       >
         <div className="drawer-header shrink-0 px-6 pb-6 text-white">
           <div className="flex items-center gap-3">
-            <Image src="/bliss-logo.png" alt="Bliss Bombay" width={48} height={48} className="h-12 w-12 object-contain" />
+            <div className="bb-monogram !mx-0 !h-12 !w-12 !text-3xl" aria-hidden />
             <div>
-              <p className="text-xl font-black tracking-widest text-[var(--bliss-lime)]">BLISS</p>
+              <p className="text-xl font-black tracking-widest text-[var(--bliss-green-light)]">BLISS</p>
               <p className="text-[10px] font-bold tracking-[0.35em] text-[var(--bliss-gold)]">BOMBAY</p>
             </div>
           </div>
           <p className="mt-2 text-xs uppercase tracking-widest text-white/50">Admin Panel</p>
           <div className="mt-5 flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--bliss-gold)]/40 bg-[var(--bliss-lime)]/10 text-xl font-black text-[var(--bliss-lime)]">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--bliss-gold)]/40 bg-[var(--bliss-green)]/20 text-xl font-black text-[var(--bliss-green-light)]">
               {session.name.charAt(0).toUpperCase()}
             </div>
             <div>
@@ -61,7 +60,7 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
               >
                 <NavIcon
                   name={item.icon}
-                  className={`h-5 w-5 ${active ? "text-[var(--bliss-lime)]" : "text-slate-500"}`}
+                  className={`h-5 w-5 ${active ? "text-[var(--bliss-green-light)]" : "text-slate-500"}`}
                 />
                 {item.label}
               </Link>

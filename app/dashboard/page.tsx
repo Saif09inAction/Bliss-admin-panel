@@ -6,7 +6,7 @@ import { getDb } from "@/lib/firebase";
 import { todayStr } from "@/lib/csv";
 import { useAuth } from "@/lib/auth-context";
 import { ADMIN_MODULES, greeting } from "@/lib/navigation";
-import { ModuleCard, SectionHeader, StatCard } from "@/components/admin/DashboardCards";
+import { ModuleRow, SectionHeader, StatCard } from "@/components/admin/DashboardCards";
 
 export default function DashboardPage() {
   const { session } = useAuth();
@@ -47,7 +47,6 @@ export default function DashboardPage() {
       const present = attendance.docs.length;
       const rate = staffList.length ? Math.round((present / staffList.length) * 100) : 0;
 
-      // Rough pending salary estimate from payments
       const paid = payments.docs.reduce((s, d) => s + ((d.data().amount as number) || 0), 0);
       const totalSalary = staffList.reduce((s, d) => s + ((d.data().monthlySalary as number) || 0), 0);
       const dues = Math.max(0, totalSalary - paid);
@@ -65,51 +64,43 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="space-y-4">
-      {/* Hero — matches Android admin dashboard */}
+    <div className="space-y-5">
       <div className="admin-hero">
-        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--bliss-gold)]/90">
+        <p className="relative z-10 text-xs font-bold uppercase tracking-[0.2em] text-[var(--bliss-gold-light)]">
           {greeting()}
         </p>
-        <h2 className="mt-1 text-2xl font-bold text-white">
+        <h2 className="relative z-10 mt-2 text-2xl font-black text-white">
           {session?.name || "Administrator"}
         </h2>
-        <p className="mt-1 text-sm text-[var(--bliss-lime)]/80">Admin Control Center</p>
-        <div className="mt-4 inline-flex items-center rounded-full border border-[var(--bliss-gold)]/30 bg-[var(--bliss-lime)]/10 px-3 py-1 text-xs text-[var(--bliss-lime)]">
-          Bliss Bombay Operations
+        <p className="relative z-10 mt-1 text-sm text-white/75">Bliss Bombay Control Center</p>
+        <div className="relative z-10 mt-4 inline-flex items-center gap-2 rounded-full border border-[var(--bliss-gold)]/40 bg-black/20 px-3 py-1.5">
+          <span className="h-2 w-2 rounded-full bg-[var(--bliss-green-light)]" />
+          <span className="text-xs font-semibold text-[var(--bliss-gold-light)]">Live Operations</span>
         </div>
       </div>
 
-      {/* Stats row */}
       <div className="grid grid-cols-2 gap-3">
-        <StatCard title="Total Workers" value={stats.workers} icon="groups" />
-        <StatCard title="Today's Attendance" value={stats.attendanceRate} icon="calendar" />
-        <StatCard title="Low Stock Alerts" value={stats.lowStock} icon="inventory" />
+        <StatCard title="Workers" value={stats.workers} icon="groups" />
+        <StatCard title="Attendance" value={stats.attendanceRate} icon="calendar" />
+        <StatCard title="Low Stock" value={stats.lowStock} icon="inventory" />
         <StatCard title="Pending Dues" value={stats.pendingDues} icon="orders" />
       </div>
 
-      {/* Quick modules grid */}
-      <SectionHeader
-        title="Management Modules"
-        subtitle="Tap a module to manage operations"
-      />
-      <div className="grid grid-cols-2 gap-3">
-        {ADMIN_MODULES.map((m) => (
-          <ModuleCard key={m.href} {...m} />
-        ))}
-      </div>
-
-      {/* Active orders banner */}
       {stats.pendingOrders > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-bold text-amber-900">
+        <div className="alert-banner">
+          <p className="alert-banner-title">
             {stats.pendingOrders} active kaariger order{stats.pendingOrders > 1 ? "s" : ""}
           </p>
-          <p className="mt-1 text-xs text-amber-800">
-            Orders awaiting delivery or staff approval
-          </p>
+          <p className="alert-banner-sub">Awaiting delivery or staff approval</p>
         </div>
       )}
+
+      <SectionHeader title="Quick Access" subtitle="All management modules in one place" />
+      <div className="module-list">
+        {ADMIN_MODULES.map((m) => (
+          <ModuleRow key={m.href} title={m.title} description={m.description} href={m.href} icon={m.icon} />
+        ))}
+      </div>
     </div>
   );
 }
