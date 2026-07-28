@@ -81,7 +81,7 @@ export function statusColorClass(status: DayStatus | string): string {
     case "ON_TIME":
       return "bg-emerald-500 text-white";
     case "LATE":
-      return "bg-amber-400 text-navy";
+      return "bg-amber-400 text-slate-900";
     case "LEFT_EARLY":
       return "bg-orange-400 text-white";
     case "ABSENT":
@@ -139,5 +139,54 @@ export function startOfDay(d: Date): Date {
 
 export function isImageUrl(url?: string): boolean {
   if (!url) return false;
-  return url.startsWith("http://") || url.startsWith("https://");
+  const trimmed = url.trim();
+  return (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("gs://")
+  );
+}
+
+export function resolveAttendanceImage(url?: string): string | null {
+  if (!url?.trim()) return null;
+  const trimmed = url.trim();
+  if (isImageUrl(trimmed)) return trimmed;
+  return null;
+}
+
+export function monthDateRange(year: number, month: number): { start: string; end: string } {
+  const total = daysInMonth(year, month);
+  return {
+    start: dateKey(year, month, 1),
+    end: dateKey(year, month, total),
+  };
+}
+
+export function computeMonthAttendanceStats(
+  records: { date: string; status?: string; signInTime?: string }[],
+  year: number,
+  month: number
+) {
+  const byDate = new Map(records.map((r) => [r.date, r]));
+  const totalDays = daysInMonth(year, month);
+  const today = new Date();
+  let present = 0;
+  let late = 0;
+  let absent = 0;
+  let workingDays = 0;
+
+  for (let d = 1; d <= totalDays; d++) {
+    const key = dateKey(year, month, d);
+    const day = new Date(year, month, d);
+    if (day > startOfDay(today)) continue;
+    workingDays++;
+    const rec = byDate.get(key);
+    const st = dayStatus(rec as import("./types").Attendance | undefined, key);
+    if (st === "ABSENT") absent++;
+    else if (st === "LATE") late++;
+    else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY") present++;
+  }
+
+  const rate = workingDays ? Math.round((present / workingDays) * 100) : 0;
+  return { present, late, absent, workingDays, rate };
 }

@@ -10,6 +10,10 @@ import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 type Tab = "kaariger" | "approvals" | "pickups" | "returns";
 
+function statusLabel(status: string) {
+  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default function RecordsPage() {
   const [tab, setTab] = useState<Tab>("kaariger");
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
@@ -29,82 +33,88 @@ export default function RecordsPage() {
       ]);
 
       setOrders(
-        oSnap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: (data.id as string) || d.id,
-            kaarigerId: data.kaarigerId as string,
-            kaarigerName: data.kaarigerName as string,
-            productName: data.productName as string,
-            targetQuantity: (data.targetQuantity as number) || 0,
-            color: (data.color as string) || "",
-            rawMaterials: [],
-            totalDealAmount: (data.totalDealAmount as number) || 0,
-            pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
-            status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || ""),
-            approvedQuantity: (data.approvedQuantity as number) || 0,
-            deliveredQuantity: data.deliveredQuantity as number | undefined,
-            verifiedBy: data.verifiedBy as string | undefined,
-            createdBy: (data.createdBy as string) || "",
-            createdAt: (data.createdAt as number) || 0,
-          };
-        }).sort((a, b) => b.createdAt - a.createdAt)
+        oSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              kaarigerId: data.kaarigerId as string,
+              kaarigerName: data.kaarigerName as string,
+              productName: data.productName as string,
+              targetQuantity: (data.targetQuantity as number) || 0,
+              color: (data.color as string) || "",
+              rawMaterials: [],
+              totalDealAmount: (data.totalDealAmount as number) || 0,
+              pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+              status: (data.status as string) === "APPROVED" ? "COMPLETED" : (data.status as string) || "",
+              approvedQuantity: (data.approvedQuantity as number) || 0,
+              deliveredQuantity: data.deliveredQuantity as number | undefined,
+              verifiedBy: data.verifiedBy as string | undefined,
+              createdBy: (data.createdBy as string) || "",
+              createdAt: (data.createdAt as number) || 0,
+            };
+          })
+          .sort((a, b) => b.createdAt - a.createdAt)
       );
 
       setApprovals(
-        aSnap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: (data.id as string) || d.id,
-            orderId: data.orderId as string,
-            productName: data.productName as string,
-            kaarigerId: data.kaarigerId as string,
-            kaarigerName: data.kaarigerName as string,
-            batchQuantity: (data.batchQuantity as number) || 0,
-            approvedTotalAfter: (data.approvedTotalAfter as number) || 0,
-            targetQuantity: (data.targetQuantity as number) || 0,
-            color: (data.color as string) || "",
-            verifiedByName: data.verifiedByName as string,
-            verifiedByPhone: data.verifiedByPhone as string,
-            verifiedAt: (data.verifiedAt as number) || 0,
-          };
-        }).sort((a, b) => b.verifiedAt - a.verifiedAt)
+        aSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              orderId: data.orderId as string,
+              productName: data.productName as string,
+              kaarigerId: data.kaarigerId as string,
+              kaarigerName: data.kaarigerName as string,
+              batchQuantity: (data.batchQuantity as number) || 0,
+              approvedTotalAfter: (data.approvedTotalAfter as number) || 0,
+              targetQuantity: (data.targetQuantity as number) || 0,
+              color: (data.color as string) || "",
+              verifiedByName: data.verifiedByName as string,
+              verifiedByPhone: data.verifiedByPhone as string,
+              verifiedAt: (data.verifiedAt as number) || 0,
+            };
+          })
+          .sort((a, b) => b.verifiedAt - a.verifiedAt)
       );
 
       setPickups(
-        pSnap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            productName: data.productName as string,
-            color: (data.color as string) || "",
-            quantity: (data.quantity as number) || 0,
-            partner: (data.partner as string) || "",
-            staffName: (data.staffName as string) || "",
-            date: (data.date as string) || "",
-            time: (data.time as string) || "",
-            timestamp: (data.timestamp as number) || 0,
-          };
-        }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        pSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              productName: data.productName as string,
+              color: (data.color as string) || "",
+              quantity: (data.quantity as number) || 0,
+              partner: (data.partner as string) || "",
+              staffName: (data.staffName as string) || "",
+              date: (data.date as string) || "",
+              time: (data.time as string) || "",
+            };
+          })
+          .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
       );
 
       setReturns(
-        rSnap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            productName: data.productName as string,
-            color: (data.color as string) || "",
-            quantity: (data.quantity as number) || 0,
-            partner: (data.partner as string) || "",
-            returnType: (data.returnType as string) || "",
-            staffName: (data.staffName as string) || "",
-            date: (data.date as string) || "",
-            time: (data.time as string) || "",
-            notes: data.notes as string | undefined,
-            timestamp: (data.timestamp as number) || 0,
-          };
-        }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        rSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              productName: data.productName as string,
+              color: (data.color as string) || "",
+              quantity: (data.quantity as number) || 0,
+              partner: (data.partner as string) || "",
+              returnType: (data.returnType as string) || "",
+              staffName: (data.staffName as string) || "",
+              date: (data.date as string) || "",
+              time: (data.time as string) || "",
+              notes: data.notes as string | undefined,
+            };
+          })
+          .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
       );
     }
     load();
@@ -196,17 +206,20 @@ export default function RecordsPage() {
     );
   }, [returns, q]);
 
+  const count =
+    tab === "kaariger"
+      ? filteredOrders.length
+      : tab === "approvals"
+        ? filteredApprovals.length
+        : tab === "pickups"
+          ? filteredPickups.length
+          : filteredReturns.length;
+
   return (
     <div className="space-y-4">
-      <PageToolbar
-        actions={<button className="btn-secondary" onClick={exportCsv}>Export CSV</button>}
-      />
+      <PageToolbar actions={<button className="btn-secondary" onClick={exportCsv}>Export CSV</button>} />
 
-      <AdminSearchBar
-        value={search}
-        onChange={setSearch}
-        placeholder="Search records..."
-      />
+      <AdminSearchBar value={search} onChange={setSearch} placeholder="Search records..." />
 
       <div className="flex flex-wrap gap-2">
         {(["kaariger", "approvals", "pickups", "returns"] as Tab[]).map((t) => (
@@ -215,116 +228,100 @@ export default function RecordsPage() {
             onClick={() => setTab(t)}
             className={`filter-pill ${tab === t ? "filter-pill-active" : ""}`}
           >
-            {t === "approvals" ? "Approvals" : t}
+            {t === "approvals" ? "Approvals" : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
 
-      <div className="card !p-0">
-        <div className="scroll-table">
-        {tab === "kaariger" && (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-slate-500">
-                <th className="py-2 pr-3">Product</th>
-                <th className="py-2 pr-3">Kaariger</th>
-                <th className="py-2 pr-3">Progress</th>
-                <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3">Verified By</th>
-                <th className="py-2">Deal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredOrders.map((o) => (
-                <tr key={o.id} className="border-b border-slate-100">
-                  <td className="py-3 pr-3">{o.productName}</td>
-                  <td className="py-3 pr-3">{o.kaarigerName}</td>
-                  <td className="py-3 pr-3">{o.approvedQuantity}/{o.targetQuantity}</td>
-                  <td className="py-3 pr-3">{o.status.replace(/_/g, " ")}</td>
-                  <td className="py-3 pr-3">{o.verifiedBy || "—"}</td>
-                  <td className="py-3">₹{o.totalDealAmount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <p className="text-xs font-medium text-slate-500">{count} record{count !== 1 ? "s" : ""}</p>
 
-        {tab === "approvals" && (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-slate-500">
-                <th className="py-2 pr-3">Product</th>
-                <th className="py-2 pr-3">Kaariger</th>
-                <th className="py-2 pr-3">Batch</th>
-                <th className="py-2 pr-3">Progress</th>
-                <th className="py-2 pr-3">Approved By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredApprovals.map((a) => (
-                <tr key={a.id} className="border-b border-slate-100">
-                  <td className="py-3 pr-3">{a.productName}</td>
-                  <td className="py-3 pr-3">{a.kaarigerName}</td>
-                  <td className="py-3 pr-3">{a.batchQuantity} pcs</td>
-                  <td className="py-3 pr-3">{a.approvedTotalAfter}/{a.targetQuantity}</td>
-                  <td className="py-3 pr-3">{a.verifiedByName}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="space-y-3">
+        {tab === "kaariger" &&
+          filteredOrders.map((o) => (
+            <div key={o.id} className="record-card">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-bold text-brand">{o.productName}</p>
+                  <p className="text-sm text-slate-500">{o.kaarigerName}</p>
+                </div>
+                <span className="rounded-full bg-[var(--bliss-green-surface)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--bliss-green-dark)]">
+                  {statusLabel(o.status)}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <Field label="Progress" value={`${o.approvedQuantity} / ${o.targetQuantity} pcs`} />
+                <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
+                <Field label="Verified By" value={o.verifiedBy || "—"} />
+                {o.color && <Field label="Color" value={o.color} />}
+              </div>
+            </div>
+          ))}
 
-        {tab === "pickups" && (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-slate-500">
-                <th className="py-2 pr-3">Product</th>
-                <th className="py-2 pr-3">Partner</th>
-                <th className="py-2 pr-3">Qty</th>
-                <th className="py-2 pr-3">Staff</th>
-                <th className="py-2">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPickups.map((p) => (
-                <tr key={p.id} className="border-b border-slate-100">
-                  <td className="py-3 pr-3">{p.productName} ({p.color})</td>
-                  <td className="py-3 pr-3">{p.partner}</td>
-                  <td className="py-3 pr-3">{p.quantity}</td>
-                  <td className="py-3 pr-3">{p.staffName}</td>
-                  <td className="py-3">{p.date} {p.time}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        {tab === "approvals" &&
+          filteredApprovals.map((a) => (
+            <div key={a.id} className="record-card">
+              <p className="font-bold text-brand">{a.productName}</p>
+              <p className="text-sm text-slate-500">{a.kaarigerName}</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <Field label="Batch" value={`${a.batchQuantity} pcs`} />
+                <Field label="Progress" value={`${a.approvedTotalAfter}/${a.targetQuantity}`} />
+                <Field label="Approved By" value={a.verifiedByName} />
+                <Field
+                  label="Date"
+                  value={new Date(a.verifiedAt).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                />
+              </div>
+            </div>
+          ))}
 
-        {tab === "returns" && (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-slate-500">
-                <th className="py-2 pr-3">Product</th>
-                <th className="py-2 pr-3">Type</th>
-                <th className="py-3 pr-3">Partner</th>
-                <th className="py-2 pr-3">Qty</th>
-                <th className="py-2">Staff</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredReturns.map((r) => (
-                <tr key={r.id} className="border-b border-slate-100">
-                  <td className="py-3 pr-3">{r.productName} ({r.color})</td>
-                  <td className="py-3 pr-3">{r.returnType}</td>
-                  <td className="py-3 pr-3">{r.partner}</td>
-                  <td className="py-3 pr-3">{r.quantity}</td>
-                  <td className="py-3">{r.staffName}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {tab === "pickups" &&
+          filteredPickups.map((p) => (
+            <div key={p.id} className="record-card">
+              <p className="font-bold text-brand">
+                {p.productName} {p.color ? `(${p.color})` : ""}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <Field label="Partner" value={p.partner} />
+                <Field label="Quantity" value={String(p.quantity)} />
+                <Field label="Staff" value={p.staffName} />
+                <Field label="Date" value={`${p.date} ${p.time}`} />
+              </div>
+            </div>
+          ))}
+
+        {tab === "returns" &&
+          filteredReturns.map((r) => (
+            <div key={r.id} className="record-card">
+              <p className="font-bold text-brand">
+                {r.productName} {r.color ? `(${r.color})` : ""}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <Field label="Type" value={r.returnType} />
+                <Field label="Partner" value={r.partner} />
+                <Field label="Quantity" value={String(r.quantity)} />
+                <Field label="Staff" value={r.staffName} />
+                {r.notes && <Field label="Notes" value={r.notes} />}
+              </div>
+            </div>
+          ))}
+
+        {count === 0 && (
+          <div className="card py-10 text-center text-sm text-slate-500">No records found.</div>
         )}
-        </div>
       </div>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="record-card-label">{label}</p>
+      <p className="record-card-value">{value}</p>
     </div>
   );
 }

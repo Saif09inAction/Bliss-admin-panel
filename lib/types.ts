@@ -119,6 +119,19 @@ export interface Attendance {
   workingHours: number;
 }
 
+export type PaymentType = "SALARY_PAYMENT" | "ADVANCE" | "EXTRA_PAYMENT" | "DEDUCTION";
+
+export interface PaymentTransaction {
+  id: string;
+  employeeId: string;
+  amount: number;
+  type: PaymentType;
+  date: string;
+  time: string;
+  remarks?: string;
+  createdBy: string;
+}
+
 export interface PickupRecord {
   id: string;
   productName: string;

@@ -31,7 +31,7 @@ export default function FloatingBottomNav() {
                 className={`h-[22px] w-[22px] transition-transform ${active ? "scale-110 text-[var(--bliss-green-light)]" : "text-white/50"}`}
               />
               <span
-                className={`text-[11px] font-medium ${active ? "font-bold text-[var(--bliss-green-light)]" : "text-white/50"}`}
+                className={`text-[10px] font-medium ${active ? "font-bold text-[var(--bliss-green-light)]" : "text-white/50"}`}
               >
                 {item.label}
               </span>

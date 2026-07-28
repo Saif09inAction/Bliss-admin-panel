@@ -12,6 +12,8 @@ import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import WorkerProfilePanel from "@/components/WorkerProfilePanel";
+import { useRouter } from "next/navigation";
 
 type FormMode = "closed" | "staff" | "kaariger" | "edit";
 
@@ -24,11 +26,13 @@ const emptyForm = {
 };
 
 export default function WorkersPage() {
+  const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<"ALL" | Role>("ALL");
   const [search, setSearch] = useState("");
   const [formMode, setFormMode] = useState<FormMode>("closed");
   const [editingPhone, setEditingPhone] = useState<string | null>(null);
+  const [profileEmployee, setProfileEmployee] = useState<Employee | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -310,7 +314,14 @@ export default function WorkersPage() {
 
       <div className="flex flex-col gap-3">
         {filtered.map((e) => (
-          <div key={e.phone} className="worker-card">
+          <div
+            key={e.phone}
+            className="worker-card cursor-pointer transition active:scale-[0.99]"
+            onClick={() => setProfileEmployee(e)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(ev) => ev.key === "Enter" && setProfileEmployee(e)}
+          >
             <div className="flex items-start gap-3">
               <div className="worker-avatar">{e.name.charAt(0).toUpperCase()}</div>
               <div className="min-w-0 flex-1">
@@ -333,7 +344,7 @@ export default function WorkersPage() {
                   <p className="text-xs text-slate-500">
                     {e.role === "KAARIGER" ? "Production worker" : `Salary: ₹${e.monthlySalary.toLocaleString("en-IN")}`}
                   </p>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3" onClick={(ev) => ev.stopPropagation()}>
                     <button
                       type="button"
                       className="text-xs font-bold text-[var(--bliss-green)]"
@@ -363,6 +374,17 @@ export default function WorkersPage() {
           </div>
         )}
       </div>
+
+      {profileEmployee && (
+        <WorkerProfilePanel
+          employee={profileEmployee}
+          onClose={() => setProfileEmployee(null)}
+          onPaySalary={(emp) => {
+            setProfileEmployee(null);
+            router.push("/dashboard/salary");
+          }}
+        />
+      )}
     </div>
   );
 }

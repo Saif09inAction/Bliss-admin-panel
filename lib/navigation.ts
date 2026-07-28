@@ -26,11 +26,19 @@ export const BOTTOM_NAV: NavRoute[] = [
     bottom: true,
   },
   {
-    href: "/dashboard/materials",
-    label: "Production",
-    title: "Raw Materials",
-    subtitle: "Inventory & stock levels",
-    icon: "inventory",
+    href: "/dashboard/attendance",
+    label: "Attendance",
+    title: "Attendance HQ",
+    subtitle: "Shift times, search & monthly calendar",
+    icon: "calendar",
+    bottom: true,
+  },
+  {
+    href: "/dashboard/salary",
+    label: "Salary",
+    title: "Salary Management",
+    subtitle: "Pay staff & track dues",
+    icon: "salary",
     bottom: true,
   },
 ];
@@ -38,10 +46,11 @@ export const BOTTOM_NAV: NavRoute[] = [
 export const DRAWER_NAV: NavRoute[] = [
   { href: "/dashboard", label: "Dashboard", title: "Admin Dashboard", icon: "home", drawer: true },
   { href: "/dashboard/workers", label: "Workers Directory", title: "Workers Directory", icon: "groups", drawer: true },
+  { href: "/dashboard/attendance", label: "Attendance HQ", title: "Attendance HQ", icon: "calendar", drawer: true },
+  { href: "/dashboard/salary", label: "Salary Management", title: "Salary Management", icon: "salary", drawer: true },
   { href: "/dashboard/materials", label: "Raw Materials", title: "Raw Materials", icon: "inventory", drawer: true },
   { href: "/dashboard/inventory", label: "Store Inventory", title: "Store Inventory", icon: "store", drawer: true },
   { href: "/dashboard/orders", label: "Kaariger Orders", title: "Kaariger Orders", icon: "orders", drawer: true },
-  { href: "/dashboard/attendance", label: "Attendance HQ", title: "Attendance HQ", icon: "calendar", drawer: true },
   { href: "/dashboard/records", label: "All Records", title: "All Records", icon: "list", drawer: true },
 ];
 
@@ -82,6 +91,20 @@ export const ADMIN_MODULES = [
     icon: "groups",
   },
   {
+    title: "Attendance HQ",
+    description: "Shift times, search & monthly calendar",
+    href: "/dashboard/attendance",
+    gradient: "from-[#151a10] to-[#1a1f14]",
+    icon: "calendar",
+  },
+  {
+    title: "Salary Management",
+    description: "Pay staff salaries & track pending dues",
+    href: "/dashboard/salary",
+    gradient: "from-[#0a0a0a] to-[#2a2a0a]",
+    icon: "salary",
+  },
+  {
     title: "Raw Materials",
     description: "Manage stock, suppliers & minimum levels",
     href: "/dashboard/materials",
@@ -101,13 +124,6 @@ export const ADMIN_MODULES = [
     href: "/dashboard/orders",
     gradient: "from-[#0a0a0a] to-[#2a2a0a]",
     icon: "orders",
-  },
-  {
-    title: "Attendance HQ",
-    description: "Shift times, search & monthly calendar",
-    href: "/dashboard/attendance",
-    gradient: "from-[#151a10] to-[#1a1f14]",
-    icon: "calendar",
   },
   {
     title: "All Records",

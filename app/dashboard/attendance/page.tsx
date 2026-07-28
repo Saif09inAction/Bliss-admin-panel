@@ -126,8 +126,8 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-5">
-      <form onSubmit={saveSettings} className="card border-[#0F3D91]/10">
-        <h2 className="mb-1 text-lg font-bold text-navy">Shift Timings</h2>
+      <form onSubmit={saveSettings} className="card">
+        <h2 className="mb-1 text-lg font-bold text-brand">Shift Timings</h2>
         <p className="mb-4 text-sm text-slate-500">Used to calculate late arrivals and early departures in the app</p>
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
@@ -198,11 +198,11 @@ export default function AttendancePage() {
                   onClick={() => setSelectedEmployee(e)}
                   className="flex w-full items-center gap-4 py-4 text-left transition hover:bg-slate-50"
                 >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-navy/10 text-sm font-bold text-navy">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-muted text-sm font-bold text-brand">
                     {e.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-navy">{e.name}</p>
+                    <p className="font-semibold text-brand">{e.name}</p>
                     <p className="text-sm text-slate-500">{e.phone}</p>
                     {r?.signInTime && (
                       <p className="mt-0.5 text-xs text-slate-500">
@@ -245,7 +245,7 @@ function StatCard({ label, value, tone }: { label: string; value: string | numbe
     green: "border-emerald-200 bg-emerald-50 text-emerald-800",
     yellow: "border-amber-200 bg-amber-50 text-amber-900",
     red: "border-red-200 bg-red-50 text-red-800",
-    navy: "border-navy/20 bg-ice/30 text-navy",
+    navy: "border-[var(--bliss-green)]/20 bg-[var(--bliss-green-surface)] text-brand",
   };
   return (
     <div className={`rounded-xl border p-4 ${tones[tone]}`}>
