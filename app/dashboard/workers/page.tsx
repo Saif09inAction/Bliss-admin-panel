@@ -172,13 +172,10 @@ export default function WorkersPage() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-navy">Workers</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {staffCount} staff · {kaarigerCount} kaarigers — mobile number + password used to login in app
-          </p>
-        </div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">
+          {staffCount} staff · {kaarigerCount} kaarigers
+        </p>
         <div className="flex flex-wrap gap-2">
           <button className="btn-primary" onClick={openStaffForm}>
             + Add Staff

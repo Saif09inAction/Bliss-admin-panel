@@ -31,32 +31,32 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-white to-slate-100 p-6">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-navy/10 text-4xl font-black text-navy-light">
-            L
-          </div>
-          <h1 className="text-2xl font-extrabold tracking-widest text-navy">LAIZA BAGS</h1>
-          <p className="mt-2 text-sm text-slate-500">Admin Panel</p>
+    <div className="flex min-h-screen flex-col bg-[#F1F7FC]">
+      <div className="flex flex-1 flex-col items-center justify-center bg-white px-6 py-12">
+        <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-[#021024]/5 text-5xl font-black text-[#052659]">
+          L
         </div>
+        <h1 className="text-2xl font-extrabold tracking-[0.2em] text-[#021024]">LAIZA BAGS</h1>
+        <p className="mt-2 text-sm text-slate-500">Admin Control Panel</p>
+      </div>
 
-        <form onSubmit={handleSubmit} className="card space-y-4">
+      <div className="hero-gradient rounded-t-[2.5rem] px-6 pb-10 pt-8">
+        <form onSubmit={handleSubmit} className="mx-auto w-full max-w-md space-y-5">
           <div>
-            <label className="label">Mobile Number</label>
+            <label className="mb-1.5 block text-sm font-medium text-[#C1E8FF]">Mobile Number</label>
             <input
-              className="input"
+              className="w-full rounded-xl border border-[#C1E8FF]/30 bg-white/5 px-4 py-3 text-white placeholder:text-[#C1E8FF]/40 outline-none focus:border-[#C1E8FF]"
               type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="Admin phone"
+              placeholder="Admin mobile"
               required
             />
           </div>
           <div>
-            <label className="label">Password</label>
+            <label className="mb-1.5 block text-sm font-medium text-[#C1E8FF]">Password</label>
             <input
-              className="input"
+              className="w-full rounded-xl border border-[#C1E8FF]/30 bg-white/5 px-4 py-3 text-white placeholder:text-[#C1E8FF]/40 outline-none focus:border-[#C1E8FF]"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -65,8 +65,12 @@ export default function LoginPage() {
               minLength={6}
             />
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button type="submit" className="btn-primary w-full" disabled={submitting}>
+          {error && <p className="text-sm text-red-300">{error}</p>}
+          <button
+            type="submit"
+            className="w-full rounded-full bg-[#C1E8FF] py-3.5 text-base font-bold text-[#021024] transition hover:bg-white disabled:opacity-50"
+            disabled={submitting}
+          >
             {submitting ? "Signing in..." : "Login as Admin"}
           </button>
         </form>

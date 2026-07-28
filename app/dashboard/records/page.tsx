@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import type { KaarigerOrder, PickupRecord, ReturnRecord } from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
@@ -18,16 +18,16 @@ export default function RecordsPage() {
     async function load() {
       const db = getDb();
       const [oSnap, pSnap, rSnap] = await Promise.all([
-        getDocs(query(collection(db, "kaariger_orders"), orderBy("createdAt", "desc"))),
-        getDocs(query(collection(db, "pickup_records"), orderBy("timestamp", "desc"))),
-        getDocs(query(collection(db, "return_records"), orderBy("timestamp", "desc"))),
+        getDocs(collection(db, "kaariger_orders")),
+        getDocs(collection(db, "pickup_records")),
+        getDocs(collection(db, "return_records")),
       ]);
 
       setOrders(
         oSnap.docs.map((d) => {
           const data = d.data();
           return {
-            id: d.id,
+            id: (data.id as string) || d.id,
             kaarigerId: data.kaarigerId as string,
             kaarigerName: data.kaarigerName as string,
             productName: data.productName as string,
@@ -35,14 +35,15 @@ export default function RecordsPage() {
             color: (data.color as string) || "",
             rawMaterials: [],
             totalDealAmount: (data.totalDealAmount as number) || 0,
-            pricingType: "OVERALL",
-            status: (data.status as string) || "",
+            pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+            status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || ""),
+            approvedQuantity: (data.approvedQuantity as number) || 0,
             deliveredQuantity: data.deliveredQuantity as number | undefined,
             verifiedBy: data.verifiedBy as string | undefined,
             createdBy: (data.createdBy as string) || "",
             createdAt: (data.createdAt as number) || 0,
           };
-        })
+        }).sort((a, b) => b.createdAt - a.createdAt)
       );
 
       setPickups(
@@ -57,8 +58,9 @@ export default function RecordsPage() {
             staffName: (data.staffName as string) || "",
             date: (data.date as string) || "",
             time: (data.time as string) || "",
+            timestamp: (data.timestamp as number) || 0,
           };
-        })
+        }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
       );
 
       setReturns(
@@ -75,8 +77,9 @@ export default function RecordsPage() {
             date: (data.date as string) || "",
             time: (data.time as string) || "",
             notes: data.notes as string | undefined,
+            timestamp: (data.timestamp as number) || 0,
           };
-        })
+        }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
       );
     }
     load();
@@ -86,11 +89,12 @@ export default function RecordsPage() {
     if (tab === "kaariger") {
       downloadCsv(
         "kaariger_orders.csv",
-        ["Product", "Kaariger", "Qty", "Status", "Verified By", "Deal"],
+        ["Product", "Kaariger", "Approved", "Target", "Status", "Verified By", "Deal"],
         orders.map((o) => [
           o.productName,
           o.kaarigerName,
-          String(o.deliveredQuantity ?? o.targetQuantity),
+          String(o.approvedQuantity),
+          String(o.targetQuantity),
           o.status,
           o.verifiedBy || "",
           String(o.totalDealAmount),
@@ -137,6 +141,7 @@ export default function RecordsPage() {
               <tr className="border-b text-slate-500">
                 <th className="py-2 pr-3">Product</th>
                 <th className="py-2 pr-3">Kaariger</th>
+                <th className="py-2 pr-3">Progress</th>
                 <th className="py-2 pr-3">Status</th>
                 <th className="py-2 pr-3">Verified By</th>
                 <th className="py-2">Deal</th>
@@ -147,6 +152,7 @@ export default function RecordsPage() {
                 <tr key={o.id} className="border-b border-slate-100">
                   <td className="py-3 pr-3">{o.productName}</td>
                   <td className="py-3 pr-3">{o.kaarigerName}</td>
+                  <td className="py-3 pr-3">{o.approvedQuantity}/{o.targetQuantity}</td>
                   <td className="py-3 pr-3">{o.status.replace(/_/g, " ")}</td>
                   <td className="py-3 pr-3">{o.verifiedBy || "—"}</td>
                   <td className="py-3">₹{o.totalDealAmount}</td>

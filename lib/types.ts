@@ -44,6 +44,8 @@ export interface OrderMaterial {
   materialName: string;
   quantity: number;
   unit: string;
+  usedQuantity?: number;
+  remainingQuantity?: number;
 }
 
 export interface KaarigerOrder {
@@ -58,10 +60,12 @@ export interface KaarigerOrder {
   pricePerPiece?: number;
   pricingType: "PER_PIECE" | "OVERALL";
   status: string;
+  approvedQuantity: number;
   deliveredQuantity?: number;
   deliveryColor?: string;
   verifiedBy?: string;
   verifiedAt?: number;
+  materialUsageReported?: boolean;
   createdBy: string;
   createdAt: number;
   notes?: string;
@@ -78,12 +82,23 @@ export interface KaarigerPayment {
   createdBy: string;
 }
 
+export interface AttendanceSettings {
+  dailySignInTime: string;
+  dailySignOutTime: string;
+}
+
 export interface Attendance {
   id: string;
   employeeId: string;
   date: string;
   signInTime?: string;
   signOutTime?: string;
+  signInGps?: string;
+  signOutGps?: string;
+  signInAddress?: string;
+  signOutAddress?: string;
+  signInImageLocalPath?: string;
+  signOutImageLocalPath?: string;
   status: string;
   lateMinutes: number;
   workingHours: number;

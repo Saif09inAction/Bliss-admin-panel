@@ -3,25 +3,115 @@
 @tailwind utilities;
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-[#F7F9FC] text-[#0F172A] antialiased;
+}
+
+.admin-shell {
+  @apply relative min-h-screen bg-[#F7F9FC];
+}
+
+.admin-main {
+  @apply mx-auto max-w-3xl px-4 pb-28 pt-2;
+}
+
+.drawer-header {
+  background: linear-gradient(180deg, #0f3d91 0%, #0f3d91dd 100%);
+}
+
+.admin-hero {
+  @apply rounded-2xl p-5 text-white shadow-lg;
+  background: linear-gradient(135deg, #021024 0%, #052659 50%, #5483b3 100%);
 }
 
 .card {
-  @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+  @apply rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm;
+}
+
+.stat-card {
+  @apply rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm;
+}
+
+.module-card {
+  @apply block rounded-2xl p-4;
 }
 
 .btn-primary {
-  @apply rounded-lg bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-light disabled:opacity-50;
+  @apply rounded-xl bg-[#0F3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#052659] disabled:opacity-50;
 }
 
 .btn-secondary {
-  @apply rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50;
+  @apply rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50;
 }
 
 .input {
-  @apply w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-navy-light focus:ring-1 focus:ring-navy-light;
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#5483B3] focus:ring-2 focus:ring-[#C1E8FF];
 }
 
 .label {
-  @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  @apply mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500;
+}
+
+.hero-gradient {
+  @apply bg-gradient-to-br from-[#021024] via-[#052659] to-[#5483B3];
+}
+
+.badge-present {
+  @apply bg-emerald-100 text-emerald-800;
+}
+
+.badge-late {
+  @apply bg-amber-100 text-amber-900;
+}
+
+.badge-early {
+  @apply bg-orange-100 text-orange-800;
+}
+
+.badge-absent {
+  @apply bg-red-100 text-red-800;
+}
+
+.badge-neutral {
+  @apply bg-slate-100 text-slate-600;
+}
+
+.calendar-day {
+  @apply flex h-10 items-center justify-center rounded-lg text-sm font-semibold transition hover:opacity-90;
+}
+
+.panel-slide {
+  animation: slideUp 0.25s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Floating bottom nav — Android-style pill navbar */
+.bottom-nav-wrap {
+  @apply pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.floating-bottom-nav {
+  @apply pointer-events-auto relative flex h-[60px] w-full max-w-lg items-stretch rounded-full border border-white/25 bg-white/80 p-1 shadow-lg backdrop-blur-md;
+}
+
+.nav-pill {
+  @apply absolute top-1 bottom-1 rounded-full border border-white/35 bg-white/95 shadow-sm transition-all duration-300 ease-out;
+}
+
+.nav-tab {
+  @apply relative z-10 flex flex-1 flex-col items-center justify-center gap-0.5 rounded-full transition active:scale-95;
+}
+
+.nav-tab-active {
+  @apply font-bold;
 }

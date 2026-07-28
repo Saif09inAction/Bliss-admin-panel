@@ -5,7 +5,6 @@ import {
   collection,
   doc,
   getDocs,
-  orderBy,
   query,
   setDoc,
   where,
@@ -37,9 +36,7 @@ export default function OrdersPage() {
   });
 
   async function loadOrders() {
-    const snap = await getDocs(
-      query(collection(getDb(), "kaariger_orders"), orderBy("createdAt", "desc"))
-    );
+    const snap = await getDocs(collection(getDb(), "kaariger_orders"));
     setOrders(
       snap.docs.map((d) => {
         const data = d.data();
@@ -48,6 +45,8 @@ export default function OrdersPage() {
           materialName: m.materialName,
           quantity: Number(m.quantity) || 0,
           unit: m.unit,
+          usedQuantity: m.usedQuantity != null ? Number(m.usedQuantity) : undefined,
+          remainingQuantity: m.remainingQuantity != null ? Number(m.remainingQuantity) : undefined,
         }));
         return {
           id: (data.id as string) || d.id,
@@ -60,16 +59,18 @@ export default function OrdersPage() {
           totalDealAmount: (data.totalDealAmount as number) || 0,
           pricePerPiece: data.pricePerPiece as number | undefined,
           pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
-          status: (data.status as string) || "ASSIGNED",
+          status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || "ASSIGNED"),
+          approvedQuantity: (data.approvedQuantity as number) || 0,
           deliveredQuantity: data.deliveredQuantity as number | undefined,
           deliveryColor: data.deliveryColor as string | undefined,
           verifiedBy: data.verifiedBy as string | undefined,
           verifiedAt: data.verifiedAt as number | undefined,
+          materialUsageReported: data.materialUsageReported as boolean | undefined,
           createdBy: (data.createdBy as string) || "",
           createdAt: (data.createdAt as number) || 0,
           notes: data.notes as string | undefined,
         };
-      })
+      }).sort((a, b) => b.createdAt - a.createdAt)
     );
   }
 
@@ -153,7 +154,9 @@ export default function OrdersPage() {
       });
 
     const qty = Number(form.targetQuantity) || 0;
-    const deal = Number(form.totalDealAmount) || 0;
+    const inputAmount = Number(form.totalDealAmount) || 0;
+    const pricePerPiece = form.pricingType === "PER_PIECE" ? inputAmount : (qty > 0 ? inputAmount / qty : 0);
+    const totalDealAmount = form.pricingType === "PER_PIECE" ? inputAmount * qty : inputAmount;
     const id = uuid();
 
     const order: KaarigerOrder = {
@@ -164,10 +167,11 @@ export default function OrdersPage() {
       targetQuantity: qty,
       color: form.color.trim(),
       rawMaterials: orderMaterials,
-      totalDealAmount: deal,
-      pricePerPiece: form.pricingType === "PER_PIECE" ? deal : deal / Math.max(qty, 1),
+      totalDealAmount,
+      pricePerPiece,
       pricingType: form.pricingType,
       status: "ASSIGNED",
+      approvedQuantity: 0,
       createdBy: session?.name || "Admin",
       createdAt: Date.now(),
       notes: form.notes || undefined,
@@ -217,6 +221,13 @@ export default function OrdersPage() {
     });
   }
 
+  const previewTotal = (() => {
+    const qty = Number(form.targetQuantity) || 0;
+    const amt = Number(form.totalDealAmount) || 0;
+    if (form.pricingType === "PER_PIECE") return amt * qty;
+    return amt;
+  })();
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -251,8 +262,13 @@ export default function OrdersPage() {
               <input className="input" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} />
             </div>
             <div>
-              <label className="label">Deal Amount (₹)</label>
+              <label className="label">{form.pricingType === "PER_PIECE" ? "Price Per Piece (₹)" : "Total Deal Amount (₹)"}</label>
               <input className="input" type="number" value={form.totalDealAmount} onChange={(e) => setForm({ ...form, totalDealAmount: e.target.value })} required />
+              {form.pricingType === "PER_PIECE" && Number(form.targetQuantity) > 0 && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Total deal: ₹{previewTotal.toLocaleString("en-IN")} ({form.totalDealAmount || 0}/pc × {form.targetQuantity} pcs)
+                </p>
+              )}
             </div>
             <div>
               <label className="label">Pricing</label>
@@ -330,8 +346,9 @@ export default function OrdersPage() {
                   <td className="py-3 pr-2">{o.kaarigerName}</td>
                   <td className="py-3 pr-2">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{o.status.replace(/_/g, " ")}</span>
+                    <p className="text-xs text-slate-500">{o.approvedQuantity}/{o.targetQuantity} pcs</p>
                   </td>
-                  <td className="py-3">₹{o.totalDealAmount}</td>
+                  <td className="py-3">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
                 </tr>
               ))}
             </tbody>
@@ -346,11 +363,31 @@ export default function OrdersPage() {
               return (
                 <>
                   <h2 className="font-bold text-navy">{o.productName}</h2>
-                  <p className="mt-1 text-sm text-slate-500">{o.kaarigerName} · Qty {o.targetQuantity}</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {o.kaarigerName} · {o.approvedQuantity}/{o.targetQuantity} pcs approved
+                    {o.status === "PENDING_APPROVAL" && o.deliveredQuantity ? ` · ${o.deliveredQuantity} awaiting approval` : ""}
+                  </p>
                   {o.verifiedBy && (
-                    <p className="mt-2 text-xs text-green-700">Verified by {o.verifiedBy}</p>
+                    <p className="mt-2 text-xs text-green-700">Last verified by {o.verifiedBy}</p>
                   )}
-                  <p className="mt-3 text-sm">Deal: ₹{o.totalDealAmount} · Paid: ₹{paid} · Balance: ₹{o.totalDealAmount - paid}</p>
+                  <p className="mt-3 text-sm">
+                    Deal: ₹{o.totalDealAmount.toLocaleString("en-IN")}
+                    {o.pricingType === "PER_PIECE" && o.pricePerPiece ? ` (₹${o.pricePerPiece}/pc)` : ""}
+                    {" · "}Paid: ₹{paid.toLocaleString("en-IN")} · Balance: ₹{(o.totalDealAmount - paid).toLocaleString("en-IN")}
+                  </p>
+                  {o.rawMaterials.length > 0 && (
+                    <>
+                      <h3 className="mt-4 text-sm font-semibold">Raw Materials</h3>
+                      <ul className="mt-2 space-y-1 text-sm">
+                        {o.rawMaterials.map((m) => (
+                          <li key={m.materialId}>
+                            {m.materialName}: {m.quantity} {m.unit}
+                            {m.usedQuantity != null && ` · Used: ${m.usedQuantity} · Left: ${m.remainingQuantity ?? 0}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
 
                   <h3 className="mt-4 text-sm font-semibold">Advance Payments</h3>
                   <ul className="mt-2 space-y-1 text-sm">
