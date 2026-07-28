@@ -5,6 +5,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import type { KaarigerOrder, PickupRecord, ReturnRecord } from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
+import PageToolbar from "@/components/admin/PageToolbar";
 
 type Tab = "kaariger" | "pickups" | "returns";
 
@@ -116,13 +117,12 @@ export default function RecordsPage() {
   }
 
   return (
-    <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-navy">All Records</h1>
-        <button className="btn-secondary" onClick={exportCsv}>Export CSV</button>
-      </div>
+    <div className="space-y-4">
+      <PageToolbar
+        actions={<button className="btn-secondary" onClick={exportCsv}>Export CSV</button>}
+      />
 
-      <div className="mb-4 flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {(["kaariger", "pickups", "returns"] as Tab[]).map((t) => (
           <button
             key={t}
@@ -134,7 +134,8 @@ export default function RecordsPage() {
         ))}
       </div>
 
-      <div className="card overflow-x-auto">
+      <div className="card !p-0">
+        <div className="scroll-table">
         {tab === "kaariger" && (
           <table className="w-full text-left text-sm">
             <thead>
@@ -211,6 +212,7 @@ export default function RecordsPage() {
             </tbody>
           </table>
         )}
+        </div>
       </div>
     </div>
   );

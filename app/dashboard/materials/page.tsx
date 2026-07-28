@@ -12,6 +12,7 @@ import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { RawMaterial } from "@/lib/types";
 import { uuid } from "@/lib/csv";
+import PageToolbar from "@/components/admin/PageToolbar";
 
 export default function MaterialsPage() {
   const { session } = useAuth();
@@ -89,22 +90,24 @@ export default function MaterialsPage() {
   }
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-navy">Raw Materials</h1>
-        <button
-          className="btn-primary"
-          onClick={() => {
-            setEditing(null);
-            setShowForm(!showForm);
-          }}
-        >
-          {showForm ? "Cancel" : "Add Material"}
-        </button>
-      </div>
+    <div className="space-y-4">
+      <PageToolbar
+        meta={`${materials.length} material${materials.length === 1 ? "" : "s"}`}
+        actions={
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setEditing(null);
+              setShowForm(!showForm);
+            }}
+          >
+            {showForm ? "Cancel" : "Add Material"}
+          </button>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={saveMaterial} className="card mb-6 grid gap-3 sm:grid-cols-2">
+        <form onSubmit={saveMaterial} className="card grid gap-3">
           <div>
             <label className="label">Name</label>
             <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -121,16 +124,17 @@ export default function MaterialsPage() {
             <label className="label">Minimum Stock</label>
             <input className="input" type="number" step="0.01" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: e.target.value })} />
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label className="label">Supplier</label>
             <input className="input" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
           </div>
-          <button type="submit" className="btn-primary sm:col-span-2">{editing ? "Update" : "Save"} Material</button>
+          <button type="submit" className="btn-primary">{editing ? "Update" : "Save"} Material</button>
         </form>
       )}
 
-      <div className="card overflow-x-auto">
-        <table className="w-full text-left text-sm">
+      <div className="card !p-0">
+        <div className="scroll-table">
+          <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b text-slate-500">
               <th className="py-2 pr-4">Name</th>
@@ -158,6 +162,7 @@ export default function MaterialsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

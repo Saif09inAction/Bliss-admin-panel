@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import type { FinishedProduct } from "@/lib/types";
+import PageToolbar from "@/components/admin/PageToolbar";
 
 export default function InventoryPage() {
   const [products, setProducts] = useState<FinishedProduct[]>([]);
@@ -33,35 +34,38 @@ export default function InventoryPage() {
   const totalQty = products.reduce((s, p) => s + p.quantity, 0);
 
   return (
-    <div>
-      <h1 className="mb-2 text-2xl font-bold text-navy">Store Inventory</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Products added when staff verifies kaariger deliveries. Total units: {totalQty}
+    <div className="space-y-4">
+      <PageToolbar meta={`${totalQty} units · ${products.length} product${products.length === 1 ? "" : "s"}`} />
+
+      <p className="text-sm text-slate-500">
+        Products appear here after staff approves kaariger deliveries.
       </p>
 
-      <div className="card overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b text-slate-500">
-              <th className="py-2 pr-4">Product</th>
-              <th className="py-2 pr-4">Color</th>
-              <th className="py-2 pr-4">Qty</th>
-              <th className="py-2 pr-4">Unit Price</th>
-              <th className="py-2">Updated By</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((p) => (
-              <tr key={p.id} className="border-b border-slate-100">
-                <td className="py-3 pr-4 font-medium">{p.name}</td>
-                <td className="py-3 pr-4">{p.color || "—"}</td>
-                <td className="py-3 pr-4">{p.quantity}</td>
-                <td className="py-3 pr-4">₹{p.unitPrice}</td>
-                <td className="py-3">{p.lastUpdatedBy}</td>
+      <div className="card !p-0">
+        <div className="scroll-table">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b text-slate-500">
+                <th className="py-2 pr-4">Product</th>
+                <th className="py-2 pr-4">Color</th>
+                <th className="py-2 pr-4">Qty</th>
+                <th className="py-2 pr-4">Unit Price</th>
+                <th className="py-2">Updated By</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {products.map((p) => (
+                <tr key={p.id} className="border-b border-slate-100">
+                  <td className="py-3 pr-4 font-medium">{p.name}</td>
+                  <td className="py-3 pr-4">{p.color || "—"}</td>
+                  <td className="py-3 pr-4">{p.quantity}</td>
+                  <td className="py-3 pr-4">₹{p.unitPrice}</td>
+                  <td className="py-3">{p.lastUpdatedBy}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {products.length === 0 && (
           <p className="py-6 text-center text-slate-500">No products in store yet.</p>
         )}

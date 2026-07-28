@@ -11,6 +11,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
+import PageToolbar from "@/components/admin/PageToolbar";
 
 type FormMode = "closed" | "staff" | "kaariger" | "edit";
 
@@ -171,26 +172,26 @@ export default function WorkersPage() {
           : "";
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">
-          {staffCount} staff · {kaarigerCount} kaarigers
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <button className="btn-primary" onClick={openStaffForm}>
-            + Add Staff
-          </button>
-          <button
-            className="rounded-lg bg-navy-light px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-            onClick={openKaarigerForm}
-          >
-            + Add Kaariger
-          </button>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <PageToolbar
+        meta={`${staffCount} staff · ${kaarigerCount} kaarigers`}
+        actions={
+          <>
+            <button className="btn-primary" onClick={openStaffForm}>
+              + Staff
+            </button>
+            <button
+              className="rounded-xl bg-navy-light px-4 py-2.5 text-sm font-semibold text-white active:scale-[0.98]"
+              onClick={openKaarigerForm}
+            >
+              + Kaariger
+            </button>
+          </>
+        }
+      />
 
       {formMode !== "closed" && (
-        <form onSubmit={saveEmployee} className="card mb-6 space-y-4">
+        <form onSubmit={saveEmployee} className="card space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-navy">{formTitle}</h2>
             <button type="button" className="text-sm text-slate-500 hover:text-slate-700" onClick={closeForm}>
@@ -289,8 +290,9 @@ export default function WorkersPage() {
         ))}
       </div>
 
-      <div className="card overflow-x-auto">
-        <table className="w-full text-left text-sm">
+      <div className="card !p-0">
+        <div className="scroll-table">
+          <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b text-slate-500">
               <th className="py-2 pr-4">Name</th>
@@ -329,9 +331,10 @@ export default function WorkersPage() {
         </table>
         {filtered.length === 0 && (
           <p className="py-6 text-center text-slate-500">
-            No workers yet. Use &quot;Add Staff&quot; or &quot;Add Kaariger&quot; above.
+            No workers yet. Use &quot;+ Staff&quot; or &quot;+ Kaariger&quot; above.
           </p>
         )}
+        </div>
       </div>
     </div>
   );

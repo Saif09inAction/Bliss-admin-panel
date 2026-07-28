@@ -19,15 +19,15 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-[#021024]/40 transition-opacity ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`fixed inset-0 z-40 bg-[#021024]/40 transition-opacity duration-300 ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[300px] max-w-[85vw] flex-col bg-white shadow-2xl transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(300px,85vw)] flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="drawer-header shrink-0 px-6 pb-6 pt-12 text-white">
+        <div className="drawer-header shrink-0 px-6 pb-6 text-white">
           <p className="text-2xl font-bold tracking-wider">LAIZA</p>
           <p className="text-xs uppercase tracking-widest text-white/70">Admin Panel</p>
           <div className="mt-5 flex items-center gap-4">

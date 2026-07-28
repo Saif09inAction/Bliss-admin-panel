@@ -65,7 +65,7 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Hero — matches Android admin dashboard */}
       <div className="admin-hero">
         <p className="text-xs font-semibold uppercase tracking-widest text-[#C1E8FF]/80">

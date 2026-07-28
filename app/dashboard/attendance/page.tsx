@@ -158,7 +158,7 @@ export default function AttendancePage() {
         {settingsMsg && <p className="mt-2 text-sm text-emerald-600">{settingsMsg}</p>}
       </form>
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3">
         <StatCard label="Present / On Time" value={stats.present} tone="green" />
         <StatCard label="Late" value={stats.late} tone="yellow" />
         <StatCard label="Absent" value={stats.absent} tone="red" />

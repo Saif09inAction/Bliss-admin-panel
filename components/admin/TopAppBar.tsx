@@ -10,8 +10,8 @@ interface Props {
 
 export default function TopAppBar({ title, subtitle, onMenuClick }: Props) {
   return (
-    <header className="sticky top-0 z-30 bg-[#F7F9FC]/90 backdrop-blur-md">
-      <div className="flex items-center gap-3 px-4 py-3">
+    <header>
+      <div className="flex items-center gap-3 px-3 py-2.5">
         <button
           type="button"
           onClick={onMenuClick}

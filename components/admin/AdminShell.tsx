@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getRouteMeta, greeting, todayHeading } from "@/lib/navigation";
@@ -20,29 +20,40 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       ? `${greeting()} • ${todayHeading()}`
       : meta.subtitle;
 
+  useEffect(() => {
+    document.documentElement.classList.add("admin-active");
+    return () => document.documentElement.classList.remove("admin-active");
+  }, []);
+
   if (!session) return null;
 
   return (
-    <div className="admin-shell">
-      <AdminDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        session={session}
-        onLogout={() => {
-          logout();
-          router.replace("/");
-        }}
-      />
+    <div className="admin-app">
+      <div className="admin-frame">
+        <AdminDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          session={session}
+          onLogout={() => {
+            logout();
+            router.replace("/");
+          }}
+        />
 
-      <TopAppBar
-        title={meta.title}
-        subtitle={subtitle}
-        onMenuClick={() => setDrawerOpen(true)}
-      />
+        <div className="admin-topbar">
+          <TopAppBar
+            title={meta.title}
+            subtitle={subtitle}
+            onMenuClick={() => setDrawerOpen(true)}
+          />
+        </div>
 
-      <main className="admin-main">{children}</main>
+        <main className="admin-scroll">
+          <div className="admin-content">{children}</div>
+        </main>
 
-      <FloatingBottomNav />
+        <FloatingBottomNav />
+      </div>
     </div>
   );
 }

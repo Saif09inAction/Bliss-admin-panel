@@ -2,20 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Mobile app shell — no page bounce, no auto zoom ── */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html.admin-active,
+html.admin-active body {
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+  position: fixed;
+  overscroll-behavior: none;
+}
+
 body {
-  @apply bg-[#F7F9FC] text-[#0F172A] antialiased;
+  @apply bg-slate-200 text-[#0F172A] antialiased;
+  touch-action: manipulation;
 }
 
-.admin-shell {
-  @apply relative min-h-screen bg-[#F7F9FC];
+/* Phone-like app frame (centered on tablet/desktop) */
+.admin-app {
+  @apply fixed inset-0 flex items-stretch justify-center overflow-hidden bg-slate-200;
 }
 
-.admin-main {
-  @apply mx-auto max-w-3xl px-4 pb-28 pt-2;
+.admin-frame {
+  @apply relative flex w-full max-w-md flex-col overflow-hidden bg-[#F7F9FC] shadow-2xl;
+  height: 100dvh;
+  max-height: 100dvh;
+}
+
+.admin-topbar {
+  @apply shrink-0 border-b border-slate-200/80 bg-[#F7F9FC]/95 backdrop-blur-md;
+  padding-top: env(safe-area-inset-top);
+}
+
+.admin-scroll {
+  @apply min-h-0 flex-1 overflow-y-auto overflow-x-hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-content {
+  @apply px-4 py-3;
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
 }
 
 .drawer-header {
   background: linear-gradient(180deg, #0f3d91 0%, #0f3d91dd 100%);
+  padding-top: max(3rem, env(safe-area-inset-top));
 }
 
 .admin-hero {
@@ -24,7 +60,7 @@ body {
 }
 
 .card {
-  @apply rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm;
+  @apply rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm;
 }
 
 .stat-card {
@@ -36,15 +72,22 @@ body {
 }
 
 .btn-primary {
-  @apply rounded-xl bg-[#0F3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#052659] disabled:opacity-50;
+  @apply inline-flex items-center justify-center rounded-xl bg-[#0F3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] hover:bg-[#052659] disabled:opacity-50;
 }
 
 .btn-secondary {
-  @apply rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50;
+  @apply inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition active:scale-[0.98] hover:bg-slate-50;
 }
 
 .input {
-  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#5483B3] focus:ring-2 focus:ring-[#C1E8FF];
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 outline-none transition focus:border-[#5483B3] focus:ring-2 focus:ring-[#C1E8FF];
+  font-size: 16px; /* prevents iOS input zoom */
+}
+
+@media (min-width: 640px) {
+  .input {
+    font-size: 14px;
+  }
 }
 
 .label {
@@ -76,7 +119,28 @@ body {
 }
 
 .calendar-day {
-  @apply flex h-10 items-center justify-center rounded-lg text-sm font-semibold transition hover:opacity-90;
+  @apply flex h-10 items-center justify-center rounded-lg text-sm font-semibold transition active:scale-95;
+}
+
+.page-toolbar {
+  @apply mb-4 flex flex-wrap items-center justify-between gap-3;
+}
+
+.page-toolbar-meta {
+  @apply text-sm text-slate-500;
+}
+
+.page-toolbar-actions {
+  @apply flex flex-wrap gap-2;
+}
+
+.scroll-table {
+  @apply -mx-4 overflow-x-auto overscroll-x-contain px-4;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scroll-table table {
+  @apply min-w-full;
 }
 
 .panel-slide {
@@ -94,14 +158,14 @@ body {
   }
 }
 
-/* Floating bottom nav — Android-style pill navbar */
+/* Bottom nav — pinned inside app frame, not the browser viewport */
 .bottom-nav-wrap {
-  @apply pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4;
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  @apply pointer-events-none absolute inset-x-0 bottom-0 z-40 flex justify-center px-3;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
 .floating-bottom-nav {
-  @apply pointer-events-auto relative flex h-[60px] w-full max-w-lg items-stretch rounded-full border border-white/25 bg-white/80 p-1 shadow-lg backdrop-blur-md;
+  @apply pointer-events-auto relative flex h-[58px] w-full items-stretch rounded-full border border-white/25 bg-white/90 p-1 shadow-lg backdrop-blur-md;
 }
 
 .nav-pill {
@@ -114,4 +178,18 @@ body {
 
 .nav-tab-active {
   @apply font-bold;
+}
+
+/* Login screen — same app frame feel */
+.login-app {
+  @apply fixed inset-0 flex justify-center overflow-hidden bg-slate-200;
+}
+
+.login-frame {
+  @apply flex h-[100dvh] w-full max-w-md flex-col overflow-hidden bg-[#F1F7FC] shadow-2xl;
+}
+
+.login-scroll {
+  @apply min-h-0 flex-1 overflow-y-auto overscroll-y-contain;
+  -webkit-overflow-scrolling: touch;
 }

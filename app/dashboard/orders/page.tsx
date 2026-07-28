@@ -13,6 +13,7 @@ import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, RawMaterial } from "@/lib/types";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import PageToolbar from "@/components/admin/PageToolbar";
 
 export default function OrdersPage() {
   const { session } = useAuth();
@@ -161,7 +162,7 @@ export default function OrdersPage() {
 
     const order: KaarigerOrder = {
       id,
-      kaarigerId: kaariger.phone,
+      kaarigerId: kaariger.phone.trim(),
       kaarigerName: kaariger.name,
       productName: form.productName.trim(),
       targetQuantity: qty,
@@ -229,17 +230,19 @@ export default function OrdersPage() {
   })();
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-navy">Kaariger Orders</h1>
-        <button className="btn-primary" onClick={() => setShowForm(!showForm)}>
-          {showForm ? "Cancel" : "Create Order"}
-        </button>
-      </div>
+    <div className="space-y-4">
+      <PageToolbar
+        meta={`${orders.length} order${orders.length === 1 ? "" : "s"}`}
+        actions={
+          <button className="btn-primary" onClick={() => setShowForm(!showForm)}>
+            {showForm ? "Cancel" : "Create Order"}
+          </button>
+        }
+      />
 
       {showForm && (
-        <form onSubmit={createOrder} className="card mb-6 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <form onSubmit={createOrder} className="card space-y-3">
+          <div className="grid gap-3">
             <div>
               <label className="label">Kaariger</label>
               <select className="input" value={form.kaarigerId} onChange={(e) => setForm({ ...form, kaarigerId: e.target.value })} required>
@@ -324,9 +327,10 @@ export default function OrdersPage() {
         </form>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card overflow-x-auto">
-          <table className="w-full text-left text-sm">
+      <div className="space-y-4">
+        <div className="card !p-0">
+          <div className="scroll-table">
+            <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b text-slate-500">
                 <th className="py-2 pr-2">Product</th>
@@ -353,6 +357,7 @@ export default function OrdersPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         {selectedOrder && (
@@ -397,7 +402,7 @@ export default function OrdersPage() {
                     {payments.length === 0 && <li className="text-slate-500">No payments yet</li>}
                   </ul>
 
-                  <form onSubmit={addPayment} className="mt-4 flex gap-2">
+                  <form onSubmit={addPayment} className="mt-4 flex flex-col gap-2 sm:flex-row">
                     <input className="input" type="number" placeholder="Amount" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} required />
                     <input className="input" placeholder="Remarks" value={paymentForm.remarks} onChange={(e) => setPaymentForm({ ...paymentForm, remarks: e.target.value })} />
                     <button type="submit" className="btn-primary whitespace-nowrap">Add</button>

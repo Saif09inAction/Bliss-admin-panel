@@ -15,8 +15,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !session) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F7F9FC] text-slate-500">
-        Loading...
+      <div className="admin-app">
+        <div className="admin-frame flex items-center justify-center bg-[#F7F9FC] text-slate-500">
+          Loading...
+        </div>
       </div>
     );
   }
