@@ -3,23 +3,25 @@
 import { useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
-import type { KaarigerOrder, PickupRecord, ReturnRecord } from "@/lib/types";
+import type { KaarigerOrder, OrderApprovalRecord, PickupRecord, ReturnRecord } from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 
-type Tab = "kaariger" | "pickups" | "returns";
+type Tab = "kaariger" | "approvals" | "pickups" | "returns";
 
 export default function RecordsPage() {
   const [tab, setTab] = useState<Tab>("kaariger");
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
+  const [approvals, setApprovals] = useState<OrderApprovalRecord[]>([]);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
 
   useEffect(() => {
     async function load() {
       const db = getDb();
-      const [oSnap, pSnap, rSnap] = await Promise.all([
+      const [oSnap, aSnap, pSnap, rSnap] = await Promise.all([
         getDocs(collection(db, "kaariger_orders")),
+        getDocs(collection(db, "order_approval_records")),
         getDocs(collection(db, "pickup_records")),
         getDocs(collection(db, "return_records")),
       ]);
@@ -45,6 +47,26 @@ export default function RecordsPage() {
             createdAt: (data.createdAt as number) || 0,
           };
         }).sort((a, b) => b.createdAt - a.createdAt)
+      );
+
+      setApprovals(
+        aSnap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: (data.id as string) || d.id,
+            orderId: data.orderId as string,
+            productName: data.productName as string,
+            kaarigerId: data.kaarigerId as string,
+            kaarigerName: data.kaarigerName as string,
+            batchQuantity: (data.batchQuantity as number) || 0,
+            approvedTotalAfter: (data.approvedTotalAfter as number) || 0,
+            targetQuantity: (data.targetQuantity as number) || 0,
+            color: (data.color as string) || "",
+            verifiedByName: data.verifiedByName as string,
+            verifiedByPhone: data.verifiedByPhone as string,
+            verifiedAt: (data.verifiedAt as number) || 0,
+          };
+        }).sort((a, b) => b.verifiedAt - a.verifiedAt)
       );
 
       setPickups(
@@ -101,6 +123,20 @@ export default function RecordsPage() {
           String(o.totalDealAmount),
         ])
       );
+    } else if (tab === "approvals") {
+      downloadCsv(
+        "approval_history.csv",
+        ["Product", "Kaariger", "Batch Qty", "Progress", "Approved By", "Phone", "Date"],
+        approvals.map((a) => [
+          a.productName,
+          a.kaarigerName,
+          String(a.batchQuantity),
+          `${a.approvedTotalAfter}/${a.targetQuantity}`,
+          a.verifiedByName,
+          a.verifiedByPhone,
+          new Date(a.verifiedAt).toISOString(),
+        ])
+      );
     } else if (tab === "pickups") {
       downloadCsv(
         "pickups.csv",
@@ -123,7 +159,7 @@ export default function RecordsPage() {
       />
 
       <div className="flex flex-wrap gap-2">
-        {(["kaariger", "pickups", "returns"] as Tab[]).map((t) => (
+        {(["kaariger", "approvals", "pickups", "returns"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -157,6 +193,31 @@ export default function RecordsPage() {
                   <td className="py-3 pr-3">{o.status.replace(/_/g, " ")}</td>
                   <td className="py-3 pr-3">{o.verifiedBy || "—"}</td>
                   <td className="py-3">₹{o.totalDealAmount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {tab === "approvals" && (
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b text-slate-500">
+                <th className="py-2 pr-3">Product</th>
+                <th className="py-2 pr-3">Kaariger</th>
+                <th className="py-2 pr-3">Batch</th>
+                <th className="py-2 pr-3">Progress</th>
+                <th className="py-2 pr-3">Approved By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {approvals.map((a) => (
+                <tr key={a.id} className="border-b border-slate-100">
+                  <td className="py-3 pr-3">{a.productName}</td>
+                  <td className="py-3 pr-3">{a.kaarigerName}</td>
+                  <td className="py-3 pr-3">{a.batchQuantity} pcs</td>
+                  <td className="py-3 pr-3">{a.approvedTotalAfter}/{a.targetQuantity}</td>
+                  <td className="py-3 pr-3">{a.verifiedByName}</td>
                 </tr>
               ))}
             </tbody>

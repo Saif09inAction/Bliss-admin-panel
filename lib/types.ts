@@ -71,6 +71,21 @@ export interface KaarigerOrder {
   notes?: string;
 }
 
+export interface OrderApprovalRecord {
+  id: string;
+  orderId: string;
+  productName: string;
+  kaarigerId: string;
+  kaarigerName: string;
+  batchQuantity: number;
+  approvedTotalAfter: number;
+  targetQuantity: number;
+  color: string;
+  verifiedByName: string;
+  verifiedByPhone: string;
+  verifiedAt: number;
+}
+
 export interface KaarigerPayment {
   id: string;
   orderId: string;
