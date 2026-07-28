@@ -16,10 +16,7 @@ export default function FloatingBottomNav() {
     <div className="bottom-nav-wrap">
       <nav className="floating-bottom-nav">
         {activeIndex >= 0 && (
-          <div
-            className="nav-pill"
-            style={{ left: pillLeft, width: pillWidth }}
-          />
+          <div className="nav-pill" style={{ left: pillLeft, width: pillWidth }} />
         )}
         {BOTTOM_NAV.map((item) => {
           const active = pathname === item.href;
@@ -31,9 +28,11 @@ export default function FloatingBottomNav() {
             >
               <NavIcon
                 name={item.icon}
-                className={`h-[22px] w-[22px] transition-transform ${active ? "scale-110 text-[#0F3D91]" : "text-gray-500"}`}
+                className={`h-[22px] w-[22px] transition-transform ${active ? "scale-110 text-[var(--bliss-lime)]" : "text-white/50"}`}
               />
-              <span className={`text-[11px] font-medium ${active ? "font-bold text-[#0F3D91]" : "text-gray-500"}`}>
+              <span
+                className={`text-[11px] font-medium ${active ? "font-bold text-[var(--bliss-lime)]" : "text-white/50"}`}
+              >
                 {item.label}
               </span>
             </Link>

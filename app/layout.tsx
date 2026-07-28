@@ -3,12 +3,12 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 
 export const metadata: Metadata = {
-  title: "Laiza Admin",
-  description: "Admin panel for Laiza Bags",
+  title: "Bliss Bombay Admin",
+  description: "Admin panel for Bliss Bombay",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
-    title: "Laiza Admin",
+    statusBarStyle: "black-translucent",
+    title: "Bliss Admin",
   },
 };
 
@@ -18,7 +18,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#F7F9FC",
+  themeColor: "#0A0A0A",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

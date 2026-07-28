@@ -5,8 +5,13 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        navy: { DEFAULT: "#021024", light: "#052659" },
-        ice: "#C1E8FF",
+        bliss: {
+          black: "#0a0a0a",
+          dark: "#121417",
+          lime: "#c8ff00",
+          gold: "#d4af37",
+          cream: "#fafaf8",
+        },
       },
     },
   },

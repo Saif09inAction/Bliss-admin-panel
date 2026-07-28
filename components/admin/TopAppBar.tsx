@@ -15,13 +15,13 @@ export default function TopAppBar({ title, subtitle, onMenuClick }: Props) {
         <button
           type="button"
           onClick={onMenuClick}
-          className="flex h-10 w-10 items-center justify-center rounded-full text-[#0F172A] transition hover:bg-white/80"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--bliss-dark)] transition hover:bg-[var(--bliss-lime)]/10"
           aria-label="Open menu"
         >
           <NavIcon name="menu" className="h-6 w-6" />
         </button>
         <div className="min-w-0 flex-1 text-center">
-          <h1 className="truncate text-base font-bold text-[#0F172A]">{title}</h1>
+          <h1 className="truncate text-base font-bold text-[var(--bliss-dark)]">{title}</h1>
           {subtitle && (
             <p className="truncate text-xs text-slate-500">{subtitle}</p>
           )}

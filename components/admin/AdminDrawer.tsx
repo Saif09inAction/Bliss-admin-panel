@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { DRAWER_NAV } from "@/lib/navigation";
 import { NavIcon } from "./NavIcon";
@@ -19,7 +20,7 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-[#021024]/40 transition-opacity duration-300 ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
         onClick={onClose}
       />
       <aside
@@ -28,15 +29,21 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
         }`}
       >
         <div className="drawer-header shrink-0 px-6 pb-6 text-white">
-          <p className="text-2xl font-bold tracking-wider">LAIZA</p>
-          <p className="text-xs uppercase tracking-widest text-white/70">Admin Panel</p>
+          <div className="flex items-center gap-3">
+            <Image src="/bliss-logo.png" alt="Bliss Bombay" width={48} height={48} className="h-12 w-12 object-contain" />
+            <div>
+              <p className="text-xl font-black tracking-widest text-[var(--bliss-lime)]">BLISS</p>
+              <p className="text-[10px] font-bold tracking-[0.35em] text-[var(--bliss-gold)]">BOMBAY</p>
+            </div>
+          </div>
+          <p className="mt-2 text-xs uppercase tracking-widest text-white/50">Admin Panel</p>
           <div className="mt-5 flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/20 text-xl font-black">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--bliss-gold)]/40 bg-[var(--bliss-lime)]/10 text-xl font-black text-[var(--bliss-lime)]">
               {session.name.charAt(0).toUpperCase()}
             </div>
             <div>
               <p className="font-bold">{session.name}</p>
-              <p className="text-sm text-white/80">ADMIN</p>
+              <p className="text-sm text-[var(--bliss-gold)]">ADMIN</p>
               <p className="text-xs text-white/60">Phone: {session.phone}</p>
             </div>
           </div>
@@ -50,13 +57,12 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
-                className={`mb-1 flex items-center gap-4 rounded-full px-4 py-3 text-sm font-medium transition ${
-                  active
-                    ? "bg-[#0F3D91]/12 text-[#0F3D91]"
-                    : "text-slate-600 hover:bg-slate-50"
-                }`}
+                className={`drawer-nav-item ${active ? "drawer-nav-active" : ""}`}
               >
-                <NavIcon name={item.icon} className={`h-5 w-5 ${active ? "text-[#0F3D91]" : "text-slate-500"}`} />
+                <NavIcon
+                  name={item.icon}
+                  className={`h-5 w-5 ${active ? "text-[var(--bliss-lime)]" : "text-slate-500"}`}
+                />
                 {item.label}
               </Link>
             );

@@ -68,15 +68,15 @@ export default function DashboardPage() {
     <div className="space-y-4">
       {/* Hero — matches Android admin dashboard */}
       <div className="admin-hero">
-        <p className="text-xs font-semibold uppercase tracking-widest text-[#C1E8FF]/80">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[var(--bliss-gold)]/90">
           {greeting()}
         </p>
         <h2 className="mt-1 text-2xl font-bold text-white">
           {session?.name || "Administrator"}
         </h2>
-        <p className="mt-1 text-sm text-[#C1E8FF]/90">Admin Control Center</p>
-        <div className="mt-4 inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs text-white/90">
-          Laiza Bags Operations
+        <p className="mt-1 text-sm text-[var(--bliss-lime)]/80">Admin Control Center</p>
+        <div className="mt-4 inline-flex items-center rounded-full border border-[var(--bliss-gold)]/30 bg-[var(--bliss-lime)]/10 px-3 py-1 text-xs text-[var(--bliss-lime)]">
+          Bliss Bombay Operations
         </div>
       </div>
 

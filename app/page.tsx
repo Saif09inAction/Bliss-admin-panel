@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
@@ -39,20 +40,30 @@ export default function LoginPage() {
     <div className="login-app">
       <div className="login-frame">
         <div className="login-scroll">
-          <div className="flex flex-col items-center bg-white px-6 pb-8 pt-16">
-            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-[#021024]/5 text-4xl font-black text-[#052659]">
-              L
-            </div>
-            <h1 className="text-xl font-extrabold tracking-[0.2em] text-[#021024]">LAIZA BAGS</h1>
-            <p className="mt-2 text-sm text-slate-500">Admin Control Panel</p>
+          <div className="flex flex-col items-center bg-[var(--bliss-cream)] px-6 pb-8 pt-14">
+            <Image
+              src="/bliss-logo.png"
+              alt="Bliss Bombay"
+              width={112}
+              height={112}
+              className="mb-4 h-28 w-28 object-contain"
+              priority
+            />
+            <h1 className="text-2xl font-black tracking-[0.25em] text-[var(--bliss-lime)] drop-shadow-sm">
+              BLISS
+            </h1>
+            <p className="text-xs font-bold tracking-[0.45em] text-[var(--bliss-gold)]">BOMBAY</p>
+            <p className="mt-3 text-sm text-slate-500">Admin Control Panel</p>
           </div>
 
-          <div className="hero-gradient px-6 pb-10 pt-6">
+          <div className="hero-gradient px-6 pb-10 pt-8">
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-[#C1E8FF]">Mobile Number</label>
+                <label className="mb-1.5 block text-sm font-medium text-[var(--bliss-gold-light)]">
+                  Mobile Number
+                </label>
                 <input
-                  className="input !border-[#C1E8FF]/30 !bg-white/10 !text-white placeholder:!text-[#C1E8FF]/50"
+                  className="input !border-[var(--bliss-gold)]/30 !bg-white/5 !text-white placeholder:!text-white/40"
                   type="tel"
                   inputMode="tel"
                   autoComplete="tel"
@@ -63,9 +74,11 @@ export default function LoginPage() {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-[#C1E8FF]">Password</label>
+                <label className="mb-1.5 block text-sm font-medium text-[var(--bliss-gold-light)]">
+                  Password
+                </label>
                 <input
-                  className="input !border-[#C1E8FF]/30 !bg-white/10 !text-white placeholder:!text-[#C1E8FF]/50"
+                  className="input !border-[var(--bliss-gold)]/30 !bg-white/5 !text-white placeholder:!text-white/40"
                   type="password"
                   autoComplete="current-password"
                   value={password}
@@ -78,7 +91,7 @@ export default function LoginPage() {
               {error && <p className="text-sm text-red-300">{error}</p>}
               <button
                 type="submit"
-                className="w-full rounded-full bg-[#C1E8FF] py-3.5 text-base font-bold text-[#021024] transition active:scale-[0.98] hover:bg-white disabled:opacity-50"
+                className="w-full rounded-full bg-[var(--bliss-lime)] py-3.5 text-base font-black tracking-wide text-[var(--bliss-black)] transition active:scale-[0.98] hover:brightness-95 disabled:opacity-50"
                 disabled={submitting}
               >
                 {submitting ? "Signing in..." : "Login as Admin"}
