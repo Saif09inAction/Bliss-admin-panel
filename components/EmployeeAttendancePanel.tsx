@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
+import { ChevronLeft, ChevronRight, MapPin, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import {
@@ -16,8 +17,6 @@ import {
   monthLabel,
   parseAttendance,
   resolveAttendanceImage,
-  statusBadgeClass,
-  statusColorClass,
   statusLabel,
 } from "@/lib/attendance-utils";
 
@@ -25,6 +24,43 @@ interface Props {
   employee: Employee;
   settings: AttendanceSettings;
   onClose: () => void;
+}
+
+function calendarDayClass(status: string, isSelected: boolean): string {
+  const classes = ["calendar-day"];
+  switch (status) {
+    case "PRESENT":
+    case "ON_TIME":
+    case "LEFT_EARLY":
+      classes.push("present");
+      break;
+    case "LATE":
+      classes.push("late");
+      break;
+    case "ABSENT":
+      classes.push("absent");
+      break;
+    case "FUTURE":
+      classes.push("muted");
+      break;
+  }
+  if (isSelected) classes.push("selected");
+  return classes.join(" ");
+}
+
+function badgeClass(status: string): string {
+  switch (status) {
+    case "PRESENT":
+    case "ON_TIME":
+      return "badge badge-success";
+    case "LATE":
+    case "LEFT_EARLY":
+      return "badge badge-warn";
+    case "ABSENT":
+      return "badge badge-danger";
+    default:
+      return "badge badge-neutral";
+  }
 }
 
 export default function EmployeeAttendancePanel({ employee, settings, onClose }: Props) {
@@ -105,81 +141,99 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="panel-slide mt-auto flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:mx-auto sm:my-auto sm:max-h-[88dvh] sm:max-w-lg sm:rounded-2xl"
+        className="panel-slide ml-auto flex w-full max-w-lg flex-col overflow-hidden bg-[var(--surface)] shadow-dock"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="hero-gradient shrink-0 px-5 py-5 text-white">
+        {/* Header */}
+        <div className="surface-ink shrink-0 px-5 py-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-widest text-white/70">Staff Attendance</p>
-              <h2 className="text-xl font-bold">{employee.name}</h2>
-              <p className="text-sm text-white/80">{employee.phone}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-bronze">
+                Staff Attendance
+              </p>
+              <h2 className="mt-1 font-display text-xl font-bold">{employee.name}</h2>
+              <p className="text-sm text-white/55">{employee.phone}</p>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg bg-white/10 px-3 py-1 text-sm hover:bg-white/20"
+              className="btn-icon !border-white/15 !bg-white/10 !text-white hover:!border-jade hover:!bg-jade/20 hover:!text-white"
+              aria-label="Close"
             >
-              Close
+              <X size={16} />
             </button>
           </div>
-          <div className="profile-stat-grid mt-4">
-            <div className="rounded-lg bg-white/10 px-2 py-2 text-center">
-              <p className="text-[10px] text-white/70">Present</p>
-              <p className="font-bold text-emerald-200">{monthStats.present}</p>
-            </div>
-            <div className="rounded-lg bg-white/10 px-2 py-2 text-center">
-              <p className="text-[10px] text-white/70">Late</p>
-              <p className="font-bold text-amber-200">{monthStats.late}</p>
-            </div>
-            <div className="rounded-lg bg-white/10 px-2 py-2 text-center">
-              <p className="text-[10px] text-white/70">Absent</p>
-              <p className="font-bold text-red-200">{monthStats.absent}</p>
-            </div>
-            <div className="rounded-lg bg-white/10 px-2 py-2 text-center">
-              <p className="text-[10px] text-white/70">Rate</p>
-              <p className="font-bold text-white">{monthStats.rate}%</p>
-            </div>
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            {[
+              { label: "Present", value: monthStats.present, color: "text-jade-glow" },
+              { label: "Late", value: monthStats.late, color: "text-warning" },
+              { label: "Absent", value: monthStats.absent, color: "text-danger" },
+              { label: "Rate", value: `${monthStats.rate}%`, color: "text-white" },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="rounded-xl border border-white/10 bg-white/5 px-2 py-2.5 text-center"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-white/45">
+                  {s.label}
+                </p>
+                <p className={`font-display text-lg font-bold ${s.color}`}>{s.value}</p>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="attendance-panel-body p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <button type="button" className="btn-secondary !px-3 !py-1" onClick={() => shiftMonth(-1)}>
-              ← Prev
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          <div className="mb-5 flex items-center justify-between">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => shiftMonth(-1)}
+            >
+              <ChevronLeft size={14} />
+              Prev
             </button>
-            <h3 className="font-bold text-brand">{monthLabel(year, month)}</h3>
-            <button type="button" className="btn-secondary !px-3 !py-1" onClick={() => shiftMonth(1)}>
-              Next →
+            <h3 className="font-display text-base font-bold text-ink">{monthLabel(year, month)}</h3>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => shiftMonth(1)}
+            >
+              Next
+              <ChevronRight size={14} />
             </button>
           </div>
 
-          <div className="mb-3 flex flex-wrap gap-3 text-xs text-slate-600">
-            <span className="flex items-center gap-1">
-              <span className="h-3 w-3 rounded bg-emerald-500" /> Present
+          <div className="mb-4 flex flex-wrap gap-4 text-xs text-[var(--text-muted)]">
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-md border border-jade/40 bg-jade-soft" /> Present
             </span>
-            <span className="flex items-center gap-1">
-              <span className="h-3 w-3 rounded bg-amber-400" /> Late
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-md border border-warning/40 bg-warning/15" /> Late
             </span>
-            <span className="flex items-center gap-1">
-              <span className="h-3 w-3 rounded bg-red-500" /> Absent
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-md border border-danger/30 bg-danger/10" /> Absent
             </span>
           </div>
 
           {loading ? (
-            <p className="py-8 text-center text-slate-500">Loading calendar...</p>
+            <div className="flex flex-col items-center gap-3 py-10">
+              <div className="skeleton h-8 w-full max-w-xs rounded-xl" />
+              <div className="skeleton h-48 w-full rounded-xl" />
+            </div>
           ) : (
-            <div className="shrink-0">
-              <div className="calendar-grid text-center text-xs font-semibold text-slate-500">
+            <div className="surface p-3 sm:p-4">
+              <div className="calendar-grid mb-1.5 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
                 {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
                   <div key={d} className="py-1">
                     {d}
                   </div>
                 ))}
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {weeks.map((w, wi) => (
                   <div key={wi} className="calendar-grid">
                     {w.map((day, di) => {
@@ -193,7 +247,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                           key={di}
                           type="button"
                           onClick={() => setSelectedDate(key)}
-                          className={`calendar-day ${statusColorClass(st)} ${isSelected ? "ring-2 ring-[var(--bliss-green)] ring-offset-1" : ""}`}
+                          className={calendarDayClass(String(st), isSelected)}
                         >
                           {day}
                         </button>
@@ -206,9 +260,9 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
           )}
 
           {selectedDate && (
-            <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h4 className="font-bold text-brand">
+            <div className="mt-5 surface p-4 sm:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-display text-base font-bold text-ink">
                   {new Date(selectedDate + "T12:00:00").toLocaleDateString("en-IN", {
                     weekday: "long",
                     day: "numeric",
@@ -216,7 +270,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     year: "numeric",
                   })}
                 </h4>
-                <span className={`rounded-full px-3 py-0.5 text-xs font-bold ${statusBadgeClass(selectedStatus)}`}>
+                <span className={badgeClass(String(selectedStatus))}>
                   {statusLabel(String(selectedStatus))}
                 </span>
               </div>
@@ -251,7 +305,9 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                   />
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">No attendance recorded for this day.</p>
+                <p className="text-sm text-[var(--text-muted)]">
+                  No attendance recorded for this day.
+                </p>
               )}
             </div>
           )}
@@ -279,18 +335,21 @@ function DetailBlock({
   const mapUrl = mapsLink(gps);
   const imageUrl = resolveAttendanceImage(image);
   return (
-    <div className="rounded-xl bg-white p-4 shadow-sm">
-      <h5 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">{title}</h5>
-      <p className="text-lg font-bold text-brand">{time || "—"}</p>
-      {extra && <p className="mt-1 text-sm text-amber-700">{extra}</p>}
-      {address && <p className="mt-2 text-sm text-slate-600">{address}</p>}
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h5 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+        {title}
+      </h5>
+      <p className="font-display text-xl font-bold text-ink">{time || "—"}</p>
+      {extra && <p className="mt-1 text-sm text-warning">{extra}</p>}
+      {address && <p className="mt-2 text-sm text-[var(--text-muted)]">{address}</p>}
       {mapUrl && (
         <a
           href={mapUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1 inline-block text-sm text-[var(--bliss-green)] underline"
+          className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-jade-deep underline-offset-2 hover:underline"
         >
+          <MapPin size={14} />
           View on map {gps && `(${gps})`}
         </a>
       )}
@@ -299,10 +358,10 @@ function DetailBlock({
           src={imageUrl}
           alt={`${title} selfie`}
           loading="lazy"
-          className="mt-3 max-h-56 w-full rounded-lg object-contain bg-slate-100"
+          className="mt-3 max-h-56 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] object-contain"
         />
       ) : image?.trim() ? (
-        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <p className="mt-3 rounded-xl border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-[#9a6b10]">
           Selfie not synced yet — will appear once uploaded from the app.
         </p>
       ) : null}

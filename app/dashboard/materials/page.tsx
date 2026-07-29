@@ -8,6 +8,7 @@ import {
   getDocs,
   setDoc,
 } from "firebase/firestore";
+import { AlertTriangle, Package, Pencil, Plus, Trash2 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { RawMaterial } from "@/lib/types";
@@ -64,6 +65,18 @@ export default function MaterialsPage() {
     setShowForm(true);
   }
 
+  function openAdd() {
+    setEditing(null);
+    setForm({ name: "", quantity: "", unit: "kg", minimumStock: "", supplier: "" });
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditing(null);
+    setForm({ name: "", quantity: "", unit: "kg", minimumStock: "", supplier: "" });
+  }
+
   async function saveMaterial(e: React.FormEvent) {
     e.preventDefault();
     const id = editing?.id || uuid();
@@ -102,22 +115,42 @@ export default function MaterialsPage() {
     );
   }, [materials, search]);
 
+  const lowStockCount = useMemo(
+    () => materials.filter((m) => m.quantity <= m.minimumStock).length,
+    [materials]
+  );
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageToolbar
-        meta={`${materials.length} material${materials.length === 1 ? "" : "s"}`}
+        title="Raw Materials"
         actions={
           <button
-            className="btn-primary"
-            onClick={() => {
-              setEditing(null);
-              setShowForm(!showForm);
-            }}
+            type="button"
+            className="btn btn-primary"
+            onClick={() => (showForm ? closeForm() : openAdd())}
           >
-            {showForm ? "Cancel" : "Add Material"}
+            {showForm ? (
+              "Cancel"
+            ) : (
+              <>
+                <Plus size={16} />
+                Add Material
+              </>
+            )}
           </button>
         }
-      />
+      >
+        <p className="text-sm text-[var(--text-muted)]">
+          {materials.length} material{materials.length === 1 ? "" : "s"}
+          {lowStockCount > 0 && (
+            <span className="ml-2 inline-flex items-center gap-1 text-danger">
+              <AlertTriangle size={13} />
+              {lowStockCount} low stock
+            </span>
+          )}
+        </p>
+      </PageToolbar>
 
       <AdminSearchBar
         value={search}
@@ -125,68 +158,149 @@ export default function MaterialsPage() {
         placeholder="Search materials by name, unit, supplier..."
       />
 
-      {showForm && (
-        <form onSubmit={saveMaterial} className="card grid gap-3">
-          <div>
-            <label className="label">Name</label>
-            <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          </div>
-          <div>
-            <label className="label">Quantity</label>
-            <input className="input" type="number" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} required />
-          </div>
-          <div>
-            <label className="label">Unit</label>
-            <input className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Minimum Stock</label>
-            <input className="input" type="number" step="0.01" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: e.target.value })} />
-          </div>
-          <div>
-            <label className="label">Supplier</label>
-            <input className="input" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
-          </div>
-          <button type="submit" className="btn-primary">{editing ? "Update" : "Save"} Material</button>
-        </form>
-      )}
-
-      <div className="card !p-0">
-        <div className="scroll-table">
-          <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b text-slate-500">
-              <th className="py-2 pr-4">Name</th>
-              <th className="py-2 pr-4">Qty</th>
-              <th className="py-2 pr-4">Min Stock</th>
-              <th className="py-2 pr-4">Supplier</th>
-              <th className="py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((m) => {
-              const low = m.quantity <= m.minimumStock;
-              return (
-                <tr key={m.id} className={`border-b border-slate-100 ${low ? "bg-red-50" : ""}`}>
-                  <td className="py-3 pr-4 font-medium">{m.name}</td>
-                  <td className="py-3 pr-4">{m.quantity} {m.unit}</td>
-                  <td className="py-3 pr-4">{m.minimumStock}</td>
-                  <td className="py-3 pr-4">{m.supplier}</td>
-                  <td className="py-3 space-x-2">
-                    <button className="text-navy-light text-xs font-semibold" onClick={() => openEdit(m)}>Edit</button>
-                    <button className="text-red-600 text-xs font-semibold" onClick={() => removeMaterial(m.id)}>Delete</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-        {filtered.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">
-            {search ? "No materials match your search." : "No materials yet."}
-          </p>
+      <div className={`grid gap-5 ${showForm ? "xl:grid-cols-[360px_1fr]" : ""}`}>
+        {showForm && (
+          <form onSubmit={saveMaterial} className="surface h-fit p-4 sm:p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
+                <Package size={16} />
+              </div>
+              <div>
+                <h3 className="font-display text-base font-bold text-ink">
+                  {editing ? "Edit Material" : "New Material"}
+                </h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {editing ? "Update stock details" : "Add to inventory"}
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3">
+              <div>
+                <label className="label">Name</label>
+                <input
+                  className="input"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Quantity</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={form.quantity}
+                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Unit</label>
+                  <input
+                    className="input"
+                    value={form.unit}
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Minimum Stock</label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={form.minimumStock}
+                  onChange={(e) => setForm({ ...form, minimumStock: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Supplier</label>
+                <input
+                  className="input"
+                  value={form.supplier}
+                  onChange={(e) => setForm({ ...form, supplier: e.target.value })}
+                />
+              </div>
+              <button type="submit" className="btn btn-primary w-full">
+                {editing ? "Update Material" : "Save Material"}
+              </button>
+            </div>
+          </form>
         )}
+
+        <div className="data-table-wrap min-w-0">
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Quantity</th>
+                  <th>Min Stock</th>
+                  <th>Supplier</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m) => {
+                  const low = m.quantity <= m.minimumStock;
+                  return (
+                    <tr key={m.id} className={low ? "low-stock" : undefined}>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          {low && <AlertTriangle size={14} className="shrink-0 text-danger" />}
+                          <span className="font-medium">{m.name}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={low ? "font-semibold text-danger" : ""}>
+                          {m.quantity} {m.unit}
+                        </span>
+                      </td>
+                      <td className="text-[var(--text-muted)]">{m.minimumStock}</td>
+                      <td className="text-[var(--text-muted)]">{m.supplier || "—"}</td>
+                      <td className="text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openEdit(m)}
+                          >
+                            <Pencil size={14} />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => removeMaterial(m.id)}
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {filtered.length === 0 && (
+            <div className="flex flex-col items-center gap-2 py-12">
+              <Package size={24} className="text-[var(--text-faint)]" />
+              <p className="text-sm text-[var(--text-muted)]">
+                {search ? "No materials match your search." : "No materials yet."}
+              </p>
+              {!showForm && !search && (
+                <button type="button" className="btn btn-primary btn-sm mt-1" onClick={openAdd}>
+                  <Plus size={14} />
+                  Add first material
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

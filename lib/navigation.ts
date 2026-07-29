@@ -4,59 +4,95 @@ export type NavRoute = {
   title: string;
   subtitle?: string;
   icon: string;
-  drawer?: boolean;
-  bottom?: boolean;
+  group?: "ops" | "people" | "finance" | "catalog";
 };
 
-export const BOTTOM_NAV: NavRoute[] = [
+export const SIDEBAR_NAV: NavRoute[] = [
   {
     href: "/dashboard",
     label: "Overview",
-    title: "Admin Dashboard",
-    subtitle: "Control center for Bliss Bombay",
+    title: "Overview",
+    subtitle: "Live pulse of operations",
     icon: "home",
-    bottom: true,
+    group: "ops",
   },
   {
     href: "/dashboard/workers",
     label: "Workers",
-    title: "Workers Directory",
-    subtitle: "Manage staff & kaarigers",
+    title: "Workers",
+    subtitle: "Staff & kaarigers",
     icon: "groups",
-    bottom: true,
+    group: "people",
   },
   {
     href: "/dashboard/attendance",
     label: "Attendance",
-    title: "Attendance HQ",
-    subtitle: "Shift times, search & monthly calendar",
+    title: "Attendance",
+    subtitle: "Shifts & presence",
     icon: "calendar",
-    bottom: true,
+    group: "people",
   },
   {
     href: "/dashboard/salary",
     label: "Salary",
-    title: "Salary Management",
-    subtitle: "Pay staff & track dues",
+    title: "Salary",
+    subtitle: "Pay & track dues",
     icon: "salary",
-    bottom: true,
+    group: "finance",
+  },
+  {
+    href: "/dashboard/orders",
+    label: "Orders",
+    title: "Kaariger Orders",
+    subtitle: "Assign & track work",
+    icon: "orders",
+    group: "ops",
+  },
+  {
+    href: "/dashboard/materials",
+    label: "Materials",
+    title: "Raw Materials",
+    subtitle: "Stock & suppliers",
+    icon: "inventory",
+    group: "catalog",
+  },
+  {
+    href: "/dashboard/inventory",
+    label: "Inventory",
+    title: "Store Inventory",
+    subtitle: "Finished products",
+    icon: "store",
+    group: "catalog",
+  },
+  {
+    href: "/dashboard/records",
+    label: "Records",
+    title: "All Records",
+    subtitle: "History & exports",
+    icon: "list",
+    group: "ops",
   },
 ];
 
-export const DRAWER_NAV: NavRoute[] = [
-  { href: "/dashboard", label: "Dashboard", title: "Admin Dashboard", icon: "home", drawer: true },
-  { href: "/dashboard/workers", label: "Workers Directory", title: "Workers Directory", icon: "groups", drawer: true },
-  { href: "/dashboard/attendance", label: "Attendance HQ", title: "Attendance HQ", icon: "calendar", drawer: true },
-  { href: "/dashboard/salary", label: "Salary Management", title: "Salary Management", icon: "salary", drawer: true },
-  { href: "/dashboard/materials", label: "Raw Materials", title: "Raw Materials", icon: "inventory", drawer: true },
-  { href: "/dashboard/inventory", label: "Store Inventory", title: "Store Inventory", icon: "store", drawer: true },
-  { href: "/dashboard/orders", label: "Kaariger Orders", title: "Kaariger Orders", icon: "orders", drawer: true },
-  { href: "/dashboard/records", label: "All Records", title: "All Records", icon: "list", drawer: true },
+export const BOTTOM_NAV: NavRoute[] = [
+  SIDEBAR_NAV[0],
+  SIDEBAR_NAV[1],
+  SIDEBAR_NAV[2],
+  SIDEBAR_NAV[3],
+];
+
+/** @deprecated use SIDEBAR_NAV */
+export const DRAWER_NAV = SIDEBAR_NAV;
+
+export const NAV_GROUPS: { id: NavRoute["group"]; label: string }[] = [
+  { id: "ops", label: "Operations" },
+  { id: "people", label: "People" },
+  { id: "finance", label: "Finance" },
+  { id: "catalog", label: "Catalog" },
 ];
 
 export function getRouteMeta(pathname: string): NavRoute {
-  const all = [...DRAWER_NAV, ...BOTTOM_NAV];
-  const exact = all.find((r) => r.href === pathname);
+  const exact = SIDEBAR_NAV.find((r) => r.href === pathname);
   if (exact) return exact;
   return {
     href: pathname,
@@ -69,9 +105,9 @@ export function getRouteMeta(pathname: string): NavRoute {
 
 export function greeting(): string {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good Morning";
-  if (hour < 17) return "Good Afternoon";
-  return "Good Evening";
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 export function todayHeading(): string {
@@ -84,52 +120,45 @@ export function todayHeading(): string {
 
 export const ADMIN_MODULES = [
   {
-    title: "Workers Directory",
-    description: "Add staff & kaarigers, set login passwords",
+    title: "Workers",
+    description: "Directory, roles & login access",
     href: "/dashboard/workers",
-    gradient: "from-[#0a0a0a] to-[#1a1f14]",
     icon: "groups",
   },
   {
-    title: "Attendance HQ",
-    description: "Shift times, search & monthly calendar",
+    title: "Attendance",
+    description: "Daily presence & monthly calendar",
     href: "/dashboard/attendance",
-    gradient: "from-[#151a10] to-[#1a1f14]",
     icon: "calendar",
   },
   {
-    title: "Salary Management",
-    description: "Pay staff salaries & track pending dues",
+    title: "Salary",
+    description: "Payouts, advances & dues",
     href: "/dashboard/salary",
-    gradient: "from-[#0a0a0a] to-[#2a2a0a]",
     icon: "salary",
   },
   {
     title: "Raw Materials",
-    description: "Manage stock, suppliers & minimum levels",
+    description: "Stock levels & suppliers",
     href: "/dashboard/materials",
-    gradient: "from-[#151a10] to-[#2a3318]",
     icon: "inventory",
   },
   {
     title: "Store Inventory",
-    description: "View approved finished products",
+    description: "Approved finished goods",
     href: "/dashboard/inventory",
-    gradient: "from-[#1e2418] to-[#3d4a20]",
     icon: "store",
   },
   {
     title: "Kaariger Orders",
-    description: "Create orders & record advances",
+    description: "Create orders & advances",
     href: "/dashboard/orders",
-    gradient: "from-[#0a0a0a] to-[#2a2a0a]",
     icon: "orders",
   },
   {
     title: "All Records",
-    description: "Orders, pickups, returns & export",
+    description: "Orders, pickups, returns, CSV",
     href: "/dashboard/records",
-    gradient: "from-[#121417] to-[#1a1f14]",
     icon: "list",
   },
 ];

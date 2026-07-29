@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  Banknote,
+  Calendar,
+  ChevronRight,
+  Loader2,
+  Phone,
+  User,
+  X,
+} from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Employee, PaymentTransaction } from "@/lib/types";
 import {
@@ -106,146 +115,168 @@ export default function WorkerProfilePanel({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex flex-col bg-black/50" onClick={onClose}>
-        <div
-          className="panel-slide mt-auto flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:mx-auto sm:my-auto sm:max-h-[88dvh] sm:max-w-lg sm:rounded-2xl"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="hero-gradient shrink-0 px-5 py-5 text-white">
-            <div className="flex items-start gap-4">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/15 text-xl font-black">
-                {employee.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className="text-xl font-bold capitalize">{employee.name}</h2>
-                    <p className="text-sm text-white/80">{employee.phone}</p>
-                    <span className="mt-1 inline-block rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold uppercase">
-                      {employee.role === "KAARIGER" ? "Kaariger" : "Staff"}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="rounded-lg bg-white/10 px-3 py-1 text-sm hover:bg-white/20"
+      <div
+        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div
+        className="panel-slide overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="shrink-0 border-b border-[var(--border)] bg-gradient-to-br from-ink-elevated to-ink px-5 py-5 text-white">
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-jade/20 font-display text-xl font-bold text-jade-glow">
+              {employee.name.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h2 className="font-display text-xl font-bold capitalize">{employee.name}</h2>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-sm text-white/60">
+                    <Phone size={13} />
+                    {employee.phone}
+                  </p>
+                  <span
+                    className={`mt-2 inline-block badge ${
+                      employee.role === "KAARIGER" ? "badge-gold" : "badge-success"
+                    }`}
                   >
-                    Close
-                  </button>
+                    {employee.role === "KAARIGER" ? "Kaariger" : "Staff"}
+                  </span>
                 </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="btn-icon !border-white/20 !bg-white/10 !text-white hover:!border-jade hover:!bg-jade/20"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
               </div>
             </div>
           </div>
+        </div>
 
-          <div className="attendance-panel-body p-5">
-            {loading ? (
-              <p className="py-10 text-center text-slate-500">Loading profile...</p>
-            ) : (
-              <div className="space-y-5">
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-16 text-[var(--text-muted)]">
+              <Loader2 size={24} className="animate-spin text-jade" />
+              <p className="text-sm">Loading profile...</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <section>
+                <h3 className="section-title flex items-center gap-2 text-base">
+                  <User size={16} className="text-jade-deep" />
+                  Basic Info
+                </h3>
+                <div className="mt-3 space-y-0 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40">
+                  <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
+                  {employee.role === "STAFF" && (
+                    <InfoRow
+                      label="Monthly Salary"
+                      value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
+                    />
+                  )}
+                </div>
+              </section>
+
+              {employee.role === "STAFF" && (
                 <section>
-                  <h3 className="section-title">Basic Info</h3>
-                  <div className="mt-3 space-y-2 text-sm">
-                    <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
-                    {employee.role === "STAFF" && (
-                      <InfoRow
-                        label="Monthly Salary"
-                        value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
-                      />
-                    )}
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <Banknote size={16} className="text-jade-deep" />
+                    Salary — {monthLabel(year, month)}
+                  </h3>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <StatTile
+                      label="Monthly"
+                      value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
+                    />
+                    <StatTile
+                      label="Paid"
+                      value={`₹${paidThisMonth.toLocaleString("en-IN")}`}
+                      accent="jade"
+                    />
+                    <StatTile
+                      label="Remaining"
+                      value={`₹${salaryRemaining.toLocaleString("en-IN")}`}
+                      accent="warn"
+                    />
+                    <StatTile
+                      label="Status"
+                      value={
+                        payStatus === "PAID" ? (
+                          <span className="salary-status-paid">Paid</span>
+                        ) : payStatus === "UNPAID" ? (
+                          <span className="salary-status-unpaid">Unpaid</span>
+                        ) : payStatus === "PARTIAL" ? (
+                          <span className="salary-status-partial">Partial</span>
+                        ) : (
+                          "—"
+                        )
+                      }
+                    />
                   </div>
-                </section>
-
-                {employee.role === "STAFF" && (
-                  <section>
-                    <h3 className="section-title">Salary — {monthLabel(year, month)}</h3>
-                    <div className="profile-stat-grid mt-3">
-                      <div className="profile-stat">
-                        <p className="profile-stat-value">₹{employee.monthlySalary.toLocaleString("en-IN")}</p>
-                        <p className="profile-stat-label">Monthly</p>
-                      </div>
-                      <div className="profile-stat">
-                        <p className="profile-stat-value">₹{paidThisMonth.toLocaleString("en-IN")}</p>
-                        <p className="profile-stat-label">Paid</p>
-                      </div>
-                      <div className="profile-stat">
-                        <p className="profile-stat-value">₹{salaryRemaining.toLocaleString("en-IN")}</p>
-                        <p className="profile-stat-label">Remaining</p>
-                      </div>
-                      <div className="profile-stat">
-                        <p className="profile-stat-value">
-                          {payStatus === "PAID" ? (
-                            <span className="salary-status-paid">Paid</span>
-                          ) : payStatus === "UNPAID" ? (
-                            <span className="salary-status-unpaid">Unpaid</span>
-                          ) : payStatus === "PARTIAL" ? (
-                            <span className="salary-status-partial">Partial</span>
-                          ) : (
-                            "—"
-                          )}
-                        </p>
-                        <p className="profile-stat-label">Status</p>
-                      </div>
-                    </div>
-                    {onPaySalary && payStatus !== "PAID" && employee.monthlySalary > 0 && (
-                      <button
-                        type="button"
-                        className="btn-primary mt-3 w-full"
-                        onClick={() => onPaySalary(employee)}
-                      >
-                        Pay Salary (₹{salaryRemaining.toLocaleString("en-IN")})
-                      </button>
-                    )}
-                    {recentPayments.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                          This month&apos;s payments
-                        </p>
-                        {recentPayments.map((p) => (
-                          <div key={p.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                            <span className="font-semibold">₹{p.amount.toLocaleString("en-IN")}</span>
-                            <span className="text-slate-500">
-                              {p.date} · {p.type.replace(/_/g, " ")}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                )}
-
-                <section>
-                  <div className="flex items-center justify-between">
-                    <h3 className="section-title">Attendance — {monthLabel(year, month)}</h3>
+                  {onPaySalary && payStatus !== "PAID" && employee.monthlySalary > 0 && (
                     <button
                       type="button"
-                      className="text-xs font-bold text-[var(--bliss-green)]"
-                      onClick={() => setShowCalendar(true)}
+                      className="btn btn-primary mt-3 w-full"
+                      onClick={() => onPaySalary(employee)}
                     >
-                      Open Calendar →
+                      <Banknote size={15} />
+                      Pay Salary (₹{salaryRemaining.toLocaleString("en-IN")})
                     </button>
-                  </div>
-                  <div className="profile-stat-grid mt-3">
-                    <div className="profile-stat">
-                      <p className="profile-stat-value">{monthStats.present}</p>
-                      <p className="profile-stat-label">Present</p>
+                  )}
+                  {recentPayments.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        This month&apos;s payments
+                      </p>
+                      {recentPayments.map((p) => (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm"
+                        >
+                          <span className="font-semibold text-jade-deep">
+                            ₹{p.amount.toLocaleString("en-IN")}
+                          </span>
+                          <span className="text-xs text-[var(--text-muted)]">
+                            {p.date} · {p.type.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                    <div className="profile-stat">
-                      <p className="profile-stat-value">{monthStats.late}</p>
-                      <p className="profile-stat-label">Late</p>
-                    </div>
-                    <div className="profile-stat">
-                      <p className="profile-stat-value">{monthStats.absent}</p>
-                      <p className="profile-stat-label">Absent</p>
-                    </div>
-                    <div className="profile-stat">
-                      <p className="profile-stat-value">{monthStats.rate}%</p>
-                      <p className="profile-stat-label">Rate</p>
-                    </div>
-                  </div>
+                  )}
                 </section>
-              </div>
-            )}
-          </div>
+              )}
+
+              <section>
+                <div className="flex items-center justify-between">
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <Calendar size={16} className="text-jade-deep" />
+                    Attendance — {monthLabel(year, month)}
+                  </h3>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm !px-2"
+                    onClick={() => setShowCalendar(true)}
+                  >
+                    Calendar
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <StatTile label="Present" value={String(monthStats.present)} accent="jade" />
+                  <StatTile label="Late" value={String(monthStats.late)} accent="warn" />
+                  <StatTile label="Absent" value={String(monthStats.absent)} accent="danger" />
+                  <StatTile label="Rate" value={`${monthStats.rate}%`} />
+                </div>
+              </section>
+            </div>
+          )}
         </div>
       </div>
 
@@ -262,9 +293,37 @@ export default function WorkerProfilePanel({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-4 border-b border-slate-100 py-2">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-semibold text-brand">{value}</span>
+    <div className="flex justify-between gap-4 px-4 py-3 text-sm">
+      <span className="text-[var(--text-muted)]">{label}</span>
+      <span className="font-semibold">{value}</span>
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: React.ReactNode;
+  accent?: "jade" | "warn" | "danger";
+}) {
+  const bg =
+    accent === "jade"
+      ? "bg-jade-soft"
+      : accent === "warn"
+        ? "bg-[rgba(232,168,56,0.12)]"
+        : accent === "danger"
+          ? "bg-[rgba(232,93,76,0.1)]"
+          : "bg-[var(--surface-mist)]";
+
+  return (
+    <div className={`rounded-xl ${bg} px-3 py-3 text-center`}>
+      <p className="font-display text-lg font-bold">{value}</p>
+      <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        {label}
+      </p>
     </div>
   );
 }

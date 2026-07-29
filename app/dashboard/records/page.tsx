@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
+import {
+  ArrowDownLeft,
+  CheckCircle2,
+  ClipboardList,
+  Download,
+  Truck,
+} from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { KaarigerOrder, OrderApprovalRecord, PickupRecord, ReturnRecord } from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
@@ -10,8 +17,31 @@ import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
 type Tab = "kaariger" | "approvals" | "pickups" | "returns";
 
+const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "kaariger", label: "Kaariger", icon: ClipboardList },
+  { id: "approvals", label: "Approvals", icon: CheckCircle2 },
+  { id: "pickups", label: "Pickups", icon: Truck },
+  { id: "returns", label: "Returns", icon: ArrowDownLeft },
+];
+
 function statusLabel(status: string) {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function recordStatusBadge(status: string) {
+  switch (status) {
+    case "COMPLETED":
+      return "badge badge-success";
+    case "PENDING_APPROVAL":
+      return "badge badge-warn";
+    case "IN_PROGRESS":
+    case "DELIVERED":
+      return "badge badge-gold";
+    case "CANCELLED":
+      return "badge badge-danger";
+    default:
+      return "badge badge-neutral";
+  }
 }
 
 export default function RecordsPage() {
@@ -216,103 +246,279 @@ export default function RecordsPage() {
           : filteredReturns.length;
 
   return (
-    <div className="space-y-4">
-      <PageToolbar actions={<button className="btn-secondary" onClick={exportCsv}>Export CSV</button>} />
+    <div className="stagger space-y-5">
+      <PageToolbar
+        title="Records"
+        actions={
+          <button type="button" className="btn btn-secondary" onClick={exportCsv}>
+            <Download className="h-4 w-4" />
+            Export CSV
+          </button>
+        }
+      >
+        <p className="section-sub">{count} record{count !== 1 ? "s" : ""}</p>
+      </PageToolbar>
 
       <AdminSearchBar value={search} onChange={setSearch} placeholder="Search records..." />
 
       <div className="flex flex-wrap gap-2">
-        {(["kaariger", "approvals", "pickups", "returns"] as Tab[]).map((t) => (
+        {TABS.map(({ id, label, icon: Icon }) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`filter-pill ${tab === t ? "filter-pill-active" : ""}`}
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={`filter-pill gap-1.5 ${tab === id ? "active" : ""}`}
           >
-            {t === "approvals" ? "Approvals" : t.charAt(0).toUpperCase() + t.slice(1)}
+            <Icon className="h-3.5 w-3.5" />
+            {label}
           </button>
         ))}
       </div>
 
-      <p className="text-xs font-medium text-slate-500">{count} record{count !== 1 ? "s" : ""}</p>
-
-      <div className="space-y-3">
-        {tab === "kaariger" &&
-          filteredOrders.map((o) => (
-            <div key={o.id} className="record-card">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-bold text-brand">{o.productName}</p>
-                  <p className="text-sm text-slate-500">{o.kaarigerName}</p>
+      {/* Kaariger orders — table on desktop, cards on mobile */}
+      {tab === "kaariger" && (
+        <>
+          <div className="data-table-wrap hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Kaariger</th>
+                    <th>Progress</th>
+                    <th>Status</th>
+                    <th>Verified By</th>
+                    <th className="text-right">Deal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((o) => (
+                    <tr key={o.id}>
+                      <td>
+                        <p className="font-semibold">{o.productName}</p>
+                        {o.color && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{o.color}</p>}
+                      </td>
+                      <td className="text-[var(--text-muted)]">{o.kaarigerName}</td>
+                      <td>{o.approvedQuantity} / {o.targetQuantity} pcs</td>
+                      <td><span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span></td>
+                      <td className="text-[var(--text-muted)]">{o.verifiedBy || "—"}</td>
+                      <td className="text-right font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredOrders.length === 0 && (
+              <p className="py-10 text-center text-sm text-[var(--text-muted)]">No records found.</p>
+            )}
+          </div>
+          <div className="space-y-3 lg:hidden">
+            {filteredOrders.map((o) => (
+              <div key={o.id} className="record-card">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-display font-bold">{o.productName}</p>
+                    <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
+                  </div>
+                  <span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span>
                 </div>
-                <span className="rounded-full bg-[var(--bliss-green-surface)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--bliss-green-dark)]">
-                  {statusLabel(o.status)}
-                </span>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <Field label="Progress" value={`${o.approvedQuantity} / ${o.targetQuantity} pcs`} />
+                  <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
+                  <Field label="Verified By" value={o.verifiedBy || "—"} />
+                  {o.color && <Field label="Color" value={o.color} />}
+                </div>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <Field label="Progress" value={`${o.approvedQuantity} / ${o.targetQuantity} pcs`} />
-                <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
-                <Field label="Verified By" value={o.verifiedBy || "—"} />
-                {o.color && <Field label="Color" value={o.color} />}
-              </div>
-            </div>
-          ))}
+            ))}
+            {filteredOrders.length === 0 && (
+              <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
+            )}
+          </div>
+        </>
+      )}
 
-        {tab === "approvals" &&
-          filteredApprovals.map((a) => (
-            <div key={a.id} className="record-card">
-              <p className="font-bold text-brand">{a.productName}</p>
-              <p className="text-sm text-slate-500">{a.kaarigerName}</p>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <Field label="Batch" value={`${a.batchQuantity} pcs`} />
-                <Field label="Progress" value={`${a.approvedTotalAfter}/${a.targetQuantity}`} />
-                <Field label="Approved By" value={a.verifiedByName} />
-                <Field
-                  label="Date"
-                  value={new Date(a.verifiedAt).toLocaleDateString("en-IN", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  })}
-                />
-              </div>
+      {/* Approvals */}
+      {tab === "approvals" && (
+        <>
+          <div className="data-table-wrap hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Kaariger</th>
+                    <th>Batch</th>
+                    <th>Progress</th>
+                    <th>Approved By</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredApprovals.map((a) => (
+                    <tr key={a.id}>
+                      <td className="font-semibold">{a.productName}</td>
+                      <td className="text-[var(--text-muted)]">{a.kaarigerName}</td>
+                      <td>{a.batchQuantity} pcs</td>
+                      <td>{a.approvedTotalAfter}/{a.targetQuantity}</td>
+                      <td>
+                        <p>{a.verifiedByName}</p>
+                        <p className="text-xs text-[var(--text-muted)]">{a.verifiedByPhone}</p>
+                      </td>
+                      <td className="text-[var(--text-muted)]">
+                        {new Date(a.verifiedAt).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
-
-        {tab === "pickups" &&
-          filteredPickups.map((p) => (
-            <div key={p.id} className="record-card">
-              <p className="font-bold text-brand">
-                {p.productName} {p.color ? `(${p.color})` : ""}
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <Field label="Partner" value={p.partner} />
-                <Field label="Quantity" value={String(p.quantity)} />
-                <Field label="Staff" value={p.staffName} />
-                <Field label="Date" value={`${p.date} ${p.time}`} />
+            {filteredApprovals.length === 0 && (
+              <p className="py-10 text-center text-sm text-[var(--text-muted)]">No records found.</p>
+            )}
+          </div>
+          <div className="space-y-3 lg:hidden">
+            {filteredApprovals.map((a) => (
+              <div key={a.id} className="record-card">
+                <p className="font-display font-bold">{a.productName}</p>
+                <p className="text-sm text-[var(--text-muted)]">{a.kaarigerName}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <Field label="Batch" value={`${a.batchQuantity} pcs`} />
+                  <Field label="Progress" value={`${a.approvedTotalAfter}/${a.targetQuantity}`} />
+                  <Field label="Approved By" value={a.verifiedByName} />
+                  <Field
+                    label="Date"
+                    value={new Date(a.verifiedAt).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+            {filteredApprovals.length === 0 && (
+              <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
+            )}
+          </div>
+        </>
+      )}
 
-        {tab === "returns" &&
-          filteredReturns.map((r) => (
-            <div key={r.id} className="record-card">
-              <p className="font-bold text-brand">
-                {r.productName} {r.color ? `(${r.color})` : ""}
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <Field label="Type" value={r.returnType} />
-                <Field label="Partner" value={r.partner} />
-                <Field label="Quantity" value={String(r.quantity)} />
-                <Field label="Staff" value={r.staffName} />
-                {r.notes && <Field label="Notes" value={r.notes} />}
+      {/* Pickups */}
+      {tab === "pickups" && (
+        <>
+          <div className="data-table-wrap hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Color</th>
+                    <th>Qty</th>
+                    <th>Partner</th>
+                    <th>Staff</th>
+                    <th>Date & Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPickups.map((p) => (
+                    <tr key={p.id}>
+                      <td className="font-semibold">{p.productName}</td>
+                      <td>{p.color || "—"}</td>
+                      <td>{p.quantity}</td>
+                      <td className="text-[var(--text-muted)]">{p.partner}</td>
+                      <td>{p.staffName}</td>
+                      <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredPickups.length === 0 && (
+              <p className="py-10 text-center text-sm text-[var(--text-muted)]">No records found.</p>
+            )}
+          </div>
+          <div className="space-y-3 lg:hidden">
+            {filteredPickups.map((p) => (
+              <div key={p.id} className="record-card">
+                <p className="font-display font-bold">
+                  {p.productName} {p.color ? `(${p.color})` : ""}
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <Field label="Partner" value={p.partner} />
+                  <Field label="Quantity" value={String(p.quantity)} />
+                  <Field label="Staff" value={p.staffName} />
+                  <Field label="Date" value={`${p.date} ${p.time}`} />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+            {filteredPickups.length === 0 && (
+              <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
+            )}
+          </div>
+        </>
+      )}
 
-        {count === 0 && (
-          <div className="card py-10 text-center text-sm text-slate-500">No records found.</div>
-        )}
-      </div>
+      {/* Returns */}
+      {tab === "returns" && (
+        <>
+          <div className="data-table-wrap hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Color</th>
+                    <th>Qty</th>
+                    <th>Type</th>
+                    <th>Partner</th>
+                    <th>Staff</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReturns.map((r) => (
+                    <tr key={r.id}>
+                      <td className="font-semibold">{r.productName}</td>
+                      <td>{r.color || "—"}</td>
+                      <td>{r.quantity}</td>
+                      <td><span className="badge badge-neutral">{r.returnType}</span></td>
+                      <td className="text-[var(--text-muted)]">{r.partner}</td>
+                      <td>{r.staffName}</td>
+                      <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredReturns.length === 0 && (
+              <p className="py-10 text-center text-sm text-[var(--text-muted)]">No records found.</p>
+            )}
+          </div>
+          <div className="space-y-3 lg:hidden">
+            {filteredReturns.map((r) => (
+              <div key={r.id} className="record-card">
+                <p className="font-display font-bold">
+                  {r.productName} {r.color ? `(${r.color})` : ""}
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <Field label="Type" value={r.returnType} />
+                  <Field label="Partner" value={r.partner} />
+                  <Field label="Quantity" value={String(r.quantity)} />
+                  <Field label="Staff" value={r.staffName} />
+                  {r.notes && <Field label="Notes" value={r.notes} />}
+                </div>
+              </div>
+            ))}
+            {filteredReturns.length === 0 && (
+              <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -320,8 +526,8 @@ export default function RecordsPage() {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="record-card-label">{label}</p>
-      <p className="record-card-value">{value}</p>
+      <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{label}</p>
+      <p className="mt-0.5 font-medium">{value}</p>
     </div>
   );
 }

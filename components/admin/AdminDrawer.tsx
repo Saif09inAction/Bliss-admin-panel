@@ -2,86 +2,76 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { DRAWER_NAV } from "@/lib/navigation";
-import { NavIcon } from "./NavIcon";
-import type { AdminSession } from "@/lib/types";
+import { LogOut, X } from "lucide-react";
+import { SIDEBAR_NAV } from "@/lib/navigation";
+import NavIcon from "./NavIcon";
 
-interface Props {
+type Props = {
   open: boolean;
   onClose: () => void;
-  session: AdminSession;
+  session: { name: string; phone: string };
   onLogout: () => void;
-}
+};
 
 export default function AdminDrawer({ open, onClose, session, onLogout }: Props) {
   const pathname = usePathname();
+  if (!open) return null;
 
   return (
     <>
-      <div
-        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
-        onClick={onClose}
-      />
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(300px,85vw)] flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="drawer-header shrink-0 px-6 pb-6 text-white">
-          <div className="flex items-center gap-3">
-            <div className="bb-monogram !mx-0 !h-12 !w-12 !text-3xl" aria-hidden />
-            <div>
-              <p className="text-xl font-black tracking-widest text-[var(--bliss-green-light)]">BLISS</p>
-              <p className="text-[10px] font-bold tracking-[0.35em] text-[var(--bliss-gold)]">BOMBAY</p>
+      <button type="button" className="drawer-backdrop" aria-label="Close menu" onClick={onClose} />
+      <div className="drawer-panel" role="dialog" aria-modal>
+        <div className="drawer-header flex items-start justify-between gap-3">
+          <div>
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-jade to-jade-deep">
+              <span className="font-display text-sm font-extrabold text-ink">BB</span>
             </div>
+            <p className="font-display text-base font-bold text-white">{session.name}</p>
+            <p className="text-xs text-white/45">{session.phone}</p>
           </div>
-          <p className="mt-2 text-xs uppercase tracking-widest text-white/50">Admin Panel</p>
-          <div className="mt-5 flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--bliss-gold)]/40 bg-[var(--bliss-green)]/20 text-xl font-black text-[var(--bliss-green-light)]">
-              {session.name.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <p className="font-bold">{session.name}</p>
-              <p className="text-sm text-[var(--bliss-gold)]">ADMIN</p>
-              <p className="text-xs text-white/60">Phone: {session.phone}</p>
-            </div>
-          </div>
+          <button type="button" onClick={onClose} className="rounded-full bg-white/5 p-2 text-white/60 hover:bg-white/10">
+            <X size={18} />
+          </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-3">
-          {DRAWER_NAV.map((item) => {
-            const active = pathname === item.href;
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+          {SIDEBAR_NAV.map((item) => {
+            const active =
+              item.href === "/dashboard"
+                ? pathname === "/dashboard"
+                : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
-                className={`drawer-nav-item ${active ? "drawer-nav-active" : ""}`}
+                className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${
+                  active
+                    ? "bg-jade/15 text-white ring-1 ring-jade/30"
+                    : "text-white/55 hover:bg-white/[0.04] hover:text-white"
+                }`}
               >
-                <NavIcon
-                  name={item.icon}
-                  className={`h-5 w-5 ${active ? "text-[var(--bliss-green-light)]" : "text-slate-500"}`}
-                />
+                <NavIcon name={item.icon} size={17} />
                 {item.label}
               </Link>
             );
           })}
         </nav>
 
-        <div className="border-t border-slate-100 p-3">
+        <div className="border-t border-white/5 p-4">
           <button
             type="button"
             onClick={() => {
               onClose();
               onLogout();
             }}
-            className="flex w-full items-center gap-4 rounded-full px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/5 py-3 text-sm font-semibold text-white/70"
           >
-            <NavIcon name="logout" className="h-5 w-5" />
-            Logout
+            <LogOut size={15} />
+            Sign out
           </button>
         </div>
-      </aside>
+      </div>
     </>
   );
 }

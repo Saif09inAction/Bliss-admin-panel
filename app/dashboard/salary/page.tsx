@@ -2,10 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDocs, setDoc } from "firebase/firestore";
+import { motion } from "framer-motion";
+import {
+  AlertCircle,
+  Banknote,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  X,
+} from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Employee, PaymentTransaction } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import PageToolbar from "@/components/admin/PageToolbar";
 import {
   currentMonthParts,
   monthKey,
@@ -20,6 +32,21 @@ import {
 
 function newPaymentId() {
   return `pay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function StatusBadge({ status }: { status: ReturnType<typeof salaryStatus> }) {
+  if (status === "PAID") return <span className="salary-status-paid">Paid</span>;
+  if (status === "UNPAID") return <span className="salary-status-unpaid">Unpaid</span>;
+  if (status === "PARTIAL") return <span className="salary-status-partial">Partial</span>;
+  return null;
+}
+
+function WorkerAvatar({ name }: { name: string }) {
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-jade-soft font-display text-xs font-bold text-jade-deep">
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
 }
 
 export default function SalaryPage() {
@@ -161,38 +188,78 @@ export default function SalaryPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+    <div className="space-y-5">
+      <PageToolbar title="Salary">
+        <p className="section-sub">
+          {staff.length} staff · {summary.unpaidCount} pending this month
+        </p>
+      </PageToolbar>
+
+      {/* Summary stats */}
+      <div className="grid gap-3 sm:grid-cols-3">
         <div className="stat-card">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Paid This Month</p>
-          <p className="stat-card-value">₹{summary.totalPaid.toLocaleString("en-IN")}</p>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-jade-soft">
+              <CheckCircle2 size={16} className="text-jade-deep" />
+            </div>
+            <p className="stat-card-label !mt-0">Paid This Month</p>
+          </div>
+          <p className="stat-card-value mt-2">₹{summary.totalPaid.toLocaleString("en-IN")}</p>
         </div>
         <div className="stat-card">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Pending Dues</p>
-          <p className="stat-card-value">₹{summary.totalDue.toLocaleString("en-IN")}</p>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(232,168,56,0.15)]">
+              <Clock size={16} className="text-warning" />
+            </div>
+            <p className="stat-card-label !mt-0">Pending Dues</p>
+          </div>
+          <p className="stat-card-value mt-2">₹{summary.totalDue.toLocaleString("en-IN")}</p>
+        </div>
+        <div className="stat-card sm:col-span-1">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(232,93,76,0.1)]">
+              <AlertCircle size={16} className="text-danger" />
+            </div>
+            <p className="stat-card-label !mt-0">Unpaid Staff</p>
+          </div>
+          <p className="stat-card-value mt-2">{summary.unpaidCount}</p>
         </div>
       </div>
 
-      <div className="card">
-        <div className="mb-4 flex items-center justify-between">
-          <button type="button" className="btn-secondary !px-3 !py-1" onClick={() => shiftMonth(-1)}>
-            ←
+      {/* Month navigator + filters */}
+      <div className="surface space-y-4 p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-4">
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => shiftMonth(-1)}
+            aria-label="Previous month"
+          >
+            <ChevronLeft size={18} />
           </button>
-          <h2 className="font-bold text-brand">{monthLabel(year, month)}</h2>
-          <button type="button" className="btn-secondary !px-3 !py-1" onClick={() => shiftMonth(1)}>
-            →
+          <div className="flex items-center gap-2 text-center">
+            <CalendarDays size={18} className="text-jade-deep" />
+            <h2 className="font-display text-lg font-bold">{monthLabel(year, month)}</h2>
+          </div>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => shiftMonth(1)}
+            aria-label="Next month"
+          >
+            <ChevronRight size={18} />
           </button>
         </div>
 
         <AdminSearchBar value={search} onChange={setSearch} placeholder="Search staff..." />
 
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           {(["ALL", "PAID", "UNPAID", "PARTIAL"] as SalaryFilter[]).map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setFilter(f)}
-              className={`filter-pill ${filter === f ? "filter-pill-active" : ""}`}
+              className={`filter-pill ${filter === f ? "active" : ""}`}
             >
               {f === "ALL" ? "All" : f.charAt(0) + f.slice(1).toLowerCase()}
             </button>
@@ -201,106 +268,197 @@ export default function SalaryPage() {
       </div>
 
       {msg && (
-        <p className={`text-sm ${msg.includes("recorded") ? "text-emerald-600" : "text-red-600"}`}>{msg}</p>
+        <div
+          className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
+            msg.includes("recorded")
+              ? "bg-jade-soft text-jade-deep"
+              : "bg-red-50 text-danger"
+          }`}
+        >
+          {msg.includes("recorded") ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {msg}
+        </div>
       )}
 
-      <div className="space-y-3">
-        {rows.map(({ employee, paid, status, remaining }) => (
-          <div key={employee.phone} className="worker-card">
+      {/* Desktop table */}
+      <div className="hidden lg:block data-table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Staff Member</th>
+              <th>Monthly Salary</th>
+              <th>Paid</th>
+              <th>Due</th>
+              <th>Status</th>
+              <th className="text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ employee, paid, status, remaining }) => (
+              <tr key={employee.phone}>
+                <td>
+                  <div className="flex items-center gap-3">
+                    <WorkerAvatar name={employee.name} />
+                    <div>
+                      <p className="font-semibold capitalize">{employee.name}</p>
+                      <p className="text-xs text-[var(--text-muted)]">{employee.phone}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="font-medium">₹{employee.monthlySalary.toLocaleString("en-IN")}</td>
+                <td className="font-medium text-jade-deep">₹{paid.toLocaleString("en-IN")}</td>
+                <td className="font-medium text-warning">₹{remaining.toLocaleString("en-IN")}</td>
+                <td>
+                  <StatusBadge status={status} />
+                </td>
+                <td className="text-right">
+                  {status !== "PAID" && employee.monthlySalary > 0 ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => openPay(employee)}
+                    >
+                      <Banknote size={14} />
+                      Pay ₹{remaining.toLocaleString("en-IN")}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-[var(--text-faint)]">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <p className="py-12 text-center text-sm text-[var(--text-muted)]">No staff match your filters.</p>
+        )}
+      </div>
+
+      {/* Mobile / tablet cards */}
+      <div className="stagger grid gap-3 sm:grid-cols-2 lg:hidden">
+        {rows.map(({ employee, paid, status, remaining }, i) => (
+          <motion.div
+            key={employee.phone}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.03 }}
+            className="surface p-4"
+          >
             <div className="flex items-start gap-3">
-              <div className="worker-avatar">{employee.name.charAt(0).toUpperCase()}</div>
+              <WorkerAvatar name={employee.name} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-bold capitalize text-brand">{employee.name}</p>
-                    <p className="text-sm text-slate-500">{employee.phone}</p>
+                    <p className="font-display font-bold capitalize">{employee.name}</p>
+                    <p className="text-sm text-[var(--text-muted)]">{employee.phone}</p>
                   </div>
-                  {status === "PAID" ? (
-                    <span className="salary-status-paid">Paid</span>
-                  ) : status === "UNPAID" ? (
-                    <span className="salary-status-unpaid">Unpaid</span>
-                  ) : status === "PARTIAL" ? (
-                    <span className="salary-status-partial">Partial</span>
-                  ) : null}
+                  <StatusBadge status={status} />
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg bg-slate-50 py-2">
-                    <p className="font-bold text-brand">₹{employee.monthlySalary.toLocaleString("en-IN")}</p>
-                    <p className="text-slate-400">Salary</p>
+                  <div className="rounded-xl bg-[var(--surface-mist)] py-2">
+                    <p className="font-bold">₹{employee.monthlySalary.toLocaleString("en-IN")}</p>
+                    <p className="text-[var(--text-faint)]">Salary</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 py-2">
-                    <p className="font-bold text-emerald-700">₹{paid.toLocaleString("en-IN")}</p>
-                    <p className="text-slate-400">Paid</p>
+                  <div className="rounded-xl bg-jade-soft py-2">
+                    <p className="font-bold text-jade-deep">₹{paid.toLocaleString("en-IN")}</p>
+                    <p className="text-[var(--text-faint)]">Paid</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 py-2">
-                    <p className="font-bold text-amber-700">₹{remaining.toLocaleString("en-IN")}</p>
-                    <p className="text-slate-400">Due</p>
+                  <div className="rounded-xl bg-[rgba(232,168,56,0.12)] py-2">
+                    <p className="font-bold text-warning">₹{remaining.toLocaleString("en-IN")}</p>
+                    <p className="text-[var(--text-faint)]">Due</p>
                   </div>
                 </div>
                 {status !== "PAID" && employee.monthlySalary > 0 && (
                   <button
                     type="button"
-                    className="btn-primary mt-3 w-full"
+                    className="btn btn-primary mt-3 w-full"
                     onClick={() => openPay(employee)}
                   >
+                    <Banknote size={15} />
                     Pay ₹{remaining.toLocaleString("en-IN")}
                   </button>
                 )}
               </div>
             </div>
-          </div>
+          </motion.div>
         ))}
 
         {rows.length === 0 && (
-          <div className="card py-10 text-center text-sm text-slate-500">
-            No staff match your filters.
+          <div className="surface col-span-full py-12 text-center sm:col-span-2">
+            <p className="text-sm text-[var(--text-muted)]">No staff match your filters.</p>
           </div>
         )}
       </div>
 
+      {/* Pay salary modal */}
       {payTarget && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <form
-            onSubmit={submitPayment}
-            className="panel-slide w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-bold text-brand">Pay Salary</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              {payTarget.name} · {monthLabel(year, month)}
-            </p>
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="label">Amount (₹)</label>
-                <input
-                  className="input"
-                  type="number"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  required
-                  min={1}
-                />
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+            onClick={() => setPayTarget(null)}
+            aria-hidden
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <form
+              onSubmit={submitPayment}
+              className="surface w-full max-w-md space-y-5 p-5 sm:p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-xl font-bold">Pay Salary</h3>
+                  <p className="mt-1 text-sm text-[var(--text-muted)]">
+                    {payTarget.name} · {monthLabel(year, month)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-icon !h-9 !w-9 shrink-0"
+                  onClick={() => setPayTarget(null)}
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <div>
-                <label className="label">Remarks (optional)</label>
-                <input
-                  className="input"
-                  value={payRemarks}
-                  onChange={(e) => setPayRemarks(e.target.value)}
-                  placeholder="e.g. July salary"
-                />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="label">Amount (₹)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    required
+                    min={1}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="label">Remarks (optional)</label>
+                  <input
+                    className="input"
+                    value={payRemarks}
+                    onChange={(e) => setPayRemarks(e.target.value)}
+                    placeholder="e.g. July salary"
+                  />
+                </div>
               </div>
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button type="button" className="btn-secondary flex-1" onClick={() => setPayTarget(null)}>
-                Cancel
-              </button>
-              <button type="submit" className="btn-primary flex-1" disabled={saving}>
-                {saving ? "Saving..." : "Confirm Payment"}
-              </button>
-            </div>
-          </form>
-        </div>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  className="btn btn-secondary flex-1"
+                  onClick={() => setPayTarget(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={saving}>
+                  {saving ? "Saving..." : "Confirm Payment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
       )}
     </div>
   );

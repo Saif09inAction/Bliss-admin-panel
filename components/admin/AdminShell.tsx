@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
 import { getRouteMeta, greeting, todayHeading } from "@/lib/navigation";
 import AdminDrawer from "./AdminDrawer";
 import FloatingBottomNav from "./FloatingBottomNav";
+import Sidebar from "./Sidebar";
 import TopAppBar from "./TopAppBar";
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
@@ -17,30 +19,33 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   const subtitle =
     pathname === "/dashboard"
-      ? `${greeting()} • ${todayHeading()}`
+      ? `${greeting()} · ${todayHeading()}`
       : meta.subtitle;
-
-  useEffect(() => {
-    document.documentElement.classList.add("admin-active");
-    return () => document.documentElement.classList.remove("admin-active");
-  }, []);
 
   if (!session) return null;
 
+  function handleLogout() {
+    logout();
+    router.replace("/");
+  }
+
   return (
-    <div className="admin-app">
-      <div className="admin-frame">
+    <div className="atrium-app">
+      <div className="atrium-shell">
+        <Sidebar
+          sessionName={session.name || "Admin"}
+          sessionPhone={session.phone}
+          onLogout={handleLogout}
+        />
+
         <AdminDrawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           session={session}
-          onLogout={() => {
-            logout();
-            router.replace("/");
-          }}
+          onLogout={handleLogout}
         />
 
-        <div className="admin-topbar">
+        <div className="atrium-main">
           <TopAppBar
             title={meta.title}
             subtitle={subtitle}
@@ -48,13 +53,23 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             onBackClick={() => router.push("/dashboard")}
             onMenuClick={() => setDrawerOpen(true)}
           />
+
+          <main className="atrium-content">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={pathname}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {children}
+              </motion.div>
+            </AnimatePresence>
+          </main>
+
+          <FloatingBottomNav />
         </div>
-
-        <main className="admin-scroll">
-          <div className="admin-content">{children}</div>
-        </main>
-
-        <FloatingBottomNav />
       </div>
     </div>
   );

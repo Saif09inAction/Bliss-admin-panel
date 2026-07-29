@@ -2,43 +2,34 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "framer-motion";
 import { BOTTOM_NAV } from "@/lib/navigation";
-import { NavIcon } from "./NavIcon";
+import NavIcon from "./NavIcon";
 
 export default function FloatingBottomNav() {
   const pathname = usePathname();
-  const activeIndex = BOTTOM_NAV.findIndex((item) => item.href === pathname);
-  const index = activeIndex >= 0 ? activeIndex : 0;
-  const pillLeft = `calc(${(index / BOTTOM_NAV.length) * 100}% + 4px)`;
-  const pillWidth = `calc(${100 / BOTTOM_NAV.length}% - 8px)`;
 
   return (
-    <div className="bottom-nav-wrap">
-      <nav className="floating-bottom-nav">
-        {activeIndex >= 0 && (
-          <div className="nav-pill" style={{ left: pillLeft, width: pillWidth }} />
-        )}
-        {BOTTOM_NAV.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`nav-tab ${active ? "nav-tab-active" : ""}`}
-            >
-              <NavIcon
-                name={item.icon}
-                className={`h-[22px] w-[22px] transition-transform ${active ? "scale-110 text-[var(--bliss-green-light)]" : "text-white/50"}`}
+    <nav className="floating-bottom-nav" aria-label="Primary">
+      {BOTTOM_NAV.map((item) => {
+        const active =
+          item.href === "/dashboard"
+            ? pathname === "/dashboard"
+            : pathname.startsWith(item.href);
+        return (
+          <Link key={item.href} href={item.href} className={`dock-item ${active ? "active" : ""}`}>
+            {active && (
+              <motion.span
+                layoutId="dock-indicator"
+                className="dock-indicator"
+                transition={{ type: "spring", stiffness: 420, damping: 32 }}
               />
-              <span
-                className={`text-[10px] font-medium ${active ? "font-bold text-[var(--bliss-green-light)]" : "text-white/50"}`}
-              >
-                {item.label}
-              </span>
-            </Link>
-          );
-        })}
-      </nav>
-    </div>
+            )}
+            <NavIcon name={item.icon} size={20} />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

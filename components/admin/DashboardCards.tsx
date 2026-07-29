@@ -1,22 +1,57 @@
+"use client";
+
 import Link from "next/link";
-import { NavIcon } from "./NavIcon";
+import { motion } from "framer-motion";
+import NavIcon from "./NavIcon";
 
 export function StatCard({
   title,
   value,
   icon,
+  hint,
+  accent,
 }: {
   title: string;
   value: string | number;
   icon: string;
+  hint?: string;
+  accent?: "jade" | "bronze" | "warn" | "danger";
 }) {
+  const glow =
+    accent === "bronze"
+      ? "from-bronze/20"
+      : accent === "warn"
+        ? "from-warning/20"
+        : accent === "danger"
+          ? "from-danger/20"
+          : "from-jade/20";
+
   return (
-    <div className="stat-card">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
-        <NavIcon name={icon} className="h-5 w-5 shrink-0 text-[var(--bliss-gold)]" />
+    <motion.div
+      whileHover={{ y: -3 }}
+      transition={{ type: "spring", stiffness: 400, damping: 28 }}
+      className="stat-card relative"
+    >
+      <div className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br ${glow} to-transparent blur-2xl`} />
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <p className="stat-card-label">{title}</p>
+          <p className="stat-card-value mt-2">{value}</p>
+          {hint && <p className="mt-1 text-xs text-[var(--text-faint)]">{hint}</p>}
+        </div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--jade-soft)] text-[var(--jade-deep)]">
+          <NavIcon name={icon} size={18} />
+        </div>
       </div>
-      <p className="stat-card-value">{value}</p>
+    </motion.div>
+  );
+}
+
+export function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div className="section-header">
+      <h2 className="section-title">{title}</h2>
+      {subtitle && <p className="section-sub">{subtitle}</p>}
     </div>
   );
 }
@@ -33,40 +68,17 @@ export function ModuleRow({
   icon: string;
 }) {
   return (
-    <Link href={href} className="module-row">
-      <div className="module-row-icon">
-        <NavIcon name={icon} className="h-6 w-6" />
+    <Link href={href} className="module-row group">
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-ink text-jade transition group-hover:scale-105 group-hover:shadow-glow">
+        <NavIcon name={icon} size={18} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="module-row-title">{title}</p>
-        <p className="module-row-desc">{description}</p>
+        <p className="font-semibold text-[var(--text)]">{title}</p>
+        <p className="truncate text-xs text-[var(--text-muted)]">{description}</p>
       </div>
-      <NavIcon name="chevron" className="h-5 w-5 shrink-0 text-[var(--bliss-green)]" />
+      <span className="text-[var(--text-faint)] transition group-hover:translate-x-0.5 group-hover:text-jade-deep">
+        →
+      </span>
     </Link>
   );
-}
-
-export function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <div className="mb-3 mt-1">
-      <h2 className="section-title">{title}</h2>
-      {subtitle && <p className="section-sub">{subtitle}</p>}
-    </div>
-  );
-}
-
-/** @deprecated use ModuleRow */
-export function ModuleCard({
-  title,
-  description,
-  href,
-  icon,
-}: {
-  title: string;
-  description: string;
-  href: string;
-  gradient?: string;
-  icon: string;
-}) {
-  return <ModuleRow title={title} description={description} href={href} icon={icon} />;
 }

@@ -15,9 +15,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !session) {
     return (
-      <div className="admin-app">
-        <div className="admin-frame flex items-center justify-center bg-[#F7F9FC] text-slate-500">
-          Loading...
+      <div className="atrium-app flex min-h-dvh items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-pulseSoft rounded-2xl bg-jade/30" />
+          <p className="text-sm text-white/40">Loading studio…</p>
         </div>
       </div>
     );
