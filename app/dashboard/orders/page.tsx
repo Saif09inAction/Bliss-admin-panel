@@ -15,7 +15,6 @@ import {
   Package,
   Plus,
   Trash2,
-  User,
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
@@ -55,6 +54,7 @@ export default function OrdersPage() {
   const [payments, setPayments] = useState<KaarigerPayment[]>([]);
   const [paymentForm, setPaymentForm] = useState({ amount: "", remarks: "" });
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "DONE">("ALL");
 
   const [form, setForm] = useState({
     kaarigerId: "",
@@ -267,15 +267,48 @@ export default function OrdersPage() {
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter(
-      (o) =>
-        o.productName.toLowerCase().includes(q) ||
-        o.kaarigerName.toLowerCase().includes(q) ||
-        o.status.toLowerCase().includes(q) ||
-        o.color.toLowerCase().includes(q)
-    );
-  }, [orders, search]);
+    const rank = (status: string) => {
+      switch (status) {
+        case "PENDING_APPROVAL":
+          return 0;
+        case "ASSIGNED":
+          return 1;
+        case "IN_PROGRESS":
+          return 2;
+        case "DELIVERED":
+          return 3;
+        case "COMPLETED":
+          return 4;
+        case "CANCELLED":
+          return 5;
+        default:
+          return 6;
+      }
+    };
+    const isActive = (s: string) =>
+      s === "PENDING_APPROVAL" || s === "ASSIGNED" || s === "IN_PROGRESS" || s === "DELIVERED";
+
+    return orders
+      .filter((o) => {
+        const matchSearch =
+          !q ||
+          o.productName.toLowerCase().includes(q) ||
+          o.kaarigerName.toLowerCase().includes(q) ||
+          o.status.toLowerCase().includes(q) ||
+          o.color.toLowerCase().includes(q);
+        const matchStatus =
+          statusFilter === "ALL" ||
+          (statusFilter === "ACTIVE" && isActive(o.status)) ||
+          (statusFilter === "DONE" && (o.status === "COMPLETED" || o.status === "CANCELLED"));
+        return matchSearch && matchStatus;
+      })
+      .sort((a, b) => {
+        const ra = rank(a.status);
+        const rb = rank(b.status);
+        if (ra !== rb) return ra - rb;
+        return b.createdAt - a.createdAt;
+      });
+  }, [orders, search, statusFilter]);
 
   const previewTotal = (() => {
     const qty = Number(form.targetQuantity) || 0;
@@ -454,6 +487,25 @@ export default function OrdersPage() {
         placeholder="Search orders by product, kaariger, status..."
       />
 
+      <div className="mobile-chip-scroll flex flex-wrap gap-2">
+        {(
+          [
+            { id: "ALL" as const, label: "All" },
+            { id: "ACTIVE" as const, label: "Needs action" },
+            { id: "DONE" as const, label: "Completed" },
+          ] as const
+        ).map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setStatusFilter(f.id)}
+            className={`filter-pill ${statusFilter === f.id ? "active" : ""}`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
         {/* Form — always visible on desktop, toggle on mobile */}
         <div className={`${showForm ? "block" : "hidden"} lg:block`}>
@@ -506,40 +558,53 @@ export default function OrdersPage() {
           </div>
 
           {/* Mobile cards */}
-          <div className="space-y-3 md:hidden">
-            {filteredOrders.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                className={`record-card w-full text-left transition ${selectedOrder === o.id ? "ring-2 ring-[var(--jade)]" : ""}`}
-                onClick={() => setSelectedOrder(o.id)}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-display font-bold">{o.productName}</p>
-                    <p className="mt-0.5 flex items-center gap-1 text-sm text-[var(--text-muted)]">
-                      <User className="h-3.5 w-3.5" />
-                      {o.kaarigerName}
+          <div className="md:hidden">
+            <p className="mobile-section-label">
+              {statusFilter === "ACTIVE"
+                ? "Needs action first"
+                : statusFilter === "DONE"
+                  ? "Finished orders"
+                  : "Active first · newest"}
+            </p>
+            <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+              {filteredOrders.map((o, idx) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  className={`mobile-row w-full text-left ${idx < filteredOrders.length - 1 ? "" : "!border-b-0"}`}
+                  onClick={() => setSelectedOrder(o.id)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate font-semibold">{o.productName}</p>
+                      <span className={`${orderStatusBadge(o.status)} shrink-0`}>{statusLabel(o.status)}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                      {o.kaarigerName} · {o.approvedQuantity}/{o.targetQuantity} pcs · ₹
+                      {o.totalDealAmount.toLocaleString("en-IN")}
                     </p>
                   </div>
-                  <span className={orderStatusBadge(o.status)}>{statusLabel(o.status)}</span>
-                </div>
-                <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3 text-sm">
-                  <span className="text-[var(--text-muted)]">{o.approvedQuantity}/{o.targetQuantity} pcs</span>
-                  <span className="font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</span>
-                </div>
-              </button>
-            ))}
-            {filteredOrders.length === 0 && (
-              <div className="card py-10 text-center text-sm text-[var(--text-muted)]">
-                {search ? "No orders match your search." : "No orders yet."}
-              </div>
-            )}
+                </button>
+              ))}
+              {filteredOrders.length === 0 && (
+                <p className="py-10 text-center text-sm text-[var(--text-muted)]">
+                  {search ? "No orders match your search." : "No orders yet."}
+                </p>
+              )}
+            </div>
           </div>
 
-          {/* Selected order detail + advances */}
+          {/* Selected order detail — sheet on mobile, inline on desktop */}
           {selected && (
-            <div className="card space-y-5">
+            <>
+              <button
+                type="button"
+                className="fixed inset-0 z-40 bg-black/45 md:hidden"
+                aria-label="Close order detail"
+                onClick={() => setSelectedOrder(null)}
+              />
+              <div className="card space-y-5 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-50 max-md:max-h-[88vh] max-md:overflow-y-auto max-md:rounded-b-none max-md:rounded-t-3xl max-md:pb-[calc(1.25rem+env(safe-area-inset-bottom))] max-md:shadow-[0_-12px_40px_rgba(6,17,13,0.18)]">
+                <div className="mx-auto mb-1 hidden h-1 w-10 rounded-full bg-[var(--border-strong)] max-md:block" />
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -671,6 +736,7 @@ export default function OrdersPage() {
                 </form>
               </div>
             </div>
+            </>
           )}
         </div>
       </div>

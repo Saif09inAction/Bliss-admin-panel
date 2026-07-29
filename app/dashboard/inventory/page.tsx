@@ -8,7 +8,7 @@ import {
   onSnapshot,
   setDoc,
 } from "firebase/firestore";
-import { Boxes, Package, Palette, Plus, Trash2, User, X } from "lucide-react";
+import { Boxes, Package, Palette, Plus, Trash2, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { FinishedProduct } from "@/lib/types";
@@ -53,7 +53,11 @@ export default function InventoryPage() {
               orderId: data.orderId as string | undefined,
             };
           })
-          .sort((a, b) => b.lastUpdatedTime - a.lastUpdatedTime)
+          .sort((a, b) => {
+            const byName = a.name.localeCompare(b.name);
+            if (byName !== 0) return byName;
+            return a.color.localeCompare(b.color);
+          })
       );
     });
     return () => unsub();
@@ -271,66 +275,50 @@ export default function InventoryPage() {
         )}
       </div>
 
-      <div className="space-y-3 md:hidden">
-        {filtered.map((p) => (
-          <div key={p.id} className="record-card">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="font-display font-bold">{p.name}</p>
-                {p.color && <span className="badge badge-neutral mt-1.5">{p.color}</span>}
-              </div>
-              <div className="text-right">
-                <p className="font-display text-xl font-bold">{p.quantity.toLocaleString("en-IN")}</p>
-                <p className="text-xs text-[var(--text-muted)]">units</p>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)] pt-3 text-sm">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Unit Price
-                </p>
-                <p className="mt-0.5 font-medium">₹{p.unitPrice.toLocaleString("en-IN")}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Stock Value
-                </p>
-                <p className="mt-0.5 font-medium">
-                  ₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Updated By
-                </p>
-                <p className="mt-0.5 flex items-center gap-1 font-medium">
-                  <User className="h-3.5 w-3.5 text-[var(--text-faint)]" />
-                  {p.lastUpdatedBy || "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Last Updated
-                </p>
-                <p className="mt-0.5 font-medium">{formatUpdated(p.lastUpdatedTime)}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-danger btn-sm mt-3 w-full"
-              disabled={deletingId === p.id}
-              onClick={() => removeProduct(p)}
+      <div className="md:hidden">
+        <p className="mobile-section-label">Products · A–Z</p>
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+          {filtered.map((p, idx) => (
+            <div
+              key={p.id}
+              className={`p-3.5 ${idx < filtered.length - 1 ? "border-b border-[var(--border)]" : ""}`}
             >
-              <Trash2 size={14} />
-              Delete
-            </button>
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div className="card py-10 text-center text-sm text-[var(--text-muted)]">
-            {search ? "No products match your search." : "No products in store yet."}
-          </div>
-        )}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold">{p.name}</p>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                    {p.color ? `${p.color} · ` : ""}
+                    ₹{p.unitPrice.toLocaleString("en-IN")}/pc
+                    {p.lastUpdatedBy ? ` · ${p.lastUpdatedBy}` : ""}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-display text-lg font-bold">{p.quantity.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-faint)]">units</p>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-[var(--text-muted)]">
+                  Value ₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm !px-2.5"
+                  disabled={deletingId === p.id}
+                  onClick={() => removeProduct(p)}
+                >
+                  <Trash2 size={13} />
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <p className="py-10 text-center text-sm text-[var(--text-muted)]">
+              {search ? "No products match your search." : "No products in store yet."}
+            </p>
+          )}
+        </div>
       </div>
 
       {showForm && (

@@ -261,7 +261,7 @@ export default function RecordsPage() {
 
       <AdminSearchBar value={search} onChange={setSearch} placeholder="Search records..." />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="mobile-chip-scroll flex flex-wrap gap-2">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}

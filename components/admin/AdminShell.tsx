@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
 import { getRouteMeta, greeting, todayHeading } from "@/lib/navigation";
+import { useIsMobile } from "@/lib/use-is-mobile";
 import AdminDrawer from "./AdminDrawer";
 import FloatingBottomNav from "./FloatingBottomNav";
 import Sidebar from "./Sidebar";
@@ -15,6 +16,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isMobile = useIsMobile();
   const meta = getRouteMeta(pathname);
 
   const subtitle =
@@ -48,24 +50,28 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         <div className="atrium-main">
           <TopAppBar
             title={meta.title}
-            subtitle={subtitle}
-            showBack={pathname !== "/dashboard"}
+            subtitle={isMobile ? undefined : subtitle}
+            showBack={!isMobile && pathname !== "/dashboard"}
             onBackClick={() => router.push("/dashboard")}
             onMenuClick={() => setDrawerOpen(true)}
           />
 
           <main className="atrium-content">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={pathname}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              >
-                {children}
-              </motion.div>
-            </AnimatePresence>
+            {isMobile ? (
+              children
+            ) : (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={pathname}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  {children}
+                </motion.div>
+              </AnimatePresence>
+            )}
           </main>
 
           <FloatingBottomNav />

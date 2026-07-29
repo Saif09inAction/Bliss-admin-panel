@@ -8,7 +8,6 @@ import {
   onSnapshot,
   setDoc,
 } from "firebase/firestore";
-import { motion } from "framer-motion";
 import {
   HardHat,
   Pencil,
@@ -199,19 +198,37 @@ export default function WorkersPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return employees.filter((e) => {
-      const matchFilter = filter === "ALL" || e.role === filter;
-      const matchSearch =
-        !q ||
-        e.name.toLowerCase().includes(q) ||
-        e.phone.includes(q) ||
-        e.role.toLowerCase().includes(q);
-      return matchFilter && matchSearch;
-    });
+    return employees
+      .filter((e) => {
+        const matchFilter = filter === "ALL" || e.role === filter;
+        const matchSearch =
+          !q ||
+          e.name.toLowerCase().includes(q) ||
+          e.phone.includes(q) ||
+          e.role.toLowerCase().includes(q);
+        return matchFilter && matchSearch;
+      })
+      .sort((a, b) => {
+        // Staff first, then kaarigers; A–Z within each
+        if (a.role !== b.role) return a.role === "STAFF" ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
   }, [employees, filter, search]);
 
   const staffCount = employees.filter((e) => e.role === "STAFF").length;
   const kaarigerCount = employees.filter((e) => e.role === "KAARIGER").length;
+
+  const mobileSections = useMemo(() => {
+    if (filter !== "ALL") {
+      return [{ label: filter === "STAFF" ? "Staff · A–Z" : "Kaarigers · A–Z", items: filtered }];
+    }
+    const staff = filtered.filter((e) => e.role === "STAFF");
+    const kaarigers = filtered.filter((e) => e.role === "KAARIGER");
+    const sections: { label: string; items: Employee[] }[] = [];
+    if (staff.length) sections.push({ label: `Staff · ${staff.length}`, items: staff });
+    if (kaarigers.length) sections.push({ label: `Kaarigers · ${kaarigers.length}`, items: kaarigers });
+    return sections;
+  }, [filtered, filter]);
 
   const formTitle =
     formMode === "staff"
@@ -248,13 +265,13 @@ export default function WorkersPage() {
         </p>
       </PageToolbar>
 
-      <div className="surface space-y-4 p-4 sm:p-5">
+      <div className="surface space-y-3 p-3.5 sm:space-y-4 sm:p-5">
         <AdminSearchBar
           value={search}
           onChange={setSearch}
           placeholder="Search by name or mobile..."
         />
-        <div className="flex flex-wrap gap-2">
+        <div className="mobile-chip-scroll flex flex-wrap gap-2 lg:flex-wrap">
           {(["ALL", "STAFF", "KAARIGER"] as const).map((f) => (
             <button
               key={f}
@@ -340,61 +357,60 @@ export default function WorkersPage() {
         )}
       </div>
 
-      {/* Card grid — mobile & tablet */}
-      <div className="stagger grid gap-3 sm:grid-cols-2 lg:hidden">
-        {filtered.map((e, i) => (
-          <motion.div
-            key={e.phone}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.03 }}
-            className="worker-card flex-col !items-stretch !gap-3"
-            onClick={() => setProfileEmployee(e)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(ev) => ev.key === "Enter" && setProfileEmployee(e)}
-          >
-            <div className="flex items-start gap-3">
-              <WorkerAvatar name={e.name} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-display font-bold capitalize">{e.name}</p>
-                    <p className="mt-0.5 text-sm text-[var(--text-muted)]">{e.phone}</p>
+      {/* Sorted sections — mobile & tablet */}
+      <div className="space-y-4 lg:hidden">
+        {mobileSections.map((section) => (
+          <div key={section.label}>
+            <p className="mobile-section-label">{section.label}</p>
+            <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+              {section.items.map((e, idx) => (
+                <div
+                  key={e.phone}
+                  className={`mobile-row ${idx < section.items.length - 1 ? "" : "!border-b-0"}`}
+                  onClick={() => setProfileEmployee(e)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(ev) => ev.key === "Enter" && setProfileEmployee(e)}
+                >
+                  <WorkerAvatar name={e.name} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate font-semibold capitalize text-[var(--text)]">{e.name}</p>
+                      <RoleBadge role={e.role} />
+                    </div>
+                    <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                      {e.phone}
+                      {e.role === "STAFF" && e.monthlySalary > 0
+                        ? ` · ₹${e.monthlySalary.toLocaleString("en-IN")}/mo`
+                        : ""}
+                    </p>
                   </div>
-                  <RoleBadge role={e.role} />
+                  <div className="flex shrink-0 gap-1" onClick={(ev) => ev.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="btn-icon !h-8 !w-8"
+                      onClick={() => openEdit(e)}
+                      aria-label="Edit"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                      onClick={() => removeEmployee(e.phone)}
+                      aria-label="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-            <div className="flex items-center justify-between border-t border-[var(--border)] pt-3">
-              <p className="text-xs text-[var(--text-muted)]">
-                {e.role === "KAARIGER"
-                  ? "Production worker"
-                  : `₹${e.monthlySalary.toLocaleString("en-IN")}/mo`}
-              </p>
-              <div className="flex gap-2" onClick={(ev) => ev.stopPropagation()}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm !px-2"
-                  onClick={() => openEdit(e)}
-                >
-                  <Pencil size={13} />
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm !px-2"
-                  onClick={() => removeEmployee(e.phone)}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </div>
-          </motion.div>
+          </div>
         ))}
 
         {filtered.length === 0 && (
-          <div className="surface col-span-full py-12 text-center sm:col-span-2">
+          <div className="surface py-12 text-center">
             <p className="text-sm text-[var(--text-muted)]">
               {search ? "No workers match your search." : "No workers yet. Add staff or kaariger above."}
             </p>

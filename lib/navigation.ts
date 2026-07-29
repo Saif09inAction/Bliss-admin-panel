@@ -83,10 +83,10 @@ export const SIDEBAR_NAV: NavRoute[] = [
 ];
 
 export const BOTTOM_NAV: NavRoute[] = [
-  SIDEBAR_NAV[0],
-  SIDEBAR_NAV[1],
-  SIDEBAR_NAV[2],
-  SIDEBAR_NAV[3],
+  SIDEBAR_NAV[0], // Overview
+  SIDEBAR_NAV[1], // Workers
+  SIDEBAR_NAV[5], // Orders
+  SIDEBAR_NAV[4], // Salary
 ];
 
 /** @deprecated use SIDEBAR_NAV */

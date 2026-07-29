@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDocs, setDoc } from "firebase/firestore";
-import { motion } from "framer-motion";
 import {
   AlertCircle,
   Banknote,
@@ -104,6 +103,7 @@ export default function SalaryPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const statusRank: Record<string, number> = { UNPAID: 0, PARTIAL: 1, NONE: 2, PAID: 3 };
     return staff
       .map((e) => {
         const empPayments = payments.filter((p) => p.employeeId === e.phone);
@@ -123,6 +123,12 @@ export default function SalaryPage() {
           (filter === "UNPAID" && status === "UNPAID") ||
           (filter === "PARTIAL" && status === "PARTIAL");
         return matchSearch && matchFilter;
+      })
+      .sort((a, b) => {
+        const ra = statusRank[a.status] ?? 9;
+        const rb = statusRank[b.status] ?? 9;
+        if (ra !== rb) return ra - rb;
+        return a.employee.name.localeCompare(b.employee.name);
       });
   }, [staff, payments, monthPrefix, search, filter]);
 
@@ -253,8 +259,8 @@ export default function SalaryPage() {
 
         <AdminSearchBar value={search} onChange={setSearch} placeholder="Search staff..." />
 
-        <div className="flex flex-wrap gap-2">
-          {(["ALL", "PAID", "UNPAID", "PARTIAL"] as SalaryFilter[]).map((f) => (
+        <div className="mobile-chip-scroll flex flex-wrap gap-2">
+          {(["ALL", "UNPAID", "PARTIAL", "PAID"] as SalaryFilter[]).map((f) => (
             <button
               key={f}
               type="button"
@@ -334,60 +340,47 @@ export default function SalaryPage() {
         )}
       </div>
 
-      {/* Mobile / tablet cards */}
-      <div className="stagger grid gap-3 sm:grid-cols-2 lg:hidden">
-        {rows.map(({ employee, paid, status, remaining }, i) => (
-          <motion.div
-            key={employee.phone}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.03 }}
-            className="surface p-4"
-          >
-            <div className="flex items-start gap-3">
-              <WorkerAvatar name={employee.name} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-display font-bold capitalize">{employee.name}</p>
-                    <p className="text-sm text-[var(--text-muted)]">{employee.phone}</p>
+      {/* Mobile — unpaid first, dense rows */}
+      <div className="space-y-3 lg:hidden">
+        <p className="mobile-section-label">
+          {filter === "ALL" ? "Unpaid → Partial → Paid · A–Z" : `${filter.charAt(0)}${filter.slice(1).toLowerCase()} · A–Z`}
+        </p>
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+          {rows.map(({ employee, paid, status, remaining }, idx) => (
+            <div
+              key={employee.phone}
+              className={`p-3.5 ${idx < rows.length - 1 ? "border-b border-[var(--border)]" : ""}`}
+            >
+              <div className="flex items-start gap-3">
+                <WorkerAvatar name={employee.name} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold capitalize">{employee.name}</p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Due ₹{remaining.toLocaleString("en-IN")} · Paid ₹{paid.toLocaleString("en-IN")}
+                      </p>
+                    </div>
+                    <StatusBadge status={status} />
                   </div>
-                  <StatusBadge status={status} />
+                  {status !== "PAID" && employee.monthlySalary > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm mt-2.5 w-full"
+                      onClick={() => openPay(employee)}
+                    >
+                      <Banknote size={14} />
+                      Pay ₹{remaining.toLocaleString("en-IN")}
+                    </button>
+                  )}
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-xl bg-[var(--surface-mist)] py-2">
-                    <p className="font-bold">₹{employee.monthlySalary.toLocaleString("en-IN")}</p>
-                    <p className="text-[var(--text-faint)]">Salary</p>
-                  </div>
-                  <div className="rounded-xl bg-jade-soft py-2">
-                    <p className="font-bold text-jade-deep">₹{paid.toLocaleString("en-IN")}</p>
-                    <p className="text-[var(--text-faint)]">Paid</p>
-                  </div>
-                  <div className="rounded-xl bg-[rgba(232,168,56,0.12)] py-2">
-                    <p className="font-bold text-warning">₹{remaining.toLocaleString("en-IN")}</p>
-                    <p className="text-[var(--text-faint)]">Due</p>
-                  </div>
-                </div>
-                {status !== "PAID" && employee.monthlySalary > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-primary mt-3 w-full"
-                    onClick={() => openPay(employee)}
-                  >
-                    <Banknote size={15} />
-                    Pay ₹{remaining.toLocaleString("en-IN")}
-                  </button>
-                )}
               </div>
             </div>
-          </motion.div>
-        ))}
-
-        {rows.length === 0 && (
-          <div className="surface col-span-full py-12 text-center sm:col-span-2">
-            <p className="text-sm text-[var(--text-muted)]">No staff match your filters.</p>
-          </div>
-        )}
+          ))}
+          {rows.length === 0 && (
+            <p className="py-12 text-center text-sm text-[var(--text-muted)]">No staff match your filters.</p>
+          )}
+        </div>
       </div>
 
       {/* Pay salary modal */}

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "framer-motion";
 import { BOTTOM_NAV } from "@/lib/navigation";
 import NavIcon from "./NavIcon";
 
@@ -17,15 +16,15 @@ export default function FloatingBottomNav() {
             ? pathname === "/dashboard"
             : pathname.startsWith(item.href);
         return (
-          <Link key={item.href} href={item.href} className={`dock-item ${active ? "active" : ""}`}>
-            {active && (
-              <motion.span
-                layoutId="dock-indicator"
-                className="dock-indicator"
-                transition={{ type: "spring", stiffness: 420, damping: 32 }}
-              />
-            )}
-            <NavIcon name={item.icon} size={20} />
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`dock-item ${active ? "active" : ""}`}
+            prefetch
+          >
+            <span className="dock-icon-wrap">
+              <NavIcon name={item.icon} size={22} />
+            </span>
             <span>{item.label}</span>
           </Link>
         );

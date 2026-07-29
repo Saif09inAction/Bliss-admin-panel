@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { useIsMobile } from "@/lib/use-is-mobile";
 import NavIcon from "./NavIcon";
 
 export function StatCard({
@@ -17,6 +18,7 @@ export function StatCard({
   hint?: string;
   accent?: "jade" | "bronze" | "warn" | "danger";
 }) {
+  const isMobile = useIsMobile();
   const glow =
     accent === "bronze"
       ? "from-bronze/20"
@@ -26,13 +28,13 @@ export function StatCard({
           ? "from-danger/20"
           : "from-jade/20";
 
-  return (
-    <motion.div
-      whileHover={{ y: -3 }}
-      transition={{ type: "spring", stiffness: 400, damping: 28 }}
-      className="stat-card relative"
-    >
-      <div className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br ${glow} to-transparent blur-2xl`} />
+  const body = (
+    <>
+      {!isMobile && (
+        <div
+          className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br ${glow} to-transparent blur-2xl`}
+        />
+      )}
       <div className="relative flex items-start justify-between gap-3">
         <div>
           <p className="stat-card-label">{title}</p>
@@ -43,6 +45,20 @@ export function StatCard({
           <NavIcon name={icon} size={18} />
         </div>
       </div>
+    </>
+  );
+
+  if (isMobile) {
+    return <div className="stat-card relative">{body}</div>;
+  }
+
+  return (
+    <motion.div
+      whileHover={{ y: -3 }}
+      transition={{ type: "spring", stiffness: 400, damping: 28 }}
+      className="stat-card relative"
+    >
+      {body}
     </motion.div>
   );
 }

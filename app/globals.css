@@ -90,7 +90,10 @@ body {
 }
 
 .atrium-header {
-  @apply sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 px-4 sm:px-6 lg:px-8;
+  @apply sticky top-0 z-30 flex shrink-0 items-center gap-3 px-4 sm:px-6 lg:px-8;
+  min-height: 4rem;
+  padding-top: env(safe-area-inset-top);
+  height: calc(4rem + env(safe-area-inset-top));
   background: rgba(243, 245, 244, 0.78);
   backdrop-filter: blur(var(--blur)) saturate(1.2);
   border-bottom: 1px solid var(--border);
@@ -104,6 +107,210 @@ body {
 @media (min-width: 1024px) {
   .atrium-content {
     padding-bottom: 2.5rem;
+  }
+
+  .atrium-header {
+    height: 4rem;
+    padding-top: 0;
+    min-height: 4rem;
+  }
+}
+
+/* iPhone / mobile performance + clarity */
+@media (max-width: 1023px) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .atrium-app {
+    background: var(--ink);
+  }
+
+  .atrium-main {
+    background: var(--surface);
+  }
+
+  .atrium-header {
+    background: #f3f5f4;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .atrium-content {
+    padding-top: 0.85rem;
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+  }
+
+  .floating-bottom-nav {
+    background: #f3f5f4;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 -1px 0 var(--border), 0 -12px 32px rgba(6, 17, 13, 0.06);
+    padding: 0.5rem 0.4rem calc(0.5rem + env(safe-area-inset-bottom));
+  }
+
+  .dock-item {
+    gap: 0.2rem;
+    font-size: 10px;
+    padding: 0.35rem 0.15rem;
+    min-height: 52px;
+    justify-content: center;
+  }
+
+  .dock-item.active {
+    color: var(--jade-deep);
+  }
+
+  .dock-item.active .dock-icon-wrap {
+    background: var(--jade-soft);
+    color: var(--jade-deep);
+  }
+
+  .dock-icon-wrap {
+    display: inline-flex;
+    height: 32px;
+    width: 32px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+  }
+
+  .dock-indicator {
+    display: none;
+  }
+
+  .stagger > * {
+    animation: none !important;
+  }
+
+  .surface,
+  .surface-interactive,
+  .stat-card,
+  .worker-card,
+  .module-row {
+    transition: none !important;
+    box-shadow: 0 1px 2px rgba(6, 17, 13, 0.04);
+  }
+
+  .surface-interactive:hover,
+  .stat-card:hover,
+  .worker-card:hover,
+  .module-row:hover {
+    transform: none !important;
+  }
+
+  .page-toolbar {
+    margin-bottom: 0.85rem;
+    gap: 0.65rem;
+  }
+
+  .page-toolbar h2,
+  .page-toolbar .font-display {
+    font-size: 1.05rem;
+  }
+
+  /* Denser mobile list rows */
+  .mobile-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    background: white;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mobile-row:active {
+    background: var(--jade-soft);
+  }
+
+  .mobile-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+  }
+
+  .mobile-section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0.25rem 0 0.55rem;
+  }
+
+  .filter-pill {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.75rem;
+  }
+
+  .panel-slide {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .admin-hero {
+    padding: 1.15rem 1.15rem 1.25rem;
+    border-radius: 18px;
+  }
+
+  .admin-hero h2 {
+    font-size: 1.55rem !important;
+  }
+
+  .stat-card {
+    padding: 0.85rem;
+  }
+
+  .stat-card-value {
+    font-size: 1.35rem;
+  }
+
+  .module-list {
+    gap: 0.65rem;
+  }
+
+  .module-row {
+    padding: 0.85rem;
+  }
+
+  .drawer-backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  /* Horizontal scroll chips */
+  .mobile-chip-scroll {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+  }
+
+  .mobile-chip-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-chip-scroll > * {
+    flex-shrink: 0;
+  }
+
+  .holiday-cal-day,
+  .calendar-day {
+    min-height: 44px;
+    font-size: 0.85rem;
+  }
+
+  .record-card {
+    padding: 0.85rem 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger > * {
+    animation: none !important;
   }
 }
 

@@ -29,6 +29,7 @@ export default function MaterialsPage() {
     supplier: "",
   });
   const [search, setSearch] = useState("");
+  const [stockFilter, setStockFilter] = useState<"ALL" | "LOW" | "OK">("ALL");
 
   async function load() {
     const snap = await getDocs(collection(getDb(), "raw_materials"));
@@ -106,14 +107,28 @@ export default function MaterialsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return materials;
-    return materials.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) ||
-        m.unit.toLowerCase().includes(q) ||
-        m.supplier.toLowerCase().includes(q)
-    );
+    const list = !q
+      ? materials
+      : materials.filter(
+          (m) =>
+            m.name.toLowerCase().includes(q) ||
+            m.unit.toLowerCase().includes(q) ||
+            m.supplier.toLowerCase().includes(q)
+        );
+    // Low stock first, then A–Z
+    return [...list].sort((a, b) => {
+      const aLow = a.quantity <= a.minimumStock ? 0 : 1;
+      const bLow = b.quantity <= b.minimumStock ? 0 : 1;
+      if (aLow !== bLow) return aLow - bLow;
+      return a.name.localeCompare(b.name);
+    });
   }, [materials, search]);
+
+  const displayList = useMemo(() => {
+    if (stockFilter === "LOW") return filtered.filter((m) => m.quantity <= m.minimumStock);
+    if (stockFilter === "OK") return filtered.filter((m) => m.quantity > m.minimumStock);
+    return filtered;
+  }, [filtered, stockFilter]);
 
   const lowStockCount = useMemo(
     () => materials.filter((m) => m.quantity <= m.minimumStock).length,
@@ -157,6 +172,25 @@ export default function MaterialsPage() {
         onChange={setSearch}
         placeholder="Search materials by name, unit, supplier..."
       />
+
+      <div className="mobile-chip-scroll flex flex-wrap gap-2">
+        {(
+          [
+            { id: "ALL" as const, label: "All" },
+            { id: "LOW" as const, label: `Low stock${lowStockCount ? ` · ${lowStockCount}` : ""}` },
+            { id: "OK" as const, label: "In stock" },
+          ] as const
+        ).map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setStockFilter(f.id)}
+            className={`filter-pill ${stockFilter === f.id ? "active" : ""}`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
 
       <div className={`grid gap-5 ${showForm ? "xl:grid-cols-[360px_1fr]" : ""}`}>
         {showForm && (
@@ -230,7 +264,8 @@ export default function MaterialsPage() {
           </form>
         )}
 
-        <div className="data-table-wrap min-w-0">
+        {/* Desktop table */}
+        <div className="data-table-wrap hidden min-w-0 lg:block">
           <div className="overflow-x-auto">
             <table className="data-table">
               <thead>
@@ -243,7 +278,7 @@ export default function MaterialsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((m) => {
+                {displayList.map((m) => {
                   const low = m.quantity <= m.minimumStock;
                   return (
                     <tr key={m.id} className={low ? "low-stock" : undefined}>
@@ -286,20 +321,74 @@ export default function MaterialsPage() {
               </tbody>
             </table>
           </div>
-          {filtered.length === 0 && (
+          {displayList.length === 0 && (
             <div className="flex flex-col items-center gap-2 py-12">
               <Package size={24} className="text-[var(--text-faint)]" />
               <p className="text-sm text-[var(--text-muted)]">
-                {search ? "No materials match your search." : "No materials yet."}
+                {search || stockFilter !== "ALL" ? "No materials match." : "No materials yet."}
               </p>
-              {!showForm && !search && (
-                <button type="button" className="btn btn-primary btn-sm mt-1" onClick={openAdd}>
-                  <Plus size={14} />
-                  Add first material
-                </button>
-              )}
             </div>
           )}
+        </div>
+
+        {/* Mobile list — low stock first */}
+        <div className="lg:hidden">
+          <p className="mobile-section-label">
+            {stockFilter === "LOW" ? "Needs restock" : stockFilter === "OK" ? "Healthy stock · A–Z" : "Low stock first · A–Z"}
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+            {displayList.map((m, idx) => {
+              const low = m.quantity <= m.minimumStock;
+              return (
+                <div
+                  key={m.id}
+                  className={`p-3.5 ${idx < displayList.length - 1 ? "border-b border-[var(--border)]" : ""} ${low ? "bg-red-50/40" : ""}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${low ? "bg-danger/10 text-danger" : "bg-jade-soft text-jade-deep"}`}>
+                      {low ? <AlertTriangle size={15} /> : <Package size={15} />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-semibold text-[var(--text)]">{m.name}</p>
+                        {low && <span className="badge badge-danger shrink-0">Low</span>}
+                      </div>
+                      <p className={`mt-0.5 text-sm ${low ? "font-semibold text-danger" : "text-[var(--text-muted)]"}`}>
+                        {m.quantity} {m.unit}
+                        <span className="text-[var(--text-faint)]"> · min {m.minimumStock}</span>
+                      </p>
+                      {m.supplier && (
+                        <p className="mt-0.5 text-xs text-[var(--text-faint)]">{m.supplier}</p>
+                      )}
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" className="btn btn-ghost btn-sm !px-2.5" onClick={() => openEdit(m)}>
+                          <Pencil size={13} />
+                          Edit
+                        </button>
+                        <button type="button" className="btn btn-danger btn-sm !px-2.5" onClick={() => removeMaterial(m.id)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {displayList.length === 0 && (
+              <div className="flex flex-col items-center gap-2 py-12">
+                <Package size={24} className="text-[var(--text-faint)]" />
+                <p className="text-sm text-[var(--text-muted)]">
+                  {search || stockFilter !== "ALL" ? "No materials match." : "No materials yet."}
+                </p>
+                {!showForm && !search && stockFilter === "ALL" && (
+                  <button type="button" className="btn btn-primary btn-sm mt-1" onClick={openAdd}>
+                    <Plus size={14} />
+                    Add first material
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -22,7 +22,6 @@ import {
   effectiveDayStatus,
   formatEarlyLeaveDuration,
   formatLateDuration,
-  formatWorkingHours,
   normalizeTime,
   parseAttendance,
   statusLabel,
@@ -57,6 +56,7 @@ export default function AttendancePage() {
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -140,9 +140,27 @@ export default function AttendancePage() {
 
   const filteredStaff = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return staff;
-    return staff.filter((e) => e.name.toLowerCase().includes(q) || e.phone.includes(q));
-  }, [staff, search]);
+    const list = !q
+      ? staff
+      : staff.filter((e) => e.name.toLowerCase().includes(q) || e.phone.includes(q));
+
+    // Needs attention first: Absent → Late → Left early → Present → A–Z
+    const rank = (st: string) => {
+      if (st === "ABSENT") return 0;
+      if (st === "LATE") return 1;
+      if (st === "LEFT_EARLY") return 2;
+      if (st === "PRESENT" || st === "ON_TIME") return 3;
+      return 4;
+    };
+    return [...list].sort((a, b) => {
+      const sa = effectiveDayStatus(byEmployee.get(a.phone), date, settings);
+      const sb = effectiveDayStatus(byEmployee.get(b.phone), date, settings);
+      const ra = rank(String(sa));
+      const rb = rank(String(sb));
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name);
+    });
+  }, [staff, search, byEmployee, date, settings]);
 
   const stats = useMemo(() => {
     let present = 0;
@@ -171,7 +189,7 @@ export default function AttendancePage() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 lg:space-y-6">
       <div className="page-toolbar">
         <div>
           <h2 className="font-display text-xl font-bold tracking-tight text-ink">Attendance</h2>
@@ -181,10 +199,18 @@ export default function AttendancePage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
+      {/* Mobile: stats first so client sees the day at a glance */}
+      <div className="grid grid-cols-2 gap-2.5 lg:hidden">
+        <StatTile label="Present" value={stats.present} icon={<UserCheck size={16} />} accent="jade" />
+        <StatTile label="Late" value={stats.late} icon={<AlertTriangle size={16} />} accent="warn" />
+        <StatTile label="Absent" value={stats.absent} icon={<UserX size={16} />} accent="danger" />
+        <StatTile label="Rate" value={`${stats.rate}%`} icon={<TrendingUp size={16} />} accent="bronze" />
+      </div>
+
+      <div className="grid gap-5 lg:gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
         {/* Left — staff roster */}
-        <div className="surface overflow-hidden">
-          <div className="border-b border-[var(--border)] p-4 sm:p-5">
+        <div className="surface overflow-hidden order-2 lg:order-1">
+          <div className="border-b border-[var(--border)] p-3.5 sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1">
                 <label className="label">Search Staff</label>
@@ -204,6 +230,9 @@ export default function AttendancePage() {
                 />
               </div>
             </div>
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-faint)] lg:hidden">
+              Sorted: Absent → Late → Present
+            </p>
           </div>
 
           {loadError && (
@@ -229,22 +258,22 @@ export default function AttendancePage() {
                     key={e.phone}
                     type="button"
                     onClick={() => setSelectedEmployee(e)}
-                    className="group flex w-full items-center gap-4 px-4 py-4 text-left transition hover:bg-jade-soft/40 sm:px-5"
+                    className="group flex w-full items-center gap-3 px-3.5 py-3.5 text-left transition active:bg-jade-soft/50 hover:bg-jade-soft/40 sm:gap-4 sm:px-5 sm:py-4"
                   >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-ink font-display text-sm font-bold text-jade">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ink font-display text-sm font-bold text-jade sm:h-11 sm:w-11">
                       {e.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-[var(--text)]">{e.name}</p>
-                      <p className="text-sm text-[var(--text-muted)]">{e.phone}</p>
-                      {r?.signInTime && (
+                      {r?.signInTime ? (
                         <p className="mt-0.5 text-xs text-[var(--text-faint)]">
                           In {r.signInTime}
                           {r.signOutTime ? ` · Out ${r.signOutTime}` : ""}
-                          {lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : r.signInTime ? " · In on time" : ""}
+                          {lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : ""}
                           {earlyMins > 0 ? ` · Left ${formatEarlyLeaveDuration(earlyMins)}` : ""}
-                          {r.workingHours ? ` · ${formatWorkingHours(r.workingHours)} worked` : ""}
                         </p>
+                      ) : (
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">{e.phone}</p>
                       )}
                     </div>
                     <span className={`shrink-0 ${badgeClass(String(st))}`}>
@@ -266,14 +295,77 @@ export default function AttendancePage() {
             </div>
           )}
 
-          <p className="border-t border-[var(--border)] px-4 py-3 text-center text-xs text-[var(--text-faint)] sm:px-5">
+          <p className="hidden border-t border-[var(--border)] px-4 py-3 text-center text-xs text-[var(--text-faint)] sm:px-5 lg:block">
             Click any staff member to open their monthly calendar with photos &amp; GPS locations
           </p>
         </div>
 
         {/* Right — settings & stats */}
-        <div className="stagger flex flex-col gap-4">
-          <form onSubmit={saveSettings} className="surface p-4 sm:p-5">
+        <div className="order-1 flex flex-col gap-3 lg:order-2 lg:gap-4">
+          {/* Collapsible shift settings on mobile */}
+          <div className="surface overflow-hidden lg:hidden">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 p-3.5 text-left"
+              onClick={() => setSettingsOpen((v) => !v)}
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
+                  <Clock size={16} />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm">Shift timings</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {settings.dailySignInTime} – {settings.dailySignOutTime}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight
+                size={16}
+                className={`text-[var(--text-faint)] transition ${settingsOpen ? "rotate-90" : ""}`}
+              />
+            </button>
+            {settingsOpen && (
+              <form onSubmit={saveSettings} className="border-t border-[var(--border)] p-3.5 pt-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Login</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={settingsForm.dailySignInTime}
+                      onChange={(e) =>
+                        setSettingsForm({ ...settingsForm, dailySignInTime: e.target.value })
+                      }
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Logout</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={settingsForm.dailySignOutTime}
+                      onChange={(e) =>
+                        setSettingsForm({ ...settingsForm, dailySignOutTime: e.target.value })
+                      }
+                      required
+                    />
+                  </div>
+                </div>
+                <button type="submit" className="btn btn-primary mt-3 w-full" disabled={savingSettings}>
+                  {savingSettings ? "Saving..." : "Save timings"}
+                </button>
+                {settingsMsg && (
+                  <p className={`mt-2 text-sm ${settingsMsg.includes("Failed") ? "text-danger" : "text-jade-deep"}`}>
+                    {settingsMsg}
+                  </p>
+                )}
+              </form>
+            )}
+          </div>
+
+          <form onSubmit={saveSettings} className="surface hidden p-4 sm:p-5 lg:block">
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
                 <Clock size={16} />
@@ -323,7 +415,7 @@ export default function AttendancePage() {
             )}
           </form>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="hidden grid-cols-2 gap-3 lg:grid">
             <StatTile
               label="Present"
               value={stats.present}
@@ -350,7 +442,7 @@ export default function AttendancePage() {
             />
           </div>
 
-          <div className="surface-ink p-4 sm:p-5">
+          <div className="surface-ink hidden p-4 sm:p-5 lg:block">
             <div className="flex items-center gap-3">
               <CalendarDays size={18} className="text-jade-glow" />
               <div>
