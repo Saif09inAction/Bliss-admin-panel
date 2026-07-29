@@ -1,24 +1,40 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
 import {
   Banknote,
   Calendar,
   ChevronRight,
+  Clock,
   Loader2,
   Phone,
   User,
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { Employee, PaymentTransaction } from "@/lib/types";
+import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
   computeMonthAttendanceStats,
+  defaultSettings,
   monthDateRange,
   monthLabel,
+  normalizeTime,
   parseAttendance,
 } from "@/lib/attendance-utils";
+import {
+  computeMonthDeductions,
+  formatDurationMinutes,
+  type DayKind,
+} from "@/lib/deduction-utils";
 import {
   currentMonthParts,
   monthKey,
@@ -27,8 +43,6 @@ import {
   salaryStatus,
 } from "@/lib/salary-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
-import { defaultSettings } from "@/lib/attendance-utils";
-import type { AttendanceSettings } from "@/lib/types";
 
 interface Props {
   employee: Employee;
@@ -39,15 +53,17 @@ interface Props {
 
 export default function WorkerProfilePanel({
   employee,
-  settings = defaultSettings(),
+  settings: settingsProp,
   onClose,
   onPaySalary,
 }: Props) {
   const { year, month } = currentMonthParts();
-  const [attendanceRecords, setAttendanceRecords] = useState<
-    { date: string; status?: string; signInTime?: string }[]
-  >([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
+  const [overrides, setOverrides] = useState<Map<string, DayKind>>(new Map());
+  const [settings, setSettings] = useState<AttendanceSettings>(
+    settingsProp || defaultSettings()
+  );
   const [loading, setLoading] = useState(true);
   const [showCalendar, setShowCalendar] = useState(false);
 
@@ -55,14 +71,44 @@ export default function WorkerProfilePanel({
   const { start, end } = monthDateRange(year, month);
 
   useEffect(() => {
+    if (settingsProp) setSettings(settingsProp);
+  }, [settingsProp]);
+
+  useEffect(() => {
+    if (employee.role === "KAARIGER") {
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
-    async function load() {
-      // Kaarigers don't use attendance / salary tracking
-      if (employee.role === "KAARIGER") {
-        setLoading(false);
-        return;
+    setLoading(true);
+
+    async function loadSettings() {
+      if (settingsProp) return;
+      const snap = await getDoc(doc(getDb(), "settings", "attendance"));
+      if (!cancelled && snap.exists()) {
+        const data = snap.data();
+        setSettings({
+          dailySignInTime: normalizeTime(data.dailySignInTime as string),
+          dailySignOutTime: normalizeTime(data.dailySignOutTime as string),
+        });
       }
-      setLoading(true);
+    }
+
+    loadSettings();
+
+    const unsubCal = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
+      const map = new Map<string, DayKind>();
+      snap.docs.forEach((d) => {
+        const kind = d.data().kind as DayKind;
+        if (kind === "HOLIDAY" || kind === "WORKING") {
+          map.set((d.data().date as string) || d.id, kind);
+        }
+      });
+      if (!cancelled) setOverrides(map);
+    });
+
+    async function loadAttPay() {
       try {
         const [attSnap, paySnap] = await Promise.all([
           getDocs(
@@ -81,9 +127,7 @@ export default function WorkerProfilePanel({
             query(collection(getDb(), "payments"), where("employeeId", "==", employee.phone))
           ),
         ]);
-
         if (cancelled) return;
-
         const attAll = attSnap.docs.map((d) => parseAttendance(d.id, d.data()));
         setAttendanceRecords(attAll.filter((r) => r.date >= start && r.date <= end));
         setPayments(paySnap.docs.map((d) => parsePayment(d.id, d.data())));
@@ -91,23 +135,40 @@ export default function WorkerProfilePanel({
         if (!cancelled) setLoading(false);
       }
     }
-    load();
+
+    loadAttPay();
+
     return () => {
       cancelled = true;
+      unsubCal();
     };
-  }, [employee.phone, employee.role, start, end]);
+  }, [employee.phone, employee.role, start, end, settingsProp]);
 
   const monthStats = useMemo(
     () => computeMonthAttendanceStats(attendanceRecords, year, month),
     [attendanceRecords, year, month]
   );
 
+  const deductions = useMemo(
+    () =>
+      computeMonthDeductions(
+        employee.monthlySalary,
+        year,
+        month,
+        attendanceRecords,
+        settings,
+        overrides
+      ),
+    [employee.monthlySalary, year, month, attendanceRecords, settings, overrides]
+  );
+
   const paidThisMonth = useMemo(
     () => salaryPaidInMonth(payments, monthPrefix),
     [payments, monthPrefix]
   );
-  const payStatus = salaryStatus(employee.monthlySalary, paidThisMonth);
-  const salaryRemaining = Math.max(0, employee.monthlySalary - paidThisMonth);
+  const netSalary = deductions.netSalary;
+  const payStatus = salaryStatus(netSalary, paidThisMonth);
+  const salaryRemaining = Math.max(0, netSalary - paidThisMonth);
 
   const recentPayments = useMemo(
     () =>
@@ -125,11 +186,7 @@ export default function WorkerProfilePanel({
         onClick={onClose}
         aria-hidden
       />
-      <div
-        className="panel-slide overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
+      <div className="panel-slide overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="shrink-0 border-b border-[var(--border)] bg-gradient-to-br from-ink-elevated to-ink px-5 py-5 text-white">
           <div className="flex items-start gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-jade/20 font-display text-xl font-bold text-jade-glow">
@@ -164,7 +221,6 @@ export default function WorkerProfilePanel({
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
           {loading ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-[var(--text-muted)]">
@@ -202,17 +258,28 @@ export default function WorkerProfilePanel({
                   </h3>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <StatTile
-                      label="Monthly"
+                      label="Gross"
                       value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
+                    />
+                    <StatTile
+                      label="Deducted"
+                      value={`₹${Math.round(deductions.totalDeduction).toLocaleString("en-IN")}`}
+                      accent="danger"
+                    />
+                    <StatTile
+                      label="Net pay"
+                      value={`₹${Math.round(netSalary).toLocaleString("en-IN")}`}
+                      accent="jade"
                     />
                     <StatTile
                       label="Paid"
                       value={`₹${paidThisMonth.toLocaleString("en-IN")}`}
-                      accent="jade"
                     />
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
                     <StatTile
                       label="Remaining"
-                      value={`₹${salaryRemaining.toLocaleString("en-IN")}`}
+                      value={`₹${Math.round(salaryRemaining).toLocaleString("en-IN")}`}
                       accent="warn"
                     />
                     <StatTile
@@ -230,14 +297,14 @@ export default function WorkerProfilePanel({
                       }
                     />
                   </div>
-                  {onPaySalary && payStatus !== "PAID" && employee.monthlySalary > 0 && (
+                  {onPaySalary && payStatus !== "PAID" && netSalary > 0 && (
                     <button
                       type="button"
                       className="btn btn-primary mt-3 w-full"
                       onClick={() => onPaySalary(employee)}
                     >
                       <Banknote size={15} />
-                      Pay Salary (₹{salaryRemaining.toLocaleString("en-IN")})
+                      Pay Salary (₹{Math.round(salaryRemaining).toLocaleString("en-IN")})
                     </button>
                   )}
                   {recentPayments.length > 0 && (
@@ -259,6 +326,67 @@ export default function WorkerProfilePanel({
                         </div>
                       ))}
                     </div>
+                  )}
+                </section>
+              )}
+
+              {employee.role === "STAFF" && (
+                <section>
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <Clock size={16} className="text-jade-deep" />
+                    Time away &amp; deductions
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Based on late / early leave · holidays &amp; Sundays excluded ·{" "}
+                    {deductions.workingDays} working days this month
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <StatTile
+                      label="Late"
+                      value={formatDurationMinutes(deductions.totalLateMinutes)}
+                      accent="warn"
+                    />
+                    <StatTile
+                      label="Left early"
+                      value={formatDurationMinutes(deductions.totalEarlyMinutes)}
+                      accent="warn"
+                    />
+                    <StatTile
+                      label="Not in shop"
+                      value={formatDurationMinutes(deductions.totalLostMinutes)}
+                      accent="danger"
+                    />
+                    <StatTile
+                      label="Money cut"
+                      value={`₹${Math.round(deductions.totalDeduction).toLocaleString("en-IN")}`}
+                      accent="danger"
+                    />
+                  </div>
+
+                  {deductions.days.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        Day-wise
+                      </p>
+                      {deductions.days.slice(0, 8).map((d) => (
+                        <div
+                          key={d.date}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-semibold">{d.date}</p>
+                            <p className="truncate text-xs text-[var(--text-muted)]">{d.note}</p>
+                          </div>
+                          <span className="shrink-0 font-bold text-danger">
+                            −₹{Math.round(d.amount).toLocaleString("en-IN")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-xl border border-jade/20 bg-jade-soft/50 px-3 py-2 text-sm text-jade-deep">
+                      No late / early deductions this month.
+                    </p>
                   )}
                 </section>
               )}

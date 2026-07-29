@@ -9,6 +9,7 @@ import {
   Warehouse,
   ClipboardList,
   ScrollText,
+  Palmtree,
   type LucideIcon,
 } from "lucide-react";
 
@@ -16,6 +17,7 @@ const ICONS: Record<string, LucideIcon> = {
   home: Home,
   groups: Users,
   calendar: CalendarDays,
+  holiday: Palmtree,
   salary: Wallet,
   inventory: Package,
   store: Warehouse,

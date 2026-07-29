@@ -611,6 +611,33 @@ body {
   pointer-events: none;
 }
 
+.calendar-day.holiday {
+  background: rgba(232, 93, 76, 0.14);
+  border-color: rgba(232, 93, 76, 0.45);
+  color: var(--danger);
+}
+
+.calendar-day.working {
+  background: var(--jade-soft);
+  border-color: rgba(30, 203, 143, 0.45);
+  color: var(--jade-deep);
+}
+
+.holiday-cal-day {
+  min-height: 52px;
+  flex-direction: column;
+  gap: 0;
+}
+
+.holiday-cal-day.is-today {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.holiday-cal-day.selected {
+  box-shadow: 0 0 0 2px var(--jade), 0 8px 20px rgba(30, 203, 143, 0.25);
+  transform: translateY(-1px);
+}
+
 /* ─── Skeleton ─── */
 
 .skeleton {

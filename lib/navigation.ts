@@ -33,6 +33,14 @@ export const SIDEBAR_NAV: NavRoute[] = [
     group: "people",
   },
   {
+    href: "/dashboard/holidays",
+    label: "Holidays",
+    title: "Holidays",
+    subtitle: "Off days & working Sundays",
+    icon: "holiday",
+    group: "people",
+  },
+  {
     href: "/dashboard/salary",
     label: "Salary",
     title: "Salary",
@@ -130,6 +138,12 @@ export const ADMIN_MODULES = [
     description: "Daily presence & monthly calendar",
     href: "/dashboard/attendance",
     icon: "calendar",
+  },
+  {
+    title: "Holidays",
+    description: "Set holidays & working Sundays",
+    href: "/dashboard/holidays",
+    icon: "holiday",
   },
   {
     title: "Salary",
