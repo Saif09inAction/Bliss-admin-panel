@@ -16,9 +16,11 @@ import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
 import {
+  computeEarlyLeaveMinutes,
   computeLateMinutes,
   defaultSettings,
   effectiveDayStatus,
+  formatEarlyLeaveDuration,
   formatLateDuration,
   formatWorkingHours,
   normalizeTime,
@@ -221,6 +223,7 @@ export default function AttendancePage() {
                 const r = byEmployee.get(e.phone);
                 const st = effectiveDayStatus(r, date, settings);
                 const lateMins = computeLateMinutes(r?.signInTime, settings.dailySignInTime);
+                const earlyMins = computeEarlyLeaveMinutes(r?.signOutTime, settings.dailySignOutTime);
                 return (
                   <button
                     key={e.phone}
@@ -238,7 +241,8 @@ export default function AttendancePage() {
                         <p className="mt-0.5 text-xs text-[var(--text-faint)]">
                           In {r.signInTime}
                           {r.signOutTime ? ` · Out ${r.signOutTime}` : ""}
-                          {lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : " · On time"}
+                          {lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : r.signInTime ? " · In on time" : ""}
+                          {earlyMins > 0 ? ` · Left ${formatEarlyLeaveDuration(earlyMins)}` : ""}
                           {r.workingHours ? ` · ${formatWorkingHours(r.workingHours)} worked` : ""}
                         </p>
                       )}

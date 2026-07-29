@@ -65,6 +65,14 @@ export function computeLateMinutes(signInTime?: string, expectedSignIn?: string)
   return Math.max(0, actual - expected);
 }
 
+/** Minutes left before expected logout. */
+export function computeEarlyLeaveMinutes(signOutTime?: string, expectedSignOut?: string): number {
+  const actual = timeToMinutes(signOutTime);
+  const expected = timeToMinutes(normalizeTime(expectedSignOut));
+  if (actual == null || expected == null) return 0;
+  return Math.max(0, expected - actual);
+}
+
 export function formatLateDuration(minutes: number): string {
   if (minutes <= 0) return "On time";
   const h = Math.floor(minutes / 60);
@@ -74,7 +82,19 @@ export function formatLateDuration(minutes: number): string {
   return `${m} min late`;
 }
 
-/** Day status using current shift settings when a punch exists. */
+export function formatEarlyLeaveDuration(minutes: number): string {
+  if (minutes <= 0) return "On time";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h} hr ${m} min early`;
+  if (h > 0) return `${h} hr early`;
+  return `${m} min early`;
+}
+
+/**
+ * Day status using current shift settings.
+ * Left early takes priority over late when both apply (matches app punch logic).
+ */
 export function effectiveDayStatus(
   record: Attendance | undefined,
   dateStr: string,
@@ -84,8 +104,13 @@ export function effectiveDayStatus(
   const day = parseDate(dateStr);
   if (day > startOfDay(today)) return "FUTURE";
   if (!record || !record.signInTime) return "ABSENT";
+
+  const early = computeEarlyLeaveMinutes(record.signOutTime, settings?.dailySignOutTime);
+  if (record.signOutTime && early > 0) return "LEFT_EARLY";
+
   const late = computeLateMinutes(record.signInTime, settings?.dailySignInTime);
   if (late > 0) return "LATE";
+
   if (record.signOutTime) return "PRESENT";
   return "ON_TIME";
 }

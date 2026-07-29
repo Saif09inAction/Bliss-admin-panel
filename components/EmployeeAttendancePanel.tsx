@@ -6,10 +6,12 @@ import { ChevronLeft, ChevronRight, MapPin, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import {
+  computeEarlyLeaveMinutes,
   computeLateMinutes,
   dateKey,
   daysInMonth,
   effectiveDayStatus,
+  formatEarlyLeaveDuration,
   formatLateDuration,
   formatWorkingHours,
   mapsLink,
@@ -135,6 +137,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
     ? effectiveDayStatus(selected, selectedDate, settings)
     : "NONE";
   const selectedLate = computeLateMinutes(selected?.signInTime, settings.dailySignInTime);
+  const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, settings.dailySignOutTime);
 
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
@@ -309,6 +312,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                           ? `On time (expected ${settings.dailySignInTime})`
                           : undefined
                     }
+                    extraTone={selectedLate > 0 ? "warn" : "ok"}
                   />
                   <DetailBlock
                     title="Clock Out"
@@ -317,8 +321,16 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     gps={selected.signOutGps}
                     image={selected.signOutImageLocalPath}
                     extra={
+                      selected.signOutTime
+                        ? selectedEarly > 0
+                          ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${settings.dailySignOutTime})`
+                          : `On time (expected ${settings.dailySignOutTime})`
+                        : undefined
+                    }
+                    extraTone={selectedEarly > 0 ? "warn" : undefined}
+                    footer={
                       selected.workingHours
-                        ? `Worked: ${formatWorkingHours(selected.workingHours)} (expected out ${settings.dailySignOutTime})`
+                        ? `Worked: ${formatWorkingHours(selected.workingHours)}`
                         : undefined
                     }
                   />
@@ -343,6 +355,8 @@ function DetailBlock({
   gps,
   image,
   extra,
+  extraTone,
+  footer,
 }: {
   title: string;
   time?: string;
@@ -350,16 +364,23 @@ function DetailBlock({
   gps?: string;
   image?: string;
   extra?: string;
+  extraTone?: "warn" | "ok";
+  footer?: string;
 }) {
   const mapUrl = mapsLink(gps);
   const imageUrl = resolveAttendanceImage(image);
+  const extraClass =
+    extraTone === "ok"
+      ? "mt-1 text-sm text-jade-deep"
+      : "mt-1 text-sm text-warning";
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <h5 className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
         {title}
       </h5>
       <p className="font-display text-xl font-bold text-ink">{time || "—"}</p>
-      {extra && <p className="mt-1 text-sm text-warning">{extra}</p>}
+      {extra && <p className={extraClass}>{extra}</p>}
+      {footer && <p className="mt-1 text-sm text-[var(--text-muted)]">{footer}</p>}
       {address && <p className="mt-2 text-sm text-[var(--text-muted)]">{address}</p>}
       {mapUrl && (
         <a
