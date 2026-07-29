@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { Boxes, Package, Palette, User } from "lucide-react";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  setDoc,
+} from "firebase/firestore";
+import { Boxes, Package, Palette, Plus, Trash2, User, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
 import type { FinishedProduct } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -17,30 +24,39 @@ function formatUpdated(ts: number) {
   });
 }
 
+const emptyForm = { name: "", color: "", quantity: "", unitPrice: "" };
+
 export default function InventoryPage() {
+  const { session } = useAuth();
   const [products, setProducts] = useState<FinishedProduct[]>([]);
   const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
-    async function load() {
-      const snap = await getDocs(collection(getDb(), "finished_products"));
+    const unsub = onSnapshot(collection(getDb(), "finished_products"), (snap) => {
       setProducts(
-        snap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: (data.id as string) || d.id,
-            name: data.name as string,
-            quantity: (data.quantity as number) || 0,
-            color: (data.color as string) || "",
-            unitPrice: (data.unitPrice as number) || 0,
-            lastUpdatedBy: (data.lastUpdatedBy as string) || "",
-            lastUpdatedTime: (data.lastUpdatedTime as number) || 0,
-            orderId: data.orderId as string | undefined,
-          };
-        }).sort((a, b) => b.lastUpdatedTime - a.lastUpdatedTime)
+        snap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              name: data.name as string,
+              quantity: (data.quantity as number) || 0,
+              color: (data.color as string) || "",
+              unitPrice: (data.unitPrice as number) || 0,
+              lastUpdatedBy: (data.lastUpdatedBy as string) || "",
+              lastUpdatedTime: (data.lastUpdatedTime as number) || 0,
+              orderId: data.orderId as string | undefined,
+            };
+          })
+          .sort((a, b) => b.lastUpdatedTime - a.lastUpdatedTime)
       );
-    }
-    load();
+    });
+    return () => unsub();
   }, []);
 
   const filtered = useMemo(() => {
@@ -61,11 +77,95 @@ export default function InventoryPage() {
     [filtered]
   );
 
+  async function saveProduct(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    const name = form.name.trim();
+    const color = form.color.trim();
+    const quantity = Number(form.quantity);
+    const unitPrice = Number(form.unitPrice) || 0;
+    if (!name) {
+      setError("Product name is required.");
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setError("Quantity must be greater than 0.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const existing = products.find(
+        (p) =>
+          p.name.toLowerCase() === name.toLowerCase() &&
+          p.color.toLowerCase() === color.toLowerCase()
+      );
+      const now = Date.now();
+      const updatedBy = session?.name || "Admin";
+
+      if (existing) {
+        const updated = {
+          ...existing,
+          quantity: existing.quantity + quantity,
+          unitPrice: unitPrice > 0 ? unitPrice : existing.unitPrice,
+          lastUpdatedBy: updatedBy,
+          lastUpdatedTime: now,
+        };
+        await setDoc(doc(getDb(), "finished_products", existing.id), updated, { merge: true });
+      } else {
+        const id = crypto.randomUUID();
+        const product: FinishedProduct = {
+          id,
+          name,
+          color,
+          quantity,
+          unitPrice: Math.max(0, unitPrice),
+          lastUpdatedBy: updatedBy,
+          lastUpdatedTime: now,
+        };
+        await setDoc(doc(getDb(), "finished_products", id), product);
+      }
+      setForm(emptyForm);
+      setShowForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add inventory.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeProduct(product: FinishedProduct) {
+    if (
+      !confirm(
+        `Delete "${product.name}${product.color ? ` (${product.color})` : ""}" from inventory? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setDeletingId(product.id);
+    try {
+      await deleteDoc(doc(getDb(), "finished_products", product.id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="stagger space-y-5">
-      <PageToolbar title="Store Inventory">
+      <PageToolbar
+        title="Store Inventory"
+        actions={
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>
+            <Plus size={15} />
+            Add inventory
+          </button>
+        }
+      >
         <p className="section-sub">
-          {totalQty.toLocaleString("en-IN")} units · {filtered.length} product{filtered.length === 1 ? "" : "s"}
+          {totalQty.toLocaleString("en-IN")} units · {filtered.length} product
+          {filtered.length === 1 ? "" : "s"}
         </p>
       </PageToolbar>
 
@@ -74,13 +174,6 @@ export default function InventoryPage() {
         onChange={setSearch}
         placeholder="Search products by name, color, staff..."
       />
-
-      <div className="alert-banner">
-        <p className="alert-banner-title">Read-only inventory</p>
-        <p className="alert-banner-sub">
-          Products appear here after staff approves kaariger deliveries.
-        </p>
-      </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="stat-card">
@@ -118,7 +211,6 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* Desktop table */}
       <div className="data-table-wrap hidden md:block">
         <div className="overflow-x-auto">
           <table className="data-table">
@@ -131,6 +223,7 @@ export default function InventoryPage() {
                 <th>Stock Value</th>
                 <th>Updated By</th>
                 <th>Last Updated</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -150,9 +243,22 @@ export default function InventoryPage() {
                     <span className="font-semibold">{p.quantity.toLocaleString("en-IN")}</span>
                   </td>
                   <td className="text-[var(--text-muted)]">₹{p.unitPrice.toLocaleString("en-IN")}</td>
-                  <td className="font-semibold">₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}</td>
+                  <td className="font-semibold">
+                    ₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}
+                  </td>
                   <td className="text-[var(--text-muted)]">{p.lastUpdatedBy || "—"}</td>
                   <td className="text-[var(--text-muted)]">{formatUpdated(p.lastUpdatedTime)}</td>
+                  <td className="text-right">
+                    <button
+                      type="button"
+                      className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                      disabled={deletingId === p.id}
+                      onClick={() => removeProduct(p)}
+                      aria-label="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -165,16 +271,13 @@ export default function InventoryPage() {
         )}
       </div>
 
-      {/* Mobile cards */}
       <div className="space-y-3 md:hidden">
         {filtered.map((p) => (
           <div key={p.id} className="record-card">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="font-display font-bold">{p.name}</p>
-                {p.color && (
-                  <span className="badge badge-neutral mt-1.5">{p.color}</span>
-                )}
+                {p.color && <span className="badge badge-neutral mt-1.5">{p.color}</span>}
               </div>
               <div className="text-right">
                 <p className="font-display text-xl font-bold">{p.quantity.toLocaleString("en-IN")}</p>
@@ -183,25 +286,44 @@ export default function InventoryPage() {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--border)] pt-3 text-sm">
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Unit Price</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Unit Price
+                </p>
                 <p className="mt-0.5 font-medium">₹{p.unitPrice.toLocaleString("en-IN")}</p>
               </div>
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Stock Value</p>
-                <p className="mt-0.5 font-medium">₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Stock Value
+                </p>
+                <p className="mt-0.5 font-medium">
+                  ₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}
+                </p>
               </div>
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Updated By</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Updated By
+                </p>
                 <p className="mt-0.5 flex items-center gap-1 font-medium">
                   <User className="h-3.5 w-3.5 text-[var(--text-faint)]" />
                   {p.lastUpdatedBy || "—"}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Last Updated</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Last Updated
+                </p>
                 <p className="mt-0.5 font-medium">{formatUpdated(p.lastUpdatedTime)}</p>
               </div>
             </div>
+            <button
+              type="button"
+              className="btn btn-danger btn-sm mt-3 w-full"
+              disabled={deletingId === p.id}
+              onClick={() => removeProduct(p)}
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
           </div>
         ))}
         {filtered.length === 0 && (
@@ -210,6 +332,82 @@ export default function InventoryPage() {
           </div>
         )}
       </div>
+
+      {showForm && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" onClick={() => setShowForm(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={saveProduct}
+              className="surface w-full max-w-md space-y-4 p-5 sm:p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Add inventory</h3>
+                  <p className="text-sm text-[var(--text-muted)]">
+                    Same name + color adds to existing stock
+                  </p>
+                </div>
+                <button type="button" className="btn-icon" onClick={() => setShowForm(false)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <div>
+                <label className="label">Product name</label>
+                <input
+                  className="input"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Color</label>
+                <input
+                  className="input"
+                  value={form.color}
+                  onChange={(e) => setForm({ ...form, color: e.target.value })}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Quantity</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={form.quantity}
+                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Unit price (₹)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={form.unitPrice}
+                    onChange={(e) => setForm({ ...form, unitPrice: e.target.value })}
+                    placeholder="Optional"
+                  />
+                </div>
+              </div>
+              {error && <p className="text-sm text-danger">{error}</p>}
+              <div className="flex gap-2">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setShowForm(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={saving}>
+                  {saving ? "Saving…" : "Add stock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
     </div>
   );
 }
