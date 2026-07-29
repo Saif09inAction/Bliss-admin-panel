@@ -57,6 +57,11 @@ export default function WorkerProfilePanel({
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // Kaarigers don't use attendance / salary tracking
+      if (employee.role === "KAARIGER") {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const [attSnap, paySnap] = await Promise.all([
@@ -90,7 +95,7 @@ export default function WorkerProfilePanel({
     return () => {
       cancelled = true;
     };
-  }, [employee.phone, start, end]);
+  }, [employee.phone, employee.role, start, end]);
 
   const monthStats = useMemo(
     () => computeMonthAttendanceStats(attendanceRecords, year, month),
@@ -174,12 +179,17 @@ export default function WorkerProfilePanel({
                   Basic Info
                 </h3>
                 <div className="mt-3 space-y-0 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40">
-                  <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
                   {employee.role === "STAFF" && (
-                    <InfoRow
-                      label="Monthly Salary"
-                      value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
-                    />
+                    <>
+                      <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
+                      <InfoRow
+                        label="Monthly Salary"
+                        value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
+                      />
+                    </>
+                  )}
+                  {employee.role === "KAARIGER" && (
+                    <InfoRow label="Role" value="Kaariger (piece-work)" />
                   )}
                 </div>
               </section>
@@ -253,34 +263,36 @@ export default function WorkerProfilePanel({
                 </section>
               )}
 
-              <section>
-                <div className="flex items-center justify-between">
-                  <h3 className="section-title flex items-center gap-2 text-base">
-                    <Calendar size={16} className="text-jade-deep" />
-                    Attendance — {monthLabel(year, month)}
-                  </h3>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm !px-2"
-                    onClick={() => setShowCalendar(true)}
-                  >
-                    Calendar
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <StatTile label="Present" value={String(monthStats.present)} accent="jade" />
-                  <StatTile label="Late" value={String(monthStats.late)} accent="warn" />
-                  <StatTile label="Absent" value={String(monthStats.absent)} accent="danger" />
-                  <StatTile label="Rate" value={`${monthStats.rate}%`} />
-                </div>
-              </section>
+              {employee.role === "STAFF" && (
+                <section>
+                  <div className="flex items-center justify-between">
+                    <h3 className="section-title flex items-center gap-2 text-base">
+                      <Calendar size={16} className="text-jade-deep" />
+                      Attendance — {monthLabel(year, month)}
+                    </h3>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm !px-2"
+                      onClick={() => setShowCalendar(true)}
+                    >
+                      Calendar
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <StatTile label="Present" value={String(monthStats.present)} accent="jade" />
+                    <StatTile label="Late" value={String(monthStats.late)} accent="warn" />
+                    <StatTile label="Absent" value={String(monthStats.absent)} accent="danger" />
+                    <StatTile label="Rate" value={`${monthStats.rate}%`} />
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      {showCalendar && (
+      {showCalendar && employee.role === "STAFF" && (
         <EmployeeAttendancePanel
           employee={employee}
           settings={settings}

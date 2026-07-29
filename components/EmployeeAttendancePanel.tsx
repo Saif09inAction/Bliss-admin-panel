@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { ChevronLeft, ChevronRight, MapPin, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import {
-  computeMonthAttendanceStats,
+  computeLateMinutes,
   dateKey,
-  dayStatus,
   daysInMonth,
+  effectiveDayStatus,
   formatLateDuration,
   formatWorkingHours,
   mapsLink,
@@ -74,48 +74,67 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
   );
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      const { start, end } = monthDateRange(year, month);
-      try {
-        const snap = await getDocs(
-          query(
-            collection(getDb(), "attendance"),
-            where("employeeId", "==", employee.phone),
-            where("date", ">=", start),
-            where("date", "<=", end)
-          )
+    setLoading(true);
+    const { start, end } = monthDateRange(year, month);
+    let fallbackUnsub: (() => void) | undefined;
+
+    const unsub = onSnapshot(
+      query(
+        collection(getDb(), "attendance"),
+        where("employeeId", "==", employee.phone),
+        where("date", ">=", start),
+        where("date", "<=", end)
+      ),
+      (snap) => {
+        setRecords(snap.docs.map((d) => parseAttendance(d.id, d.data())));
+        setLoading(false);
+      },
+      () => {
+        fallbackUnsub = onSnapshot(
+          query(collection(getDb(), "attendance"), where("employeeId", "==", employee.phone)),
+          (snap) => {
+            const all = snap.docs.map((d) => parseAttendance(d.id, d.data()));
+            setRecords(all.filter((r) => r.date >= start && r.date <= end));
+            setLoading(false);
+          },
+          () => setLoading(false)
         );
-        if (!cancelled) {
-          setRecords(snap.docs.map((d) => parseAttendance(d.id, d.data())));
-        }
-      } catch {
-        const snap = await getDocs(
-          query(collection(getDb(), "attendance"), where("employeeId", "==", employee.phone))
-        );
-        if (!cancelled) {
-          const all = snap.docs.map((d) => parseAttendance(d.id, d.data()));
-          setRecords(all.filter((r) => r.date >= start && r.date <= end));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    }
-    load();
+    );
+
     return () => {
-      cancelled = true;
+      unsub();
+      fallbackUnsub?.();
     };
   }, [employee.phone, year, month]);
 
   const byDate = useMemo(() => new Map(records.map((r) => [r.date, r])), [records]);
-  const monthStats = useMemo(
-    () => computeMonthAttendanceStats(records, year, month),
-    [records, year, month]
-  );
+  const monthStats = useMemo(() => {
+    const totalDays = daysInMonth(year, month);
+    const today = new Date();
+    let present = 0;
+    let late = 0;
+    let absent = 0;
+    let workingDays = 0;
+    for (let d = 1; d <= totalDays; d++) {
+      const key = dateKey(year, month, d);
+      const day = new Date(year, month, d);
+      if (day > new Date(today.getFullYear(), today.getMonth(), today.getDate())) continue;
+      workingDays++;
+      const st = effectiveDayStatus(byDate.get(key), key, settings);
+      if (st === "ABSENT") absent++;
+      else if (st === "LATE") late++;
+      else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY") present++;
+    }
+    const rate = workingDays ? Math.round(((present + late) / workingDays) * 100) : 0;
+    return { present, late, absent, workingDays, rate };
+  }, [byDate, year, month, settings]);
 
   const selected = selectedDate ? byDate.get(selectedDate) : undefined;
-  const selectedStatus = selectedDate ? dayStatus(selected, selectedDate) : "NONE";
+  const selectedStatus = selectedDate
+    ? effectiveDayStatus(selected, selectedDate, settings)
+    : "NONE";
+  const selectedLate = computeLateMinutes(selected?.signInTime, settings.dailySignInTime);
 
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
@@ -240,7 +259,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                       if (!day) return <div key={di} />;
                       const key = dateKey(year, month, day);
                       const rec = byDate.get(key);
-                      const st = dayStatus(rec, key);
+                      const st = effectiveDayStatus(rec, key, settings);
                       const isSelected = selectedDate === key;
                       return (
                         <button
@@ -284,8 +303,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     gps={selected.signInGps}
                     image={selected.signInImageLocalPath}
                     extra={
-                      selected.lateMinutes > 0
-                        ? `Delayed: ${formatLateDuration(selected.lateMinutes)} (expected ${settings.dailySignInTime})`
+                      selectedLate > 0
+                        ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${settings.dailySignInTime})`
                         : selected.signInTime
                           ? `On time (expected ${settings.dailySignInTime})`
                           : undefined

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, doc, onSnapshot, setDoc, query, where } from "firebase/firestore";
 import {
   CalendarDays,
   ChevronRight,
@@ -16,8 +16,9 @@ import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
 import {
-  dayStatus,
+  computeLateMinutes,
   defaultSettings,
+  effectiveDayStatus,
   formatLateDuration,
   formatWorkingHours,
   normalizeTime,
@@ -56,29 +57,31 @@ export default function AttendancePage() {
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    async function loadStaff() {
-      const snap = await getDocs(collection(getDb(), "employees"));
-      setStaff(
-        snap.docs
-          .filter((d) => (d.data().role as string) === "STAFF" || !d.data().role)
-          .map((d) => ({
-            id: (d.data().id as string) || d.id,
-            name: d.data().name as string,
-            phone: d.data().phone as string,
-            joiningDate: (d.data().joiningDate as string) || "",
-            monthlySalary: (d.data().monthlySalary as number) || 0,
-            attendancePercentage: (d.data().attendancePercentage as number) || 0,
-            role: "STAFF" as const,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
-    }
-    loadStaff();
+    const unsub = onSnapshot(
+      collection(getDb(), "employees"),
+      (snap) => {
+        setStaff(
+          snap.docs
+            .filter((d) => (d.data().role as string) === "STAFF" || !d.data().role)
+            .map((d) => ({
+              id: (d.data().id as string) || d.id,
+              name: d.data().name as string,
+              phone: d.data().phone as string,
+              joiningDate: (d.data().joiningDate as string) || "",
+              monthlySalary: (d.data().monthlySalary as number) || 0,
+              attendancePercentage: (d.data().attendancePercentage as number) || 0,
+              role: "STAFF" as const,
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+      },
+      () => setLoadError("Could not load staff list.")
+    );
+    return () => unsub();
   }, []);
 
   useEffect(() => {
-    async function loadSettings() {
-      const snap = await getDoc(doc(getDb(), "settings", "attendance"));
+    const unsub = onSnapshot(doc(getDb(), "settings", "attendance"), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         const s = {
@@ -88,26 +91,27 @@ export default function AttendancePage() {
         setSettings(s);
         setSettingsForm(s);
       }
-    }
-    loadSettings();
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
-    async function loadDay() {
-      setLoading(true);
-      setLoadError("");
-      try {
-        const snap = await getDocs(query(collection(getDb(), "attendance"), where("date", "==", date)));
+    setLoading(true);
+    setLoadError("");
+    const unsub = onSnapshot(
+      query(collection(getDb(), "attendance"), where("date", "==", date)),
+      (snap) => {
         setRecords(snap.docs.map((d) => parseAttendance(d.id, d.data())));
-      } catch (err) {
+        setLoading(false);
+      },
+      (err) => {
         console.error(err);
         setLoadError("Could not load attendance. Check Firebase connection.");
         setRecords([]);
-      } finally {
         setLoading(false);
       }
-    }
-    loadDay();
+    );
+    return () => unsub();
   }, [date]);
 
   async function saveSettings(e: React.FormEvent) {
@@ -115,8 +119,13 @@ export default function AttendancePage() {
     setSavingSettings(true);
     setSettingsMsg("");
     try {
-      await setDoc(doc(getDb(), "settings", "attendance"), settingsForm, { merge: true });
-      setSettings(settingsForm);
+      const payload = {
+        dailySignInTime: normalizeTime(settingsForm.dailySignInTime),
+        dailySignOutTime: normalizeTime(settingsForm.dailySignOutTime),
+      };
+      await setDoc(doc(getDb(), "settings", "attendance"), payload, { merge: true });
+      setSettings(payload);
+      setSettingsForm(payload);
       setSettingsMsg("Shift timings saved.");
     } catch {
       setSettingsMsg("Failed to save settings.");
@@ -139,14 +148,14 @@ export default function AttendancePage() {
     let absent = 0;
     for (const e of staff) {
       const r = byEmployee.get(e.phone);
-      const st = dayStatus(r, date);
+      const st = effectiveDayStatus(r, date, settings);
       if (st === "ABSENT") absent++;
       else if (st === "LATE") late++;
       else present++;
     }
-    const rate = staff.length ? Math.round((present / staff.length) * 100) : 0;
+    const rate = staff.length ? Math.round(((present + late) / staff.length) * 100) : 0;
     return { present, late, absent, rate };
-  }, [staff, byEmployee, date]);
+  }, [staff, byEmployee, date, settings]);
 
   const formattedDate = useMemo(
     () =>
@@ -210,7 +219,8 @@ export default function AttendancePage() {
             <div className="divide-y divide-[var(--border)]">
               {filteredStaff.map((e) => {
                 const r = byEmployee.get(e.phone);
-                const st = dayStatus(r, date);
+                const st = effectiveDayStatus(r, date, settings);
+                const lateMins = computeLateMinutes(r?.signInTime, settings.dailySignInTime);
                 return (
                   <button
                     key={e.phone}
@@ -228,7 +238,7 @@ export default function AttendancePage() {
                         <p className="mt-0.5 text-xs text-[var(--text-faint)]">
                           In {r.signInTime}
                           {r.signOutTime ? ` · Out ${r.signOutTime}` : ""}
-                          {r.lateMinutes > 0 ? ` · ${formatLateDuration(r.lateMinutes)}` : ""}
+                          {lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : " · On time"}
                           {r.workingHours ? ` · ${formatWorkingHours(r.workingHours)} worked` : ""}
                         </p>
                       )}
@@ -356,7 +366,7 @@ export default function AttendancePage() {
               />
             </div>
             <p className="mt-2 text-xs text-white/40">
-              {stats.present} of {staff.length} staff checked in
+              {stats.present + stats.late} of {staff.length} staff checked in
             </p>
           </div>
         </div>

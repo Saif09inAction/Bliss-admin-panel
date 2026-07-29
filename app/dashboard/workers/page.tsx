@@ -5,7 +5,7 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDocs,
+  onSnapshot,
   setDoc,
 } from "firebase/firestore";
 import { motion } from "framer-motion";
@@ -20,6 +20,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
+import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import PageToolbar from "@/components/admin/PageToolbar";
 import WorkerProfilePanel from "@/components/WorkerProfilePanel";
@@ -63,25 +64,23 @@ export default function WorkersPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function load() {
-    const snap = await getDocs(collection(getDb(), "employees"));
-    const list = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: (data.id as string) || d.id,
-        name: data.name as string,
-        phone: data.phone as string,
-        joiningDate: data.joiningDate as string,
-        monthlySalary: (data.monthlySalary as number) || 0,
-        attendancePercentage: (data.attendancePercentage as number) || 0,
-        role: ((data.role as Role) || "STAFF") as Role,
-      };
-    });
-    setEmployees(list.sort((a, b) => a.name.localeCompare(b.name)));
-  }
-
   useEffect(() => {
-    load();
+    const unsub = onSnapshot(collection(getDb(), "employees"), (snap) => {
+      const list = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: (data.id as string) || d.id,
+          name: data.name as string,
+          phone: data.phone as string,
+          joiningDate: (data.joiningDate as string) || "",
+          monthlySalary: (data.monthlySalary as number) || 0,
+          attendancePercentage: (data.attendancePercentage as number) || 0,
+          role: ((data.role as Role) || "STAFF") as Role,
+        };
+      });
+      setEmployees(list.sort((a, b) => a.name.localeCompare(b.name)));
+    });
+    return () => unsub();
   }, []);
 
   function openStaffForm() {
@@ -157,7 +156,7 @@ export default function WorkersPage() {
         id: phone,
         name,
         phone,
-        joiningDate: form.joiningDate,
+        joiningDate: formMode === "kaariger" ? "" : form.joiningDate,
         monthlySalary: formMode === "kaariger" ? 0 : Number(form.monthlySalary) || 0,
         profilePhotoUrl: "",
         attendancePercentage: existingDoc?.attendancePercentage ?? 0,
@@ -175,7 +174,6 @@ export default function WorkersPage() {
       }
 
       closeForm();
-      load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save worker.");
     } finally {
@@ -184,9 +182,19 @@ export default function WorkersPage() {
   }
 
   async function removeEmployee(phone: string) {
-    if (!confirm("Delete this worker? They will no longer be able to login.")) return;
-    await deleteDoc(doc(getDb(), "employees", phone));
-    load();
+    if (
+      !confirm(
+        "Delete this worker? Their attendance, payments, and profile will also be removed. They will be logged out of the app."
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteWorkerAndPersonalData(phone);
+      if (profileEmployee?.phone === phone) setProfileEmployee(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete worker.");
+    }
   }
 
   const filtered = useMemo(() => {
@@ -481,15 +489,17 @@ export default function WorkersPage() {
                     />
                   </div>
                 )}
-                <div className={formMode === "staff" ? "" : "sm:col-span-2"}>
-                  <label className="label">Joining Date</label>
-                  <input
-                    className="input"
-                    type="date"
-                    value={form.joiningDate}
-                    onChange={(e) => setForm({ ...form, joiningDate: e.target.value })}
-                  />
-                </div>
+                {(formMode === "staff" || (formMode === "edit" && editingPhone && employees.find((e) => e.phone === editingPhone)?.role === "STAFF")) && (
+                  <div>
+                    <label className="label">Joining Date</label>
+                    <input
+                      className="input"
+                      type="date"
+                      value={form.joiningDate}
+                      onChange={(e) => setForm({ ...form, joiningDate: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
 
               {error && (

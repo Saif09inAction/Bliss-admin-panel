@@ -27,9 +27,42 @@ export function defaultSettings(): AttendanceSettings {
 
 export function normalizeTime(value?: string): string {
   if (!value) return "09:00";
-  const parts = value.split(":");
-  if (parts.length >= 2) return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
-  return value;
+  const trimmed = value.trim();
+  // Support "10:30 PM" / "10:30AM"
+  const ampm = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (ampm) {
+    let h = Number(ampm[1]) % 12;
+    if (/pm/i.test(ampm[4])) h += 12;
+    return `${String(h).padStart(2, "0")}:${ampm[2]}`;
+  }
+  const parts = trimmed.split(":");
+  if (parts.length >= 2) {
+    return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+  }
+  return trimmed;
+}
+
+/** Minutes from midnight for HH:mm or HH:mm:ss */
+export function timeToMinutes(value?: string): number | null {
+  if (!value?.trim()) return null;
+  const norm = value.trim();
+  const ampm = norm.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (ampm) {
+    let h = Number(ampm[1]) % 12;
+    if (/pm/i.test(ampm[4])) h += 12;
+    return h * 60 + Number(ampm[2]);
+  }
+  const parts = norm.split(":").map(Number);
+  if (parts.length < 2 || parts.some((n) => Number.isNaN(n))) return null;
+  return parts[0] * 60 + parts[1];
+}
+
+/** Recompute lateness from clock-in vs expected shift (ignores stale stored lateMinutes). */
+export function computeLateMinutes(signInTime?: string, expectedSignIn?: string): number {
+  const actual = timeToMinutes(signInTime);
+  const expected = timeToMinutes(normalizeTime(expectedSignIn));
+  if (actual == null || expected == null) return 0;
+  return Math.max(0, actual - expected);
 }
 
 export function formatLateDuration(minutes: number): string {
@@ -39,6 +72,22 @@ export function formatLateDuration(minutes: number): string {
   if (h > 0 && m > 0) return `${h} hr ${m} min late`;
   if (h > 0) return `${h} hr late`;
   return `${m} min late`;
+}
+
+/** Day status using current shift settings when a punch exists. */
+export function effectiveDayStatus(
+  record: Attendance | undefined,
+  dateStr: string,
+  settings?: AttendanceSettings
+): DayStatus {
+  const today = new Date();
+  const day = parseDate(dateStr);
+  if (day > startOfDay(today)) return "FUTURE";
+  if (!record || !record.signInTime) return "ABSENT";
+  const late = computeLateMinutes(record.signInTime, settings?.dailySignInTime);
+  if (late > 0) return "LATE";
+  if (record.signOutTime) return "PRESENT";
+  return "ON_TIME";
 }
 
 export function formatWorkingHours(hours: number): string {
