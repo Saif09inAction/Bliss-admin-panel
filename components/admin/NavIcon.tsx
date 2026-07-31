@@ -10,6 +10,7 @@ import {
   ClipboardList,
   ScrollText,
   Palmtree,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -22,6 +23,7 @@ const ICONS: Record<string, LucideIcon> = {
   inventory: Package,
   store: Warehouse,
   orders: ClipboardList,
+  repair: Wrench,
   list: ScrollText,
 };
 

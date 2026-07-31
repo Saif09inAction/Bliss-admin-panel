@@ -69,6 +69,10 @@ export interface KaarigerOrder {
   createdBy: string;
   createdAt: number;
   notes?: string;
+  /** Original deal before any repairing deductions (set on first repair). */
+  originalDealAmount?: number;
+  /** Cumulative repairing deductions from deal. */
+  repairDeductionTotal?: number;
 }
 
 export interface OrderApprovalRecord {
@@ -97,6 +101,34 @@ export interface KaarigerPayment {
   time: string;
   remarks?: string;
   createdBy: string;
+}
+
+export type RepairItemType = "RUNNER" | "FITTING" | "ASTAR" | "MATERIAL";
+
+export interface RepairLineItem {
+  type: RepairItemType;
+  label: string;
+  quantity: number;
+  pricePerPiece: number;
+  lineTotal: number;
+}
+
+export interface OrderRepair {
+  id: string;
+  orderId: string;
+  kaarigerId: string;
+  kaarigerName: string;
+  productName: string;
+  faultyQuantity: number;
+  faultyPricePerPiece: number;
+  faultyTotal: number;
+  items: RepairLineItem[];
+  totalRepairCost: number;
+  originalDealAmount: number;
+  dealAfterThisRepair: number;
+  notes?: string;
+  createdBy: string;
+  createdAt: number;
 }
 
 export interface AttendanceSettings {

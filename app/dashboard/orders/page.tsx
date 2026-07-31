@@ -113,6 +113,8 @@ export default function OrdersPage() {
           createdBy: (data.createdBy as string) || "",
           createdAt: (data.createdAt as number) || 0,
           notes: data.notes as string | undefined,
+          originalDealAmount: data.originalDealAmount as number | undefined,
+          repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
         };
       }).sort((a, b) => b.createdAt - a.createdAt)
     );
@@ -712,7 +714,7 @@ export default function OrdersPage() {
                 <div className="stat-card !p-3">
                   <p className="stat-card-label">Deal Amount</p>
                   <p className="stat-card-value !text-xl">
-                    ₹{selected.totalDealAmount.toLocaleString("en-IN")}
+                    ₹{(selected.originalDealAmount ?? selected.totalDealAmount).toLocaleString("en-IN")}
                   </p>
                   {selected.pricingType === "PER_PIECE" && selected.pricePerPiece ? (
                     <p className="mt-0.5 text-xs text-[var(--text-muted)]">₹{selected.pricePerPiece}/pc</p>
@@ -727,8 +729,18 @@ export default function OrdersPage() {
                 <div className="stat-card !p-3">
                   <p className="stat-card-label">Balance</p>
                   <p className="stat-card-value !text-xl">
-                    ₹{(selected.totalDealAmount - paidTotal).toLocaleString("en-IN")}
+                    ₹{Math.max(
+                      0,
+                      (selected.originalDealAmount ?? selected.totalDealAmount) -
+                        (selected.repairDeductionTotal || 0) -
+                        paidTotal
+                    ).toLocaleString("en-IN")}
                   </p>
+                  {(selected.repairDeductionTotal || 0) > 0 && (
+                    <p className="mt-0.5 text-xs text-danger">
+                      Repair −₹{(selected.repairDeductionTotal || 0).toLocaleString("en-IN")}
+                    </p>
+                  )}
                 </div>
               </div>
 

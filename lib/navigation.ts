@@ -57,6 +57,14 @@ export const SIDEBAR_NAV: NavRoute[] = [
     group: "ops",
   },
   {
+    href: "/dashboard/repairing",
+    label: "Repairing",
+    title: "Repairing",
+    subtitle: "Faulty stock & deductions",
+    icon: "repair",
+    group: "ops",
+  },
+  {
     href: "/dashboard/materials",
     label: "Materials",
     title: "Raw Materials",
@@ -168,6 +176,12 @@ export const ADMIN_MODULES = [
     description: "Create orders & advances",
     href: "/dashboard/orders",
     icon: "orders",
+  },
+  {
+    title: "Repairing",
+    description: "Faulty pcs & material deductions",
+    href: "/dashboard/repairing",
+    icon: "repair",
   },
   {
     title: "All Records",
