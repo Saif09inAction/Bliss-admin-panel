@@ -179,6 +179,45 @@ export default function HisaabPage() {
     return { deal, paid, repaired, balance };
   }, [orders, payments, repairs]);
 
+  // Runner / Fitting / Astar / Material — grouped the same way the old paper
+  // "Kaarigar Statement" sheets were, so it reads as one sorted ledger.
+  const materialCategories = useMemo(() => {
+    const allLines = orders.flatMap((o) =>
+      (o.materialDeductions || []).map((it) => ({ ...it, orderId: o.id, productName: o.productName, createdAt: o.createdAt }))
+    );
+
+    function groupByLabel(type: string) {
+      const items = allLines.filter((l) => l.type === type);
+      const byLabel = new Map<string, { label: string; quantity: number; lineTotal: number }>();
+      items.forEach((it) => {
+        const existing = byLabel.get(it.label);
+        if (existing) {
+          existing.quantity += it.quantity;
+          existing.lineTotal += it.lineTotal;
+        } else {
+          byLabel.set(it.label, { label: it.label, quantity: it.quantity, lineTotal: it.lineTotal });
+        }
+      });
+      return {
+        rows: Array.from(byLabel.values()).sort((a, b) => b.lineTotal - a.lineTotal),
+        total: items.reduce((s, it) => s + it.lineTotal, 0),
+      };
+    }
+
+    const material = groupByLabel("MATERIAL");
+    const astar = groupByLabel("ASTAR");
+    const runner = groupByLabel("RUNNER");
+    const fitting = groupByLabel("FITTING");
+    const grandTotal = material.total + astar.total + runner.total + fitting.total;
+    return { material, astar, runner, fitting, grandTotal };
+  }, [orders]);
+
+  const hasMaterialCategories =
+    materialCategories.material.rows.length > 0 ||
+    materialCategories.astar.rows.length > 0 ||
+    materialCategories.runner.rows.length > 0 ||
+    materialCategories.fitting.rows.length > 0;
+
   return (
     <div className="space-y-5">
       <PageToolbar title="Hisaab">
@@ -297,6 +336,48 @@ export default function HisaabPage() {
 
           <div>
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <Package className="h-4 w-4 text-[var(--text-muted)]" />
+              Material, Runner, Fitting &amp; Astar
+            </h3>
+            {!hasMaterialCategories ? (
+              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+                No material, runner, fitting or astar charges recorded yet.
+              </div>
+            ) : (
+              <div className="surface space-y-4 p-4">
+                {materialCategories.material.rows.length > 0 && (
+                  <CategoryBlock
+                    title="Material"
+                    rows={materialCategories.material.rows}
+                    total={materialCategories.material.total}
+                  />
+                )}
+                {materialCategories.astar.rows.length > 0 && (
+                  <CategoryBlock
+                    title="Astar"
+                    rows={materialCategories.astar.rows}
+                    total={materialCategories.astar.total}
+                  />
+                )}
+                {(materialCategories.runner.rows.length > 0 || materialCategories.fitting.rows.length > 0) && (
+                  <CategoryBlock
+                    title="Runner / Fitting"
+                    rows={[...materialCategories.runner.rows, ...materialCategories.fitting.rows]}
+                    total={materialCategories.runner.total + materialCategories.fitting.total}
+                  />
+                )}
+                <div className="flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3">
+                  <span className="font-display font-bold text-amber-700">Grand Total</span>
+                  <span className="font-display text-lg font-bold text-amber-700">
+                    {money(materialCategories.grandTotal)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
               <Wrench className="h-4 w-4 text-[var(--text-muted)]" />
               Repairing Deductions
             </h3>
@@ -378,6 +459,41 @@ export default function HisaabPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CategoryBlock({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; quantity: number; lineTotal: number }[];
+  total: number;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">{title}</p>
+      <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className={i % 2 === 1 ? "bg-[var(--surface-mist)]" : undefined}>
+                <td className="px-3 py-2 font-medium">{r.label}</td>
+                <td className="px-3 py-2 text-[var(--text-muted)]">{r.quantity} pcs</td>
+                <td className="px-3 py-2 text-right font-semibold text-danger">−{money(r.lineTotal)}</td>
+              </tr>
+            ))}
+            <tr className="bg-amber-50/70">
+              <td colSpan={2} className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-700">
+                {title} Total
+              </td>
+              <td className="px-3 py-2 text-right font-bold text-amber-700">−{money(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

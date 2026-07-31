@@ -42,11 +42,10 @@ import SearchSelect from "@/components/admin/SearchSelect";
 
 type CatalogProduct = { id: string; name: string };
 
-const DEDUCTION_ITEMS: { type: RepairItemType; label: string }[] = [
+const DEDUCTION_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }[] = [
   { type: "RUNNER", label: "Runner" },
   { type: "FITTING", label: "Fitting" },
   { type: "ASTAR", label: "Astar" },
-  { type: "MATERIAL", label: "Material" },
 ];
 
 type ProductLineForm = {
@@ -56,7 +55,13 @@ type ProductLineForm = {
   pricePerPiece: string;
 };
 
-type DeductionDraft = Record<RepairItemType, { qty: string; price: string }>;
+type DeductionDraft = Record<Exclude<RepairItemType, "MATERIAL">, { qty: string; price: string }>;
+
+type MaterialLineForm = {
+  name: string;
+  qty: string;
+  price: string;
+};
 
 function emptyProductLine(): ProductLineForm {
   return { productId: "", productName: "", quantity: "", pricePerPiece: "" };
@@ -67,8 +72,11 @@ function emptyDeductions(): DeductionDraft {
     RUNNER: { qty: "", price: "" },
     FITTING: { qty: "", price: "" },
     ASTAR: { qty: "", price: "" },
-    MATERIAL: { qty: "", price: "" },
   };
+}
+
+function emptyMaterialLine(): MaterialLineForm {
+  return { name: "", qty: "", price: "" };
 }
 
 function money(n: number) {
@@ -122,6 +130,7 @@ export default function OrdersPage() {
   const [kaarigerId, setKaarigerId] = useState("");
   const [productLines, setProductLines] = useState<ProductLineForm[]>([emptyProductLine()]);
   const [deductions, setDeductions] = useState<DeductionDraft>(emptyDeductions());
+  const [materialLines, setMaterialLines] = useState<MaterialLineForm[]>([emptyMaterialLine()]);
   const [kharcha, setKharcha] = useState("");
   const [notes, setNotes] = useState("");
   const [sending, setSending] = useState(false);
@@ -131,6 +140,7 @@ export default function OrdersPage() {
     setKaarigerId("");
     setProductLines([emptyProductLine()]);
     setDeductions(emptyDeductions());
+    setMaterialLines([emptyMaterialLine()]);
     setKharcha("");
     setNotes("");
     setFormMsg("");
@@ -266,11 +276,27 @@ export default function OrdersPage() {
     });
     const productsTotal = lines.reduce((s, l) => s + l.lineTotal, 0);
 
-    const deductionLines: RepairLineItem[] = DEDUCTION_ITEMS.map(({ type, label }) => {
+    const chargeLines: RepairLineItem[] = DEDUCTION_ITEMS.map(({ type, label }) => {
       const qty = Number(deductions[type].qty) || 0;
       const price = Number(deductions[type].price) || 0;
       return { type, label, quantity: qty, pricePerPiece: price, lineTotal: qty * price };
     }).filter((it) => it.quantity > 0 && it.pricePerPiece > 0);
+
+    const materialItemLines: RepairLineItem[] = materialLines
+      .map((m) => {
+        const qty = Number(m.qty) || 0;
+        const price = Number(m.price) || 0;
+        return {
+          type: "MATERIAL" as RepairItemType,
+          label: m.name.trim() || "Material",
+          quantity: qty,
+          pricePerPiece: price,
+          lineTotal: qty * price,
+        };
+      })
+      .filter((it) => it.label.trim() && it.quantity > 0 && it.pricePerPiece > 0);
+
+    const deductionLines: RepairLineItem[] = [...chargeLines, ...materialItemLines];
     const deductionsTotal = deductionLines.reduce((s, it) => s + it.lineTotal, 0);
 
     const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
@@ -283,6 +309,8 @@ export default function OrdersPage() {
     return {
       lines,
       productsTotal,
+      chargeLines,
+      materialItemLines,
       deductionLines,
       deductionsTotal,
       afterDeductions,
@@ -291,7 +319,19 @@ export default function OrdersPage() {
       creditApplied,
       finalTotal,
     };
-  }, [productLines, deductions, kharcha, availableCredit]);
+  }, [productLines, deductions, materialLines, kharcha, availableCredit]);
+
+  function addMaterialLine() {
+    setMaterialLines((prev) => [...prev, emptyMaterialLine()]);
+  }
+
+  function removeMaterialLine(index: number) {
+    setMaterialLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateMaterialLine(index: number, patch: Partial<MaterialLineForm>) {
+    setMaterialLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  }
 
   function addProductLine() {
     setProductLines((prev) => [...prev, emptyProductLine()]);
@@ -702,7 +742,7 @@ export default function OrdersPage() {
       <div>
         <p className="label mb-1 flex items-center gap-1.5">
           <Wrench className="h-3.5 w-3.5" />
-          Runner / Fitting / Astar / Material (optional)
+          Runner / Fitting / Astar (optional)
         </p>
         <p className="mb-2 text-[11px] text-[var(--text-muted)]">
           These costs are deducted from the products total. Fill only what applies.
@@ -744,6 +784,71 @@ export default function OrdersPage() {
             </div>
           ))}
         </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <p className="label !mb-0 flex items-center gap-1.5">
+            <Package className="h-3.5 w-3.5" />
+            Material (optional)
+          </p>
+          <button type="button" className="btn-ghost btn-sm" onClick={addMaterialLine}>
+            <Plus className="h-3.5 w-3.5" />
+            Add material
+          </button>
+        </div>
+        <p className="mb-2 mt-1 text-[11px] text-[var(--text-muted)]">
+          Add each raw material by name — e.g. Vinit, Badal, Board — with its own qty and rate.
+        </p>
+        <div className="space-y-2">
+          {materialLines.map((m, index) => (
+            <div
+              key={index}
+              className="grid grid-cols-[minmax(0,1fr)_4.5rem_5.5rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+            >
+              <div>
+                <label className="label !text-[10px]">Material name</label>
+                <input
+                  className="input !w-full !py-2"
+                  value={m.name}
+                  onChange={(e) => updateMaterialLine(index, { name: e.target.value })}
+                  placeholder="e.g. Vinit"
+                />
+              </div>
+              <div>
+                <label className="label !text-[10px]">Qty</label>
+                <input
+                  className="input !w-full !py-2"
+                  type="number"
+                  min={0}
+                  value={m.qty}
+                  onChange={(e) => updateMaterialLine(index, { qty: e.target.value })}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="label !text-[10px]">₹ / pc</label>
+                <input
+                  className="input !w-full !py-2"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={m.price}
+                  onChange={(e) => updateMaterialLine(index, { price: e.target.value })}
+                  placeholder="0"
+                />
+              </div>
+              <button
+                type="button"
+                className="btn-ghost btn-sm !p-2"
+                onClick={() => removeMaterialLine(index)}
+                aria-label="Remove material"
+                disabled={materialLines.length === 1 && !m.name && !m.qty && !m.price}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
         <div className="mt-2.5 flex items-center justify-between rounded-xl bg-[var(--surface-mist)] px-3 py-2.5 text-sm">
           <span className="font-medium text-[var(--text-muted)]">Deductions Total</span>
           <span className="font-bold text-danger">−{money(calc.deductionsTotal)}</span>
