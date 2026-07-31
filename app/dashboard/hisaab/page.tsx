@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { Package, Receipt, ShoppingBag, Wallet, Wrench } from "lucide-react";
+import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { IndianRupee, Package, Plus, Receipt, ShoppingBag, Wallet, Wrench, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
+import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, OrderProductLine, OrderRepair, RepairLineItem } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
@@ -34,49 +36,55 @@ function orderStatusBadge(status: string) {
 }
 
 export default function HisaabPage() {
+  const { session } = useAuth();
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
   const [kaarigerId, setKaarigerId] = useState("");
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
   const [payments, setPayments] = useState<KaarigerPayment[]>([]);
   const [repairs, setRepairs] = useState<OrderRepair[]>([]);
   const [loading, setLoading] = useState(false);
+  const [payOrderId, setPayOrderId] = useState<string | null>(null);
+  const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
+  const [paySaving, setPaySaving] = useState(false);
+  const [payMsg, setPayMsg] = useState("");
+
+  async function loadKaarigers() {
+    const snap = await getDocs(collection(getDb(), "employees"));
+    setKaarigers(
+      snap.docs
+        .filter((d) => d.data().role === "KAARIGER")
+        .map((d) => ({
+          id: d.id,
+          name: (d.data().name as string) || "",
+          phone: (d.data().phone as string) || "",
+          joiningDate: "",
+          monthlySalary: 0,
+          attendancePercentage: 0,
+          role: "KAARIGER" as const,
+          creditBalance: (d.data().creditBalance as number) || 0,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
+  }
 
   useEffect(() => {
-    (async () => {
-      const snap = await getDocs(collection(getDb(), "employees"));
-      setKaarigers(
-        snap.docs
-          .filter((d) => d.data().role === "KAARIGER")
-          .map((d) => ({
-            id: d.id,
-            name: (d.data().name as string) || "",
-            phone: (d.data().phone as string) || "",
-            joiningDate: "",
-            monthlySalary: 0,
-            attendancePercentage: 0,
-            role: "KAARIGER" as const,
-            creditBalance: (d.data().creditBalance as number) || 0,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
-    })();
+    loadKaarigers();
   }, []);
 
-  useEffect(() => {
-    if (!kaarigerId) {
+  async function loadKaarigerData(id: string) {
+    if (!id) {
       setOrders([]);
       setPayments([]);
       setRepairs([]);
       return;
     }
-    (async () => {
-      setLoading(true);
-      try {
+    setLoading(true);
+    try {
         const db = getDb();
         const [orderSnap, paySnap, repairSnap] = await Promise.all([
-          getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaarigerId))),
-          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaarigerId))),
-          getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", kaarigerId))),
+          getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", id))),
+          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", id))),
+          getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", id))),
         ]);
         setOrders(
           orderSnap.docs
@@ -156,11 +164,74 @@ export default function HisaabPage() {
             })
             .sort((a, b) => b.createdAt - a.createdAt)
         );
-      } finally {
-        setLoading(false);
-      }
-    })();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadKaarigerData(kaarigerId);
   }, [kaarigerId]);
+
+  async function submitPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!payOrderId || !session) return;
+    const order = orders.find((o) => o.id === payOrderId);
+    if (!order) return;
+
+    const amount = Number(payForm.amount) || 0;
+    if (amount <= 0) return;
+
+    setPaySaving(true);
+    setPayMsg("");
+    try {
+      const id = uuid();
+      const payment: KaarigerPayment = {
+        id,
+        orderId: order.id,
+        kaarigerId: order.kaarigerId,
+        amount,
+        date: todayStr(),
+        time: nowTimeStr(),
+        remarks: payForm.remarks || undefined,
+        createdBy: session.name,
+      };
+      await setDoc(doc(getDb(), "kaariger_payments", id), payment);
+
+      // Auto-complete the order once fully paid, carrying any overpayment
+      // forward as credit that's auto-applied to this kaariger's next bill.
+      if (order.status !== "COMPLETED") {
+        const netDeal = orderNetDeal(order);
+        const totalPaidBefore = payments.filter((p) => p.orderId === order.id).reduce((s, p) => s + p.amount, 0);
+        const totalPaidAfter = totalPaidBefore + amount;
+        if (totalPaidAfter >= netDeal) {
+          const excess = totalPaidAfter - netDeal;
+          await updateDoc(doc(getDb(), "kaariger_orders", order.id), { status: "COMPLETED" });
+          if (excess > 0) {
+            const currentCredit = selectedKaariger?.creditBalance || 0;
+            await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
+              creditBalance: currentCredit + excess,
+            });
+            setPayMsg(`Order completed. ${money(excess)} extra kharcha carried forward as credit.`);
+          } else {
+            setPayMsg("Order fully paid — marked as completed.");
+          }
+        } else {
+          setPayMsg("Kharcha recorded.");
+        }
+      } else {
+        setPayMsg("Kharcha recorded.");
+      }
+
+      setPayForm({ amount: "", remarks: "" });
+      setPayOrderId(null);
+      await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
+    } catch (err) {
+      setPayMsg(err instanceof Error ? err.message : "Failed to record kharcha.");
+    } finally {
+      setPaySaving(false);
+    }
+  }
 
   const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
   const selectedKaariger = kaarigers.find((k) => k.phone === kaarigerId);
@@ -306,6 +377,7 @@ export default function HisaabPage() {
                       <th className="text-right">Deal</th>
                       <th className="text-right">Paid</th>
                       <th className="text-right">Balance</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -325,6 +397,20 @@ export default function HisaabPage() {
                           <td className="text-right">{money(net)}</td>
                           <td className="text-right text-jade-deep">{money(paid)}</td>
                           <td className="text-right font-semibold">{money(balance)}</td>
+                          <td className="text-right">
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm whitespace-nowrap"
+                              onClick={() => {
+                                setPayOrderId(o.id);
+                                setPayForm({ amount: "", remarks: "" });
+                                setPayMsg("");
+                              }}
+                            >
+                              <IndianRupee className="h-3.5 w-3.5" />
+                              Pay
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -460,6 +546,69 @@ export default function HisaabPage() {
             )}
           </div>
         </div>
+      )}
+
+      {payOrderId && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setPayOrderId(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={submitPayment}
+              className="surface w-full max-w-sm space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Add Kharcha</h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {orders.find((o) => o.id === payOrderId)?.productName}
+                  </p>
+                </div>
+                <button type="button" className="btn-icon" onClick={() => setPayOrderId(null)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div>
+                <label className="label">Amount (₹) *</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  autoFocus
+                  value={payForm.amount}
+                  onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                  placeholder="e.g. 500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Remarks (optional)</label>
+                <input
+                  className="input"
+                  value={payForm.remarks}
+                  onChange={(e) => setPayForm({ ...payForm, remarks: e.target.value })}
+                  placeholder="Optional note"
+                />
+              </div>
+              {payMsg && (
+                <p className="rounded-xl bg-jade-soft px-3 py-2 text-sm text-jade-deep">{payMsg}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary flex-1"
+                  onClick={() => setPayOrderId(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={paySaving}>
+                  <Plus className="h-4 w-4" />
+                  {paySaving ? "Saving…" : "Add Kharcha"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
       )}
     </div>
   );
