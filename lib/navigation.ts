@@ -57,6 +57,14 @@ export const SIDEBAR_NAV: NavRoute[] = [
     group: "ops",
   },
   {
+    href: "/dashboard/hisaab",
+    label: "Hisaab",
+    title: "Hisaab",
+    subtitle: "Per-kaariger payment history",
+    icon: "hisaab",
+    group: "finance",
+  },
+  {
     href: "/dashboard/repairing",
     label: "Repairing",
     title: "Repairing",
@@ -109,7 +117,7 @@ export const SIDEBAR_NAV: NavRoute[] = [
 export const BOTTOM_NAV: NavRoute[] = [
   SIDEBAR_NAV[0], // Overview
   SIDEBAR_NAV[1], // Brothers
-  SIDEBAR_NAV[5], // Orders
+  SIDEBAR_NAV[5], // Kaarigar
   SIDEBAR_NAV[4], // Salary
 ];
 
@@ -198,6 +206,12 @@ export const ADMIN_MODULES = [
     description: "Products, deductions & kharcha",
     href: "/dashboard/orders",
     icon: "orders",
+  },
+  {
+    title: "Hisaab",
+    description: "Per-kaariger payment history",
+    href: "/dashboard/hisaab",
+    icon: "hisaab",
   },
   {
     title: "Repairing",

@@ -1,0 +1,292 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { Package, Receipt, ShoppingBag, Wallet } from "lucide-react";
+import { getDb } from "@/lib/firebase";
+import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, OrderProductLine, RepairLineItem } from "@/lib/types";
+import PageToolbar from "@/components/admin/PageToolbar";
+import SearchSelect from "@/components/admin/SearchSelect";
+
+function money(n: number) {
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
+
+function orderNetDeal(order: KaarigerOrder) {
+  const deal = order.originalDealAmount ?? order.totalDealAmount;
+  return Math.max(0, deal - (order.repairDeductionTotal || 0));
+}
+
+function orderStatusBadge(status: string) {
+  switch (status) {
+    case "COMPLETED":
+      return "badge badge-success";
+    case "PENDING_APPROVAL":
+      return "badge badge-warn";
+    case "IN_PROGRESS":
+    case "DELIVERED":
+      return "badge badge-gold";
+    case "CANCELLED":
+      return "badge badge-danger";
+    default:
+      return "badge badge-neutral";
+  }
+}
+
+export default function HisaabPage() {
+  const [kaarigers, setKaarigers] = useState<Employee[]>([]);
+  const [kaarigerId, setKaarigerId] = useState("");
+  const [orders, setOrders] = useState<KaarigerOrder[]>([]);
+  const [payments, setPayments] = useState<KaarigerPayment[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const snap = await getDocs(collection(getDb(), "employees"));
+      setKaarigers(
+        snap.docs
+          .filter((d) => d.data().role === "KAARIGER")
+          .map((d) => ({
+            id: d.id,
+            name: (d.data().name as string) || "",
+            phone: (d.data().phone as string) || "",
+            joiningDate: "",
+            monthlySalary: 0,
+            attendancePercentage: 0,
+            role: "KAARIGER" as const,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!kaarigerId) {
+      setOrders([]);
+      setPayments([]);
+      return;
+    }
+    (async () => {
+      setLoading(true);
+      try {
+        const db = getDb();
+        const [orderSnap, paySnap] = await Promise.all([
+          getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaarigerId))),
+          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaarigerId))),
+        ]);
+        setOrders(
+          orderSnap.docs
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: (data.id as string) || d.id,
+                kaarigerId: data.kaarigerId as string,
+                kaarigerName: data.kaarigerName as string,
+                productName: (data.productName as string) || "",
+                targetQuantity: (data.targetQuantity as number) || 0,
+                color: (data.color as string) || "",
+                rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
+                totalDealAmount: (data.totalDealAmount as number) || 0,
+                pricePerPiece: data.pricePerPiece as number | undefined,
+                pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+                status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || "ASSIGNED"),
+                approvedQuantity: (data.approvedQuantity as number) || 0,
+                createdBy: (data.createdBy as string) || "",
+                createdAt: (data.createdAt as number) || 0,
+                notes: data.notes as string | undefined,
+                originalDealAmount: data.originalDealAmount as number | undefined,
+                repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+                products: (data.products as OrderProductLine[]) || [],
+                productsTotal: data.productsTotal as number | undefined,
+                materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
+                materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+                kharchaGiven: data.kharchaGiven as number | undefined,
+              } satisfies KaarigerOrder;
+            })
+            .sort((a, b) => b.createdAt - a.createdAt)
+        );
+        setPayments(
+          paySnap.docs
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: (data.id as string) || d.id,
+                orderId: data.orderId as string,
+                kaarigerId: data.kaarigerId as string,
+                amount: (data.amount as number) || 0,
+                date: (data.date as string) || "",
+                time: (data.time as string) || "",
+                remarks: data.remarks as string | undefined,
+                createdBy: (data.createdBy as string) || "",
+              } satisfies KaarigerPayment;
+            })
+            .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+        );
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [kaarigerId]);
+
+  const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
+  const selectedKaariger = kaarigers.find((k) => k.phone === kaarigerId);
+
+  const orderPaidMap = useMemo(() => {
+    const map = new Map<string, number>();
+    payments.forEach((p) => map.set(p.orderId, (map.get(p.orderId) || 0) + p.amount));
+    return map;
+  }, [payments]);
+
+  const totals = useMemo(() => {
+    const deal = orders.reduce((s, o) => s + orderNetDeal(o), 0);
+    const paid = payments.reduce((s, p) => s + p.amount, 0);
+    const balance = Math.max(0, deal - paid);
+    return { deal, paid, balance };
+  }, [orders, payments]);
+
+  return (
+    <div className="space-y-5">
+      <PageToolbar title="Hisaab">
+        <p className="section-sub">Full payment & kharcha history per kaariger</p>
+      </PageToolbar>
+
+      <div className="surface max-w-md p-4">
+        <label className="label">Select kaariger</label>
+        <SearchSelect
+          value={kaarigerId}
+          onSelect={setKaarigerId}
+          options={kaarigerOptions}
+          placeholder="Search or select a kaariger…"
+          emptyText="No kaarigers found"
+        />
+      </div>
+
+      {!kaarigerId ? (
+        <div className="surface flex flex-col items-center py-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-jade-soft text-jade-deep">
+            <Receipt size={22} />
+          </div>
+          <p className="mt-3 font-semibold">Select a kaariger to view their hisaab</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
+            You&apos;ll see every order, all kharcha payments with dates, and the grand total.
+          </p>
+        </div>
+      ) : loading ? (
+        <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">Loading hisaab…</div>
+      ) : (
+        <div className="space-y-5">
+          <div className="surface flex items-center gap-3 p-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
+              <Wallet size={20} />
+            </div>
+            <div>
+              <p className="font-display text-lg font-bold">{selectedKaariger?.name}</p>
+              <p className="text-sm text-[var(--text-muted)]">{selectedKaariger?.phone} · {orders.length} order{orders.length === 1 ? "" : "s"}</p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="stat-card">
+              <p className="stat-card-label">Total Deal</p>
+              <p className="stat-card-value">{money(totals.deal)}</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-card-label">Total Kharcha Paid</p>
+              <p className="stat-card-value text-jade-deep">{money(totals.paid)}</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-card-label">Total Balance</p>
+              <p className="stat-card-value">{money(totals.balance)}</p>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <ShoppingBag className="h-4 w-4 text-[var(--text-muted)]" />
+              Orders
+            </h3>
+            {orders.length === 0 ? (
+              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+                No orders for this kaariger yet.
+              </div>
+            ) : (
+              <div className="data-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th className="text-right">Deal</th>
+                      <th className="text-right">Paid</th>
+                      <th className="text-right">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.map((o) => {
+                      const net = orderNetDeal(o);
+                      const paid = orderPaidMap.get(o.id) || 0;
+                      const balance = Math.max(0, net - paid);
+                      return (
+                        <tr key={o.id}>
+                          <td className="font-medium">{o.productName}</td>
+                          <td className="text-[var(--text-muted)]">
+                            {o.createdAt ? new Date(o.createdAt).toLocaleDateString("en-IN") : "—"}
+                          </td>
+                          <td>
+                            <span className={orderStatusBadge(o.status)}>{o.status.replace(/_/g, " ")}</span>
+                          </td>
+                          <td className="text-right">{money(net)}</td>
+                          <td className="text-right text-jade-deep">{money(paid)}</td>
+                          <td className="text-right font-semibold">{money(balance)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <Package className="h-4 w-4 text-[var(--text-muted)]" />
+              Kharcha Timeline
+            </h3>
+            {payments.length === 0 ? (
+              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+                No kharcha paid to this kaariger yet.
+              </div>
+            ) : (
+              <div className="surface space-y-0 divide-y divide-[var(--border)] overflow-hidden !p-0">
+                {payments.map((p, i) => {
+                  const order = orders.find((o) => o.id === p.orderId);
+                  return (
+                    <div key={p.id} className="flex items-center gap-3 p-3.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-jade-soft text-xs font-bold text-jade-deep">
+                        {i + 1}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold">
+                          {money(p.amount)} paid {order ? `· ${order.productName}` : ""}
+                        </p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {p.date} {p.time} · {p.createdBy}
+                          {p.remarks ? ` · ${p.remarks}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between bg-jade-soft/50 p-4">
+                  <span className="font-display font-bold text-jade-deep">Grand Total Kharcha</span>
+                  <span className="font-display text-lg font-bold text-jade-deep">{money(totals.paid)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

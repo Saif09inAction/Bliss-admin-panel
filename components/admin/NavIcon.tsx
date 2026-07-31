@@ -13,6 +13,7 @@ import {
   Wrench,
   Shield,
   BookOpen,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ const ICONS: Record<string, LucideIcon> = {
   list: ScrollText,
   admins: Shield,
   catalog: BookOpen,
+  hisaab: Receipt,
 };
 
 export default function NavIcon({
