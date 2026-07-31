@@ -50,9 +50,9 @@ export const SIDEBAR_NAV: NavRoute[] = [
   },
   {
     href: "/dashboard/orders",
-    label: "Orders",
-    title: "Kaariger Orders",
-    subtitle: "Assign & track work",
+    label: "Kaarigar",
+    title: "Kaarigar",
+    subtitle: "Assign work & settle amounts",
     icon: "orders",
     group: "ops",
   },
@@ -194,8 +194,8 @@ export const ADMIN_MODULES = [
     icon: "store",
   },
   {
-    title: "Kaariger Orders",
-    description: "Create orders & kharcha",
+    title: "Kaarigar",
+    description: "Products, deductions & kharcha",
     href: "/dashboard/orders",
     icon: "orders",
   },

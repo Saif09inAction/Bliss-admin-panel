@@ -11,20 +11,68 @@ import {
   where,
 } from "firebase/firestore";
 import {
+  Calculator,
   ClipboardList,
   IndianRupee,
   Package,
   Pencil,
   Plus,
+  ShoppingBag,
   Trash2,
+  Wallet,
+  Wrench,
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, RawMaterial } from "@/lib/types";
+import type {
+  Employee,
+  KaarigerOrder,
+  KaarigerPayment,
+  OrderMaterial,
+  OrderProductLine,
+  RepairItemType,
+  RepairLineItem,
+} from "@/lib/types";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import SearchSelect from "@/components/admin/SearchSelect";
+
+type CatalogProduct = { id: string; name: string };
+
+const DEDUCTION_ITEMS: { type: RepairItemType; label: string }[] = [
+  { type: "RUNNER", label: "Runner" },
+  { type: "FITTING", label: "Fitting" },
+  { type: "ASTAR", label: "Astar" },
+  { type: "MATERIAL", label: "Material" },
+];
+
+type ProductLineForm = {
+  productId: string;
+  productName: string;
+  quantity: string;
+  pricePerPiece: string;
+};
+
+type DeductionDraft = Record<RepairItemType, { qty: string; price: string }>;
+
+function emptyProductLine(): ProductLineForm {
+  return { productId: "", productName: "", quantity: "", pricePerPiece: "" };
+}
+
+function emptyDeductions(): DeductionDraft {
+  return {
+    RUNNER: { qty: "", price: "" },
+    FITTING: { qty: "", price: "" },
+    ASTAR: { qty: "", price: "" },
+    MATERIAL: { qty: "", price: "" },
+  };
+}
+
+function money(n: number) {
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
 
 function orderStatusBadge(status: string) {
   switch (status) {
@@ -50,7 +98,7 @@ export default function OrdersPage() {
   const { session } = useAuth();
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
-  const [materials, setMaterials] = useState<RawMaterial[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [payments, setPayments] = useState<KaarigerPayment[]>([]);
@@ -69,16 +117,22 @@ export default function OrdersPage() {
     kaarigerId: "",
   });
 
-  const [form, setForm] = useState({
-    kaarigerId: "",
-    productName: "",
-    targetQuantity: "",
-    color: "",
-    totalDealAmount: "",
-    pricingType: "OVERALL" as "OVERALL" | "PER_PIECE",
-    notes: "",
-    selectedMaterials: [] as { materialId: string; quantity: string }[],
-  });
+  const [kaarigerId, setKaarigerId] = useState("");
+  const [productLines, setProductLines] = useState<ProductLineForm[]>([emptyProductLine()]);
+  const [deductions, setDeductions] = useState<DeductionDraft>(emptyDeductions());
+  const [kharcha, setKharcha] = useState("");
+  const [notes, setNotes] = useState("");
+  const [sending, setSending] = useState(false);
+  const [formMsg, setFormMsg] = useState("");
+
+  function resetForm() {
+    setKaarigerId("");
+    setProductLines([emptyProductLine()]);
+    setDeductions(emptyDeductions());
+    setKharcha("");
+    setNotes("");
+    setFormMsg("");
+  }
 
   async function loadOrders() {
     const snap = await getDocs(collection(getDb(), "kaariger_orders"));
@@ -92,6 +146,19 @@ export default function OrdersPage() {
           unit: m.unit,
           usedQuantity: m.usedQuantity != null ? Number(m.usedQuantity) : undefined,
           remainingQuantity: m.remainingQuantity != null ? Number(m.remainingQuantity) : undefined,
+        }));
+        const products = ((data.products as OrderProductLine[]) || []).map((p) => ({
+          productName: p.productName,
+          quantity: Number(p.quantity) || 0,
+          pricePerPiece: Number(p.pricePerPiece) || 0,
+          lineTotal: Number(p.lineTotal) || 0,
+        }));
+        const materialDeductions = ((data.materialDeductions as RepairLineItem[]) || []).map((it) => ({
+          type: it.type,
+          label: it.label,
+          quantity: Number(it.quantity) || 0,
+          pricePerPiece: Number(it.pricePerPiece) || 0,
+          lineTotal: Number(it.lineTotal) || 0,
         }));
         return {
           id: (data.id as string) || d.id,
@@ -116,15 +183,20 @@ export default function OrdersPage() {
           notes: data.notes as string | undefined,
           originalDealAmount: data.originalDealAmount as number | undefined,
           repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+          products,
+          productsTotal: data.productsTotal as number | undefined,
+          materialDeductions,
+          materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+          kharchaGiven: data.kharchaGiven as number | undefined,
         };
       }).sort((a, b) => b.createdAt - a.createdAt)
     );
   }
 
   async function loadMeta() {
-    const [empSnap, matSnap] = await Promise.all([
+    const [empSnap, catSnap] = await Promise.all([
       getDocs(collection(getDb(), "employees")),
-      getDocs(collection(getDb(), "raw_materials")),
+      getDocs(collection(getDb(), "product_catalog")),
     ]);
     setKaarigers(
       empSnap.docs
@@ -139,17 +211,11 @@ export default function OrdersPage() {
           role: "KAARIGER" as const,
         }))
     );
-    setMaterials(
-      matSnap.docs.map((d) => ({
-        id: (d.data().id as string) || d.id,
-        name: d.data().name as string,
-        quantity: (d.data().quantity as number) || 0,
-        unit: (d.data().unit as string) || "",
-        minimumStock: 0,
-        supplier: "",
-        lastUpdatedBy: "",
-        lastUpdatedTime: 0,
-      }))
+    setCatalogProducts(
+      catSnap.docs
+        .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
+        .filter((p) => p.name.trim())
+        .sort((a, b) => a.name.localeCompare(b.name))
     );
   }
 
@@ -183,76 +249,114 @@ export default function OrdersPage() {
     if (selectedOrder) loadPayments(selectedOrder);
   }, [selectedOrder]);
 
-  async function createOrder(e: React.FormEvent) {
+  const calc = useMemo(() => {
+    const lines = productLines.map((l) => {
+      const quantity = Number(l.quantity) || 0;
+      const pricePerPiece = Number(l.pricePerPiece) || 0;
+      return { ...l, quantity, pricePerPiece, lineTotal: quantity * pricePerPiece };
+    });
+    const productsTotal = lines.reduce((s, l) => s + l.lineTotal, 0);
+
+    const deductionLines: RepairLineItem[] = DEDUCTION_ITEMS.map(({ type, label }) => {
+      const qty = Number(deductions[type].qty) || 0;
+      const price = Number(deductions[type].price) || 0;
+      return { type, label, quantity: qty, pricePerPiece: price, lineTotal: qty * price };
+    }).filter((it) => it.quantity > 0 && it.pricePerPiece > 0);
+    const deductionsTotal = deductionLines.reduce((s, it) => s + it.lineTotal, 0);
+
+    const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
+    const kharchaAmount = Number(kharcha) || 0;
+    const finalTotal = Math.max(0, afterDeductions - kharchaAmount);
+
+    return { lines, productsTotal, deductionLines, deductionsTotal, afterDeductions, kharchaAmount, finalTotal };
+  }, [productLines, deductions, kharcha]);
+
+  function addProductLine() {
+    setProductLines((prev) => [...prev, emptyProductLine()]);
+  }
+
+  function removeProductLine(index: number) {
+    setProductLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateProductLine(index: number, patch: Partial<ProductLineForm>) {
+    setProductLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  }
+
+  async function sendOrder(e: React.FormEvent) {
     e.preventDefault();
-    const productName = form.productName.trim();
-    const qty = Number(form.targetQuantity) || 0;
-    if (!productName || qty <= 0) {
-      alert("Product name and quantity are required.");
+    setFormMsg("");
+    const kaariger = kaarigers.find((k) => k.phone === kaarigerId);
+    if (!kaariger) {
+      setFormMsg("Select a kaariger.");
       return;
     }
-    const kaariger = kaarigers.find((k) => k.phone === form.kaarigerId);
+    const validLines = calc.lines.filter(
+      (l) => l.productName.trim() && l.quantity > 0 && l.pricePerPiece > 0
+    );
+    if (validLines.length === 0) {
+      setFormMsg("Add at least one product with quantity and price per piece.");
+      return;
+    }
 
-    const orderMaterials: OrderMaterial[] = form.selectedMaterials
-      .filter((s) => s.materialId && Number(s.quantity) > 0)
-      .flatMap((s) => {
-        const mat = materials.find((m) => m.id === s.materialId);
-        if (!mat) return [];
-        return [
-          {
-            materialId: mat.id,
-            materialName: mat.name,
-            quantity: Number(s.quantity),
-            unit: mat.unit,
-          },
-        ];
-      });
-
-    const inputAmount = Number(form.totalDealAmount) || 0;
-    const pricePerPiece =
-      form.pricingType === "PER_PIECE"
-        ? inputAmount
-        : qty > 0 && inputAmount > 0
-          ? inputAmount / qty
-          : 0;
-    const totalDealAmount =
-      form.pricingType === "PER_PIECE" ? inputAmount * qty : inputAmount;
-    const id = uuid();
-
-    const order: KaarigerOrder = {
-      id,
-      kaarigerId: kaariger?.phone.trim() || form.kaarigerId || "",
-      kaarigerName: kaariger?.name || "",
-      productName,
-      targetQuantity: qty,
-      color: "",
-      rawMaterials: orderMaterials,
-      totalDealAmount,
-      pricePerPiece,
-      pricingType: form.pricingType,
-      status: "ASSIGNED",
-      approvedQuantity: 0,
-      createdBy: session?.name || "Admin",
-      createdAt: Date.now(),
-      notes: form.notes.trim(),
-    };
-
+    setSending(true);
     try {
-      await setDoc(doc(getDb(), "kaariger_orders", id), order);
-      setShowForm(false);
-      setForm({
-        kaarigerId: "",
-        productName: "",
-        targetQuantity: "",
+      const id = uuid();
+      const targetQuantity = validLines.reduce((s, l) => s + l.quantity, 0);
+      const productName = validLines.map((l) => l.productName).join(", ");
+      const products: OrderProductLine[] = validLines.map((l) => ({
+        productName: l.productName,
+        quantity: l.quantity,
+        pricePerPiece: l.pricePerPiece,
+        lineTotal: l.lineTotal,
+      }));
+
+      const order: KaarigerOrder = {
+        id,
+        kaarigerId: kaariger.phone,
+        kaarigerName: kaariger.name,
+        productName,
+        targetQuantity,
         color: "",
-        totalDealAmount: "",
-        pricingType: "OVERALL",
-        notes: "",
-        selectedMaterials: [],
-      });
+        rawMaterials: [],
+        totalDealAmount: calc.afterDeductions,
+        pricePerPiece: targetQuantity > 0 ? calc.productsTotal / targetQuantity : 0,
+        pricingType: "PER_PIECE",
+        status: "ASSIGNED",
+        approvedQuantity: 0,
+        createdBy: session?.name || "Admin",
+        createdAt: Date.now(),
+        notes: notes.trim(),
+        products,
+        productsTotal: calc.productsTotal,
+        materialDeductions: calc.deductionLines,
+        materialDeductionsTotal: calc.deductionsTotal,
+        kharchaGiven: calc.kharchaAmount,
+      };
+
+      await setDoc(doc(getDb(), "kaariger_orders", id), order);
+
+      if (calc.kharchaAmount > 0) {
+        const paymentId = uuid();
+        await setDoc(doc(getDb(), "kaariger_payments", paymentId), {
+          id: paymentId,
+          orderId: id,
+          kaarigerId: kaariger.phone,
+          amount: calc.kharchaAmount,
+          date: todayStr(),
+          time: nowTimeStr(),
+          remarks: "Kharcha given at order creation",
+          createdBy: session?.name || "Admin",
+        });
+      }
+
+      setShowForm(false);
+      resetForm();
       loadOrders();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create order.");
+      setFormMsg(err instanceof Error ? err.message : "Failed to send.");
+    } finally {
+      setSending(false);
     }
   }
 
@@ -278,14 +382,12 @@ export default function OrdersPage() {
     loadPayments(selectedOrder);
   }
 
-
   async function deleteOrder(order: KaarigerOrder) {
     if (!confirm(`Delete order "${order.productName}" for ${order.kaarigerName}? Related payments and repairs will also be removed.`)) {
       return;
     }
     const db = getDb();
     await deleteDoc(doc(db, "kaariger_orders", order.id));
-    // Clean related docs
     try {
       const [paySnap, repairSnap, approvalSnap] = await Promise.all([
         getDocs(query(collection(db, "kaariger_payments"), where("orderId", "==", order.id))),
@@ -350,25 +452,6 @@ export default function OrdersPage() {
     loadOrders();
   }
 
-  function addMaterialRow() {
-    setForm({
-      ...form,
-      selectedMaterials: [...form.selectedMaterials, { materialId: "", quantity: "" }],
-    });
-  }
-
-  function removeMaterialRow(index: number) {
-    setForm({
-      ...form,
-      selectedMaterials: form.selectedMaterials.filter((_, i) => i !== index),
-    });
-  }
-
-  const inStockMaterials = useMemo(
-    () => materials.filter((m) => m.quantity > 0),
-    [materials]
-  );
-
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rank = (status: string) => {
@@ -414,26 +497,22 @@ export default function OrdersPage() {
       });
   }, [orders, search, statusFilter]);
 
-  const previewTotal = (() => {
-    const qty = Number(form.targetQuantity) || 0;
-    const amt = Number(form.totalDealAmount) || 0;
-    if (form.pricingType === "PER_PIECE") return amt * qty;
-    return amt;
-  })();
-
   const selected = selectedOrder ? orders.find((x) => x.id === selectedOrder) : null;
   const paidTotal = payments.reduce((s, p) => s + p.amount, 0);
 
+  const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
+  const productOptions = catalogProducts.map((p) => ({ id: p.id, label: p.name }));
+
   const formPanel = (
-    <form onSubmit={createOrder} className="card space-y-4 lg:sticky lg:top-24">
+    <form onSubmit={sendOrder} className="card space-y-5 lg:sticky lg:top-24">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--jade-soft)]">
             <ClipboardList className="h-4 w-4 text-[var(--jade-deep)]" />
           </div>
           <div>
-            <h2 className="font-display text-base font-bold">New Order</h2>
-            <p className="text-xs text-[var(--text-muted)]">Assign work to a kaariger</p>
+            <h2 className="font-display text-base font-bold">New Kaarigar Bill</h2>
+            <p className="text-xs text-[var(--text-muted)]">Assign work & settle amounts</p>
           </div>
         </div>
         <button
@@ -446,126 +525,198 @@ export default function OrdersPage() {
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-        <div className="sm:col-span-2 lg:col-span-1">
-          <label className="label">Kaariger (optional)</label>
-          <select className="input" value={form.kaarigerId} onChange={(e) => setForm({ ...form, kaarigerId: e.target.value })}>
-            <option value="">Select kaariger</option>
-            {kaarigers.map((k) => (
-              <option key={k.phone} value={k.phone}>{k.name} ({k.phone})</option>
-            ))}
-          </select>
+      <div>
+        <label className="label">Kaariger *</label>
+        <SearchSelect
+          value={kaarigerId}
+          onSelect={setKaarigerId}
+          options={kaarigerOptions}
+          placeholder="Search or select a kaariger…"
+          emptyText="No kaarigers found"
+        />
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <label className="label mb-0 flex items-center gap-1.5">
+            <ShoppingBag className="h-3.5 w-3.5" />
+            Products *
+          </label>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={addProductLine}>
+            <Plus className="h-3.5 w-3.5" />
+            Add product
+          </button>
         </div>
-        <div>
-          <label className="label">Product / SKU name *</label>
-          <input className="input" value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} required placeholder="Same spelling merges in inventory" />
-        </div>
-        <div>
-          <label className="label">Target Quantity *</label>
-          <input className="input" type="number" min={1} value={form.targetQuantity} onChange={(e) => setForm({ ...form, targetQuantity: e.target.value })} required />
-        </div>
-        <div>
-          <label className="label">Pricing (optional)</label>
-          <select className="input" value={form.pricingType} onChange={(e) => setForm({ ...form, pricingType: e.target.value as "OVERALL" | "PER_PIECE" })}>
-            <option value="OVERALL">Overall deal</option>
-            <option value="PER_PIECE">Per piece</option>
-          </select>
-        </div>
-        <div className="sm:col-span-2 lg:col-span-1">
-          <label className="label">{form.pricingType === "PER_PIECE" ? "Price Per Piece ₹ (optional)" : "Total Deal Amount ₹ (optional)"}</label>
-          <input className="input" type="number" value={form.totalDealAmount} onChange={(e) => setForm({ ...form, totalDealAmount: e.target.value })} placeholder="0" />
-          {form.pricingType === "PER_PIECE" && Number(form.targetQuantity) > 0 && Number(form.totalDealAmount) > 0 && (
-            <p className="mt-1.5 text-xs text-[var(--text-muted)]">
-              Total deal: ₹{previewTotal.toLocaleString("en-IN")} ({form.totalDealAmount || 0}/pc × {form.targetQuantity} pcs)
-            </p>
+        <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+          Price is always per piece — quantity × price is calculated automatically.
+        </p>
+        <div className="space-y-2.5">
+          {productLines.map((line, i) => {
+            const lineTotal = (Number(line.quantity) || 0) * (Number(line.pricePerPiece) || 0);
+            return (
+              <div key={i} className="rounded-xl border border-[var(--border)] p-2.5">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                  <SearchSelect
+                    value={line.productId}
+                    onSelect={(id) => {
+                      const product = catalogProducts.find((p) => p.id === id);
+                      updateProductLine(i, { productId: id, productName: product?.name || "" });
+                    }}
+                    options={productOptions}
+                    placeholder="Search catalog product…"
+                    emptyText="No products in catalog"
+                  />
+                  <button
+                    type="button"
+                    className="btn-icon !h-10 !w-10 shrink-0 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                    onClick={() => removeProductLine(i)}
+                    aria-label="Remove product"
+                    title="Remove"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <input
+                    className="input !w-full"
+                    type="number"
+                    min={0}
+                    placeholder="Qty"
+                    value={line.quantity}
+                    onChange={(e) => updateProductLine(i, { quantity: e.target.value })}
+                  />
+                  <input
+                    className="input !w-full"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="₹ / pc"
+                    value={line.pricePerPiece}
+                    onChange={(e) => updateProductLine(i, { pricePerPiece: e.target.value })}
+                  />
+                </div>
+                {lineTotal > 0 && (
+                  <p className="mt-1.5 text-right text-xs text-[var(--text-muted)]">
+                    {line.quantity} × ₹{line.pricePerPiece} ={" "}
+                    <span className="font-semibold text-[var(--text)]">{money(lineTotal)}</span>
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          {productLines.length === 0 && (
+            <div className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-4 text-center text-xs text-[var(--text-muted)]">
+              No products added. Tap &ldquo;Add product&rdquo; above.
+            </div>
           )}
+        </div>
+        <div className="mt-2.5 flex items-center justify-between rounded-xl bg-jade-soft/50 px-3 py-2.5">
+          <span className="text-sm font-semibold text-jade-deep">Products Total</span>
+          <span className="font-display text-lg font-bold text-jade-deep">{money(calc.productsTotal)}</span>
         </div>
       </div>
 
-      <p className="rounded-xl bg-[var(--surface-mist)] px-3 py-2 text-xs text-[var(--text-muted)]">
-        Colours are set by staff when approving delivery. Materials &amp; notes are optional.
-      </p>
-
-      {inStockMaterials.length > 0 ? (
-        <div>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <label className="label mb-0">Raw Materials (optional)</label>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={addMaterialRow}>
-              <Plus className="h-3.5 w-3.5" />
-              Add
-            </button>
-          </div>
-          {form.selectedMaterials.length === 0 && (
-            <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-2 text-xs text-[var(--text-muted)]">
-              Optional — leave empty to create order without materials.
-            </p>
-          )}
-          <div className="space-y-2">
-            {form.selectedMaterials.map((row, i) => (
-              <div
-                key={i}
-                className="grid grid-cols-[minmax(0,1fr)_4.75rem_2.75rem] items-center gap-2"
-              >
-                <select
-                  className="input !w-full min-w-0"
-                  value={row.materialId}
-                  onChange={(e) => {
-                    const next = [...form.selectedMaterials];
-                    next[i] = { ...next[i], materialId: e.target.value };
-                    setForm({ ...form, selectedMaterials: next });
-                  }}
-                >
-                  <option value="">Select material…</option>
-                  {inStockMaterials.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({m.quantity} {m.unit})
-                    </option>
-                  ))}
-                </select>
+      <div>
+        <p className="label mb-1 flex items-center gap-1.5">
+          <Wrench className="h-3.5 w-3.5" />
+          Runner / Fitting / Astar / Material (optional)
+        </p>
+        <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+          These costs are deducted from the products total. Fill only what applies.
+        </p>
+        <div className="space-y-2">
+          {DEDUCTION_ITEMS.map(({ type, label }) => (
+            <div
+              key={type}
+              className="grid grid-cols-[minmax(0,1fr)_4.5rem_5.5rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+            >
+              <p className="pb-2 text-sm font-semibold">{label}</p>
+              <div>
+                <label className="label !text-[10px]">Qty</label>
                 <input
-                  className="input !w-full text-center"
+                  className="input !w-full !py-2"
                   type="number"
-                  step="0.01"
                   min={0}
-                  placeholder="Qty"
-                  value={row.quantity}
-                  onChange={(e) => {
-                    const next = [...form.selectedMaterials];
-                    next[i] = { ...next[i], quantity: e.target.value };
-                    setForm({ ...form, selectedMaterials: next });
-                  }}
+                  value={deductions[type].qty}
+                  onChange={(e) =>
+                    setDeductions({ ...deductions, [type]: { ...deductions[type], qty: e.target.value } })
+                  }
+                  placeholder="0"
                 />
-                <button
-                  type="button"
-                  className="btn-icon !h-11 !w-11 shrink-0 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
-                  onClick={() => removeMaterialRow(i)}
-                  aria-label="Remove material"
-                  title="Remove"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
               </div>
-            ))}
-          </div>
+              <div>
+                <label className="label !text-[10px]">₹ / pc</label>
+                <input
+                  className="input !w-full !py-2"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={deductions[type].price}
+                  onChange={(e) =>
+                    setDeductions({ ...deductions, [type]: { ...deductions[type], price: e.target.value } })
+                  }
+                  placeholder="0"
+                />
+              </div>
+            </div>
+          ))}
         </div>
-      ) : (
-        <div className="rounded-xl border border-dashed border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)]">
-          No materials in stock yet — you can still create the order without materials.
+        <div className="mt-2.5 flex items-center justify-between rounded-xl bg-[var(--surface-mist)] px-3 py-2.5 text-sm">
+          <span className="font-medium text-[var(--text-muted)]">Deductions Total</span>
+          <span className="font-bold text-danger">−{money(calc.deductionsTotal)}</span>
         </div>
-      )}
+      </div>
+
+      <div>
+        <label className="label flex items-center gap-1.5">
+          <Wallet className="h-3.5 w-3.5" />
+          Kharcha given now (optional)
+        </label>
+        <input
+          className="input"
+          type="number"
+          min={0}
+          value={kharcha}
+          onChange={(e) => setKharcha(e.target.value)}
+          placeholder="0"
+        />
+        <p className="mt-1 text-xs text-[var(--text-muted)]">
+          Advance cash given to the kaariger — also subtracted from the total.
+        </p>
+      </div>
 
       <div>
         <label className="label">Instructions / notes (optional)</label>
         <input
           className="input"
-          value={form.notes}
-          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
           placeholder="Optional instructions"
         />
       </div>
 
-      <button type="submit" className="btn btn-primary w-full">
-        Create Order
+      <div className="rounded-2xl border border-jade/20 bg-jade-soft/40 p-4">
+        <div className="mb-2 flex items-center gap-2 text-jade-deep">
+          <Calculator size={16} />
+          <p className="text-xs font-bold uppercase tracking-wider">Detailed Total</p>
+        </div>
+        <div className="space-y-1 text-sm">
+          <Row label="Products total" value={money(calc.productsTotal)} />
+          <Row label="Less: Runner/Fitting/Astar/Material" value={`−${money(calc.deductionsTotal)}`} />
+          <div className="my-2 border-t border-jade/20" />
+          <Row label="Subtotal" value={money(calc.afterDeductions)} bold />
+          <Row label="Less: Kharcha" value={`−${money(calc.kharchaAmount)}`} />
+          <div className="my-2 border-t border-jade/20" />
+          <Row label="Final balance to pay" value={money(calc.finalTotal)} bold accent />
+        </div>
+      </div>
+
+      {formMsg && (
+        <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{formMsg}</p>
+      )}
+
+      <button type="submit" className="btn btn-primary w-full" disabled={sending}>
+        {sending ? "Sending…" : "Send"}
       </button>
     </form>
   );
@@ -573,7 +724,7 @@ export default function OrdersPage() {
   return (
     <div className="stagger space-y-5">
       <PageToolbar
-        title="Kaariger Orders"
+        title="Kaarigar"
         actions={
           <button
             className="btn btn-primary lg:hidden"
@@ -587,7 +738,7 @@ export default function OrdersPage() {
             ) : (
               <>
                 <Plus className="h-4 w-4" />
-                Create Order
+                New Bill
               </>
             )}
           </button>
@@ -622,13 +773,11 @@ export default function OrdersPage() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
-        {/* Form — always visible on desktop, toggle on mobile */}
         <div className={`${showForm ? "block" : "hidden"} lg:block`}>
           {formPanel}
         </div>
 
         <div className="min-w-0 space-y-5">
-          {/* Desktop table */}
           <div className="data-table-wrap hidden md:block">
             <div className="overflow-x-auto">
               <table className="data-table">
@@ -672,7 +821,6 @@ export default function OrdersPage() {
             )}
           </div>
 
-          {/* Mobile cards */}
           <div className="md:hidden">
             <p className="mobile-section-label">
               {statusFilter === "ACTIVE"
@@ -709,7 +857,6 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          {/* Selected order detail — sheet on mobile, inline on desktop */}
           {selected && (
             <>
               <button
@@ -771,7 +918,7 @@ export default function OrdersPage() {
                     ₹{(selected.originalDealAmount ?? selected.totalDealAmount).toLocaleString("en-IN")}
                   </p>
                   {selected.pricingType === "PER_PIECE" && selected.pricePerPiece ? (
-                    <p className="mt-0.5 text-xs text-[var(--text-muted)]">₹{selected.pricePerPiece}/pc</p>
+                    <p className="mt-0.5 text-xs text-[var(--text-muted)]">₹{selected.pricePerPiece.toFixed(2)}/pc avg</p>
                   ) : null}
                 </div>
                 <div className="stat-card !p-3">
@@ -797,6 +944,80 @@ export default function OrdersPage() {
                   )}
                 </div>
               </div>
+
+              {selected.products && selected.products.length > 0 && (
+                <div>
+                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                    <ShoppingBag className="h-4 w-4 text-[var(--text-muted)]" />
+                    Products
+                  </h3>
+                  <div className="data-table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Product</th>
+                          <th>Qty</th>
+                          <th>₹/pc</th>
+                          <th className="text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selected.products.map((p, i) => (
+                          <tr key={i}>
+                            <td className="font-medium">{p.productName}</td>
+                            <td>{p.quantity}</td>
+                            <td>₹{p.pricePerPiece}</td>
+                            <td className="text-right font-semibold">{money(p.lineTotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-jade-soft/50 px-3 py-2 text-sm">
+                    <span className="font-semibold text-jade-deep">Products Total</span>
+                    <span className="font-bold text-jade-deep">
+                      {money(selected.productsTotal ?? 0)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {selected.materialDeductions && selected.materialDeductions.length > 0 && (
+                <div>
+                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                    <Wrench className="h-4 w-4 text-[var(--text-muted)]" />
+                    Runner / Fitting / Astar / Material
+                  </h3>
+                  <div className="data-table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Qty</th>
+                          <th>₹/pc</th>
+                          <th className="text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selected.materialDeductions.map((it, i) => (
+                          <tr key={i}>
+                            <td className="font-medium">{it.label}</td>
+                            <td>{it.quantity}</td>
+                            <td>₹{it.pricePerPiece}</td>
+                            <td className="text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-[var(--surface-mist)] px-3 py-2 text-sm">
+                    <span className="font-medium text-[var(--text-muted)]">Deductions Total</span>
+                    <span className="font-bold text-danger">
+                      −{money(selected.materialDeductionsTotal ?? 0)}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {selected.rawMaterials.length > 0 && (
                 <div>
@@ -997,6 +1218,27 @@ export default function OrdersPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  bold,
+  accent,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[var(--text-muted)]">{label}</span>
+      <span className={`${bold ? "font-bold" : "font-medium"} ${accent ? "text-jade-deep" : ""}`}>
+        {value}
+      </span>
     </div>
   );
 }

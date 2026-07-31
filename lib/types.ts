@@ -48,6 +48,14 @@ export interface OrderMaterial {
   remainingQuantity?: number;
 }
 
+/** One product line in a Kaarigar order — price is always per piece. */
+export interface OrderProductLine {
+  productName: string;
+  quantity: number;
+  pricePerPiece: number;
+  lineTotal: number;
+}
+
 export interface KaarigerOrder {
   id: string;
   kaarigerId: string;
@@ -73,6 +81,16 @@ export interface KaarigerOrder {
   originalDealAmount?: number;
   /** Cumulative repairing deductions from deal. */
   repairDeductionTotal?: number;
+  /** Multiple products with qty × price/pc, set from the Kaarigar creation form. */
+  products?: OrderProductLine[];
+  /** Sum of all product line totals, before any deductions. */
+  productsTotal?: number;
+  /** Runner / Fitting / Astar / Material cost deductions taken at order creation. */
+  materialDeductions?: RepairLineItem[];
+  /** Sum of materialDeductions line totals. */
+  materialDeductionsTotal?: number;
+  /** Kharcha (advance) given to the kaariger at the time this order was created. */
+  kharchaGiven?: number;
 }
 
 export interface OrderApprovalRecord {
