@@ -18,8 +18,8 @@ export const SIDEBAR_NAV: NavRoute[] = [
   },
   {
     href: "/dashboard/workers",
-    label: "Workers",
-    title: "Workers",
+    label: "Brothers",
+    title: "Brothers",
     subtitle: "Staff & kaarigers",
     icon: "groups",
     group: "people",
@@ -100,7 +100,7 @@ export const SIDEBAR_NAV: NavRoute[] = [
 
 export const BOTTOM_NAV: NavRoute[] = [
   SIDEBAR_NAV[0], // Overview
-  SIDEBAR_NAV[1], // Workers
+  SIDEBAR_NAV[1], // Brothers
   SIDEBAR_NAV[5], // Orders
   SIDEBAR_NAV[4], // Salary
 ];
@@ -144,7 +144,7 @@ export function todayHeading(): string {
 
 export const ADMIN_MODULES = [
   {
-    title: "Workers",
+    title: "Brothers",
     description: "Directory, roles & login access",
     href: "/dashboard/workers",
     icon: "groups",

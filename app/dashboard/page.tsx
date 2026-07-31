@@ -207,7 +207,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="stagger grid grid-cols-2 gap-2.5 lg:gap-3 lg:grid-cols-4">
-        <StatCard title="Workers" value={loaded ? stats.workers : "—"} icon="groups" hint={isMobile ? undefined : "Staff + kaarigers"} />
+        <StatCard title="Brothers" value={loaded ? stats.workers : "—"} icon="groups" hint={isMobile ? undefined : "Staff + kaarigers"} />
         <StatCard title="Attendance" value={loaded ? stats.attendanceRate : "—"} icon="calendar" hint={isMobile ? undefined : "Today present"} />
         <StatCard
           title="Low stock"

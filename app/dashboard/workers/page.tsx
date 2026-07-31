@@ -183,7 +183,7 @@ export default function WorkersPage() {
   async function removeEmployee(phone: string) {
     if (
       !confirm(
-        "Delete this worker? Their attendance, payments, and profile will also be removed. They will be logged out of the app."
+        "Delete this brother? Their attendance, payments, and profile will also be removed. They will be logged out of the app."
       )
     ) {
       return;
@@ -192,7 +192,7 @@ export default function WorkersPage() {
       await deleteWorkerAndPersonalData(phone);
       if (profileEmployee?.phone === phone) setProfileEmployee(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete worker.");
+      alert(err instanceof Error ? err.message : "Failed to delete brother.");
     }
   }
 
@@ -236,13 +236,13 @@ export default function WorkersPage() {
       : formMode === "kaariger"
         ? "Add Kaariger"
         : formMode === "edit"
-          ? "Edit Worker"
+          ? "Edit Brother"
           : "";
 
   return (
     <div className="space-y-5">
       <PageToolbar
-        title="Workers"
+        title="Brothers"
         actions={
           <>
             <button type="button" className="btn btn-primary btn-sm" onClick={openStaffForm}>
@@ -352,7 +352,7 @@ export default function WorkersPage() {
         </table>
         {filtered.length === 0 && (
           <p className="py-12 text-center text-sm text-[var(--text-muted)]">
-            {search ? "No workers match your search." : "No workers yet. Add staff or kaariger above."}
+            {search ? "No brothers match your search." : "No brothers yet. Add staff or kaariger above."}
           </p>
         )}
       </div>
@@ -412,7 +412,7 @@ export default function WorkersPage() {
         {filtered.length === 0 && (
           <div className="surface py-12 text-center">
             <p className="text-sm text-[var(--text-muted)]">
-              {search ? "No workers match your search." : "No workers yet. Add staff or kaariger above."}
+              {search ? "No brothers match your search." : "No brothers yet. Add staff or kaariger above."}
             </p>
           </div>
         )}
@@ -463,7 +463,7 @@ export default function WorkersPage() {
                     className="input"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder="Worker name"
+                    placeholder="Brother name"
                     required
                   />
                 </div>
@@ -530,7 +530,7 @@ export default function WorkersPage() {
                   {saving
                     ? "Saving..."
                     : formMode === "edit"
-                      ? "Update Worker"
+                      ? "Update Brother"
                       : formMode === "kaariger"
                         ? "Create Kaariger"
                         : "Create Staff"}
