@@ -339,7 +339,10 @@ export default function WorkerProfilePanel({
                             ₹{p.amount.toLocaleString("en-IN")}
                           </span>
                           <span className="text-xs text-[var(--text-muted)]">
-                            {p.date} · {p.type.replace(/_/g, " ")}
+                            {p.date} ·{" "}
+                            {p.type === "ADVANCE"
+                              ? "Kharcha"
+                              : p.type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())}
                           </span>
                         </div>
                       ))}
