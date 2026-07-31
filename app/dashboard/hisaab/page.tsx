@@ -2,11 +2,29 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
-import { History, IndianRupee, Package, Plus, Receipt, ShoppingBag, Wallet, Wrench, X } from "lucide-react";
+import {
+  History,
+  IndianRupee,
+  Package,
+  Plus,
+  Receipt,
+  ShoppingBag,
+  Wallet,
+  Wrench,
+  X,
+} from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
-import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, OrderProductLine, OrderRepair, RepairLineItem } from "@/lib/types";
+import type {
+  Employee,
+  KaarigerOrder,
+  KaarigerPayment,
+  OrderMaterial,
+  OrderProductLine,
+  OrderRepair,
+  RepairLineItem,
+} from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
@@ -35,6 +53,14 @@ function orderStatusBadge(status: string) {
   }
 }
 
+function formatDate(ts: number) {
+  return ts ? new Date(ts).toLocaleDateString("en-IN") : "—";
+}
+
+function formatTime(ts: number) {
+  return ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+}
+
 export default function HisaabPage() {
   const { session } = useAuth();
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
@@ -47,7 +73,7 @@ export default function HisaabPage() {
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
-  const [showCompletedHistory, setShowCompletedHistory] = useState(false);
+  const [historyOrderId, setHistoryOrderId] = useState("");
 
   async function loadKaarigers() {
     const snap = await getDocs(collection(getDb(), "employees"));
@@ -81,110 +107,111 @@ export default function HisaabPage() {
     }
     setLoading(true);
     try {
-        const db = getDb();
-        const [orderSnap, paySnap, repairSnap] = await Promise.all([
-          getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", id))),
-          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", id))),
-          getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", id))),
-        ]);
-        const loadedOrders = orderSnap.docs
+      const db = getDb();
+      const [orderSnap, paySnap, repairSnap] = await Promise.all([
+        getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", id))),
+        getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", id))),
+        getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", id))),
+      ]);
+
+      const loadedOrders = orderSnap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: (data.id as string) || d.id,
+            kaarigerId: data.kaarigerId as string,
+            kaarigerName: data.kaarigerName as string,
+            productName: (data.productName as string) || "",
+            targetQuantity: (data.targetQuantity as number) || 0,
+            color: (data.color as string) || "",
+            rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
+            totalDealAmount: (data.totalDealAmount as number) || 0,
+            pricePerPiece: data.pricePerPiece as number | undefined,
+            pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+            status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || "ASSIGNED"),
+            approvedQuantity: (data.approvedQuantity as number) || 0,
+            createdBy: (data.createdBy as string) || "",
+            createdAt: (data.createdAt as number) || 0,
+            notes: data.notes as string | undefined,
+            originalDealAmount: data.originalDealAmount as number | undefined,
+            repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+            products: (data.products as OrderProductLine[]) || [],
+            productsTotal: data.productsTotal as number | undefined,
+            materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
+            materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+            kharchaGiven: data.kharchaGiven as number | undefined,
+          } satisfies KaarigerOrder;
+        })
+        .sort((a, b) => b.createdAt - a.createdAt);
+      setOrders(loadedOrders);
+
+      const loadedPayments = paySnap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: (data.id as string) || d.id,
+            orderId: data.orderId as string,
+            kaarigerId: data.kaarigerId as string,
+            amount: (data.amount as number) || 0,
+            date: (data.date as string) || "",
+            time: (data.time as string) || "",
+            remarks: data.remarks as string | undefined,
+            createdBy: (data.createdBy as string) || "",
+          } satisfies KaarigerPayment;
+        })
+        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      setPayments(loadedPayments);
+
+      // Self-heal the stored credit balance: it should always equal total
+      // fresh kharcha cash minus total net deal across every order for this
+      // kaariger. An older bug could under-credit extra kharcha added to
+      // an order that was already completed, so correct any drift here.
+      // "Credit carried…" entries are excluded — they're a re-recording of
+      // cash counted once already at the order where the credit originated,
+      // not new money, so including them would double-count it.
+      const totalDealAll = loadedOrders.reduce((s, o) => s + orderNetDeal(o), 0);
+      const totalFreshCashPaid = loadedPayments
+        .filter((p) => p.remarks !== "Credit carried from previous overpaid bill")
+        .reduce((s, p) => s + p.amount, 0);
+      const correctCredit = Math.max(0, totalFreshCashPaid - totalDealAll);
+      const storedCredit = kaarigers.find((k) => k.phone === id)?.creditBalance || 0;
+      if (Math.abs(correctCredit - storedCredit) > 0.5) {
+        await updateDoc(doc(db, "employees", id), { creditBalance: correctCredit });
+        setKaarigers((prev) =>
+          prev.map((k) => (k.phone === id ? { ...k, creditBalance: correctCredit } : k))
+        );
+      }
+
+      setRepairs(
+        repairSnap.docs
           .map((d) => {
             const data = d.data();
             return {
               id: (data.id as string) || d.id,
-              kaarigerId: data.kaarigerId as string,
-              kaarigerName: data.kaarigerName as string,
+              orderId: (data.orderId as string) || "",
+              kaarigerId: (data.kaarigerId as string) || "",
+              kaarigerName: (data.kaarigerName as string) || "",
               productName: (data.productName as string) || "",
-              targetQuantity: (data.targetQuantity as number) || 0,
-              color: (data.color as string) || "",
-              rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
-              totalDealAmount: (data.totalDealAmount as number) || 0,
-              pricePerPiece: data.pricePerPiece as number | undefined,
-              pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
-              status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || "ASSIGNED"),
-              approvedQuantity: (data.approvedQuantity as number) || 0,
+              faultyQuantity: (data.faultyQuantity as number) || 0,
+              faultyPricePerPiece: (data.faultyPricePerPiece as number) || 0,
+              faultyTotal: (data.faultyTotal as number) || 0,
+              items: ((data.items as RepairLineItem[]) || []).map((it) => ({
+                type: it.type,
+                label: it.label,
+                quantity: Number(it.quantity) || 0,
+                pricePerPiece: Number(it.pricePerPiece) || 0,
+                lineTotal: Number(it.lineTotal) || 0,
+              })),
+              totalRepairCost: (data.totalRepairCost as number) || 0,
+              originalDealAmount: (data.originalDealAmount as number) || 0,
+              dealAfterThisRepair: (data.dealAfterThisRepair as number) || 0,
+              notes: data.notes as string | undefined,
               createdBy: (data.createdBy as string) || "",
               createdAt: (data.createdAt as number) || 0,
-              notes: data.notes as string | undefined,
-              originalDealAmount: data.originalDealAmount as number | undefined,
-              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
-              products: (data.products as OrderProductLine[]) || [],
-              productsTotal: data.productsTotal as number | undefined,
-              materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
-              materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
-              kharchaGiven: data.kharchaGiven as number | undefined,
-            } satisfies KaarigerOrder;
+            } satisfies OrderRepair;
           })
-          .sort((a, b) => b.createdAt - a.createdAt);
-        setOrders(loadedOrders);
-
-        const loadedPayments = paySnap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: (data.id as string) || d.id,
-              orderId: data.orderId as string,
-              kaarigerId: data.kaarigerId as string,
-              amount: (data.amount as number) || 0,
-              date: (data.date as string) || "",
-              time: (data.time as string) || "",
-              remarks: data.remarks as string | undefined,
-              createdBy: (data.createdBy as string) || "",
-            } satisfies KaarigerPayment;
-          })
-          .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-        setPayments(loadedPayments);
-
-        // Self-heal the stored credit balance: it should always equal total
-        // fresh kharcha cash minus total net deal across every order for this
-        // kaariger. An older bug could under-credit extra kharcha added to
-        // an order that was already completed, so correct any drift here.
-        // "Credit carried…" entries are excluded — they're a re-recording of
-        // cash counted once already at the order where the credit originated,
-        // not new money, so including them would double-count it.
-        const totalDealAll = loadedOrders.reduce((s, o) => s + orderNetDeal(o), 0);
-        const totalFreshCashPaid = loadedPayments
-          .filter((p) => p.remarks !== "Credit carried from previous overpaid bill")
-          .reduce((s, p) => s + p.amount, 0);
-        const correctCredit = Math.max(0, totalFreshCashPaid - totalDealAll);
-        const storedCredit = kaarigers.find((k) => k.phone === id)?.creditBalance || 0;
-        if (Math.abs(correctCredit - storedCredit) > 0.5) {
-          await updateDoc(doc(db, "employees", id), { creditBalance: correctCredit });
-          setKaarigers((prev) =>
-            prev.map((k) => (k.phone === id ? { ...k, creditBalance: correctCredit } : k))
-          );
-        }
-
-        setRepairs(
-          repairSnap.docs
-            .map((d) => {
-              const data = d.data();
-              return {
-                id: (data.id as string) || d.id,
-                orderId: (data.orderId as string) || "",
-                kaarigerId: (data.kaarigerId as string) || "",
-                kaarigerName: (data.kaarigerName as string) || "",
-                productName: (data.productName as string) || "",
-                faultyQuantity: (data.faultyQuantity as number) || 0,
-                faultyPricePerPiece: (data.faultyPricePerPiece as number) || 0,
-                faultyTotal: (data.faultyTotal as number) || 0,
-                items: ((data.items as RepairLineItem[]) || []).map((it) => ({
-                  type: it.type,
-                  label: it.label,
-                  quantity: Number(it.quantity) || 0,
-                  pricePerPiece: Number(it.pricePerPiece) || 0,
-                  lineTotal: Number(it.lineTotal) || 0,
-                })),
-                totalRepairCost: (data.totalRepairCost as number) || 0,
-                originalDealAmount: (data.originalDealAmount as number) || 0,
-                dealAfterThisRepair: (data.dealAfterThisRepair as number) || 0,
-                notes: data.notes as string | undefined,
-                createdBy: (data.createdBy as string) || "",
-                createdAt: (data.createdAt as number) || 0,
-              } satisfies OrderRepair;
-            })
-            .sort((a, b) => b.createdAt - a.createdAt)
-        );
+          .sort((a, b) => b.createdAt - a.createdAt)
+      );
     } finally {
       setLoading(false);
     }
@@ -192,7 +219,7 @@ export default function HisaabPage() {
 
   useEffect(() => {
     loadKaarigerData(kaarigerId);
-    setShowCompletedHistory(false);
+    setHistoryOrderId("");
   }, [kaarigerId]);
 
   async function submitPayment(e: React.FormEvent) {
@@ -239,7 +266,7 @@ export default function HisaabPage() {
       }
 
       if (excess > 0) {
-        const currentCredit = selectedKaariger?.creditBalance || 0;
+        const currentCredit = kaarigers.find((k) => k.phone === order.kaarigerId)?.creditBalance || 0;
         await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
           creditBalance: currentCredit + excess,
         });
@@ -267,58 +294,27 @@ export default function HisaabPage() {
     return map;
   }, [payments]);
 
-  // Fully paid orders move out of the active list into a "completed hisaab"
-  // history the admin can pull up on demand, so the main view stays focused
-  // on what still needs attention.
+  // Once an order is fully paid it moves entirely out of the active view —
+  // its products, deductions, repairs and kharcha are only reachable via
+  // "See previous hisaab". The active view never merges multiple orders
+  // together; each one gets its own separate card.
   const activeOrders = useMemo(() => orders.filter((o) => o.status !== "COMPLETED"), [orders]);
   const completedOrders = useMemo(() => orders.filter((o) => o.status === "COMPLETED"), [orders]);
 
-  const totals = useMemo(() => {
-    const deal = orders.reduce((s, o) => s + orderNetDeal(o), 0);
-    const paid = payments.reduce((s, p) => s + p.amount, 0);
-    const repaired = repairs.reduce((s, r) => s + r.totalRepairCost, 0);
+  const activeTotals = useMemo(() => {
+    const deal = activeOrders.reduce((s, o) => s + orderNetDeal(o), 0);
+    const paid = activeOrders.reduce((s, o) => s + (orderPaidMap.get(o.id) || 0), 0);
     const balance = Math.max(0, deal - paid);
-    return { deal, paid, repaired, balance };
-  }, [orders, payments, repairs]);
+    return { deal, paid, balance };
+  }, [activeOrders, orderPaidMap]);
 
-  // Runner / Fitting / Astar / Material — grouped the same way the old paper
-  // "Kaarigar Statement" sheets were, so it reads as one sorted ledger.
-  const materialCategories = useMemo(() => {
-    const allLines = orders.flatMap((o) =>
-      (o.materialDeductions || []).map((it) => ({ ...it, orderId: o.id, productName: o.productName, createdAt: o.createdAt }))
-    );
+  const previousHisaabOptions = completedOrders.map((o) => ({
+    id: o.id,
+    label: o.productName,
+    sublabel: `${formatDate(o.createdAt)} · Deal ${money(orderNetDeal(o))}`,
+  }));
 
-    function groupByLabel(type: string) {
-      const items = allLines.filter((l) => l.type === type);
-      const byLabel = new Map<string, { label: string; quantity: number; lineTotal: number }>();
-      items.forEach((it) => {
-        const existing = byLabel.get(it.label);
-        if (existing) {
-          existing.quantity += it.quantity;
-          existing.lineTotal += it.lineTotal;
-        } else {
-          byLabel.set(it.label, { label: it.label, quantity: it.quantity, lineTotal: it.lineTotal });
-        }
-      });
-      return {
-        rows: Array.from(byLabel.values()).sort((a, b) => b.lineTotal - a.lineTotal),
-        total: items.reduce((s, it) => s + it.lineTotal, 0),
-      };
-    }
-
-    const material = groupByLabel("MATERIAL");
-    const astar = groupByLabel("ASTAR");
-    const runner = groupByLabel("RUNNER");
-    const fitting = groupByLabel("FITTING");
-    const grandTotal = material.total + astar.total + runner.total + fitting.total;
-    return { material, astar, runner, fitting, grandTotal };
-  }, [orders]);
-
-  const hasMaterialCategories =
-    materialCategories.material.rows.length > 0 ||
-    materialCategories.astar.rows.length > 0 ||
-    materialCategories.runner.rows.length > 0 ||
-    materialCategories.fitting.rows.length > 0;
+  const historyOrder = completedOrders.find((o) => o.id === historyOrderId) || null;
 
   return (
     <div className="space-y-5">
@@ -326,15 +322,31 @@ export default function HisaabPage() {
         <p className="section-sub">Full payment & kharcha history per kaariger</p>
       </PageToolbar>
 
-      <div className="surface max-w-md p-4">
-        <label className="label">Select kaariger</label>
-        <SearchSelect
-          value={kaarigerId}
-          onSelect={setKaarigerId}
-          options={kaarigerOptions}
-          placeholder="Search or select a kaariger…"
-          emptyText="No kaarigers found"
-        />
+      <div className="surface grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="label">Select kaariger</label>
+          <SearchSelect
+            value={kaarigerId}
+            onSelect={setKaarigerId}
+            options={kaarigerOptions}
+            placeholder="Search or select a kaariger…"
+            emptyText="No kaarigers found"
+          />
+        </div>
+        <div>
+          <label className="label flex items-center gap-1.5">
+            <History className="h-3.5 w-3.5" />
+            See previous hisaab
+          </label>
+          <SearchSelect
+            value={historyOrderId}
+            onSelect={setHistoryOrderId}
+            options={previousHisaabOptions}
+            placeholder={!kaarigerId ? "Select a kaariger first…" : "Search a completed order…"}
+            emptyText="No completed orders yet"
+            disabled={!kaarigerId || previousHisaabOptions.length === 0}
+          />
+        </div>
       </div>
 
       {!kaarigerId ? (
@@ -344,7 +356,8 @@ export default function HisaabPage() {
           </div>
           <p className="mt-3 font-semibold">Select a kaariger to view their hisaab</p>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            You&apos;ll see every order, all kharcha payments with dates, and the grand total.
+            You&apos;ll see their active orders in full detail, and can pull up any completed
+            order&apos;s history separately above.
           </p>
         </div>
       ) : loading ? (
@@ -357,7 +370,10 @@ export default function HisaabPage() {
             </div>
             <div className="flex-1">
               <p className="font-display text-lg font-bold">{selectedKaariger?.name}</p>
-              <p className="text-sm text-[var(--text-muted)]">{selectedKaariger?.phone} · {orders.length} order{orders.length === 1 ? "" : "s"}</p>
+              <p className="text-sm text-[var(--text-muted)]">
+                {selectedKaariger?.phone} · {activeOrders.length} active
+                {completedOrders.length > 0 ? ` · ${completedOrders.length} completed` : ""}
+              </p>
             </div>
             {(selectedKaariger?.creditBalance || 0) > 0 && (
               <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
@@ -383,236 +399,80 @@ export default function HisaabPage() {
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="stat-card">
-              <p className="stat-card-label">Total Deal</p>
-              <p className="stat-card-value">{money(totals.deal)}</p>
+          {activeOrders.length === 0 ? (
+            <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+              {completedOrders.length > 0
+                ? "No active orders — everything is fully settled. Use \u201cSee previous hisaab\u201d above to review past orders."
+                : "No orders for this kaariger yet."}
             </div>
-            <div className="stat-card">
-              <p className="stat-card-label">Total Kharcha Paid</p>
-              <p className="stat-card-value text-jade-deep">{money(totals.paid)}</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-card-label">Repairing Deductions</p>
-              <p className="stat-card-value text-danger">{money(totals.repaired)}</p>
-            </div>
-            <div className="stat-card">
-              <p className="stat-card-label">Total Balance</p>
-              <p className="stat-card-value">{money(totals.balance)}</p>
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="stat-card">
+                  <p className="stat-card-label">Active Deal</p>
+                  <p className="stat-card-value">{money(activeTotals.deal)}</p>
+                </div>
+                <div className="stat-card">
+                  <p className="stat-card-label">Active Kharcha Paid</p>
+                  <p className="stat-card-value text-jade-deep">{money(activeTotals.paid)}</p>
+                </div>
+                <div className="stat-card">
+                  <p className="stat-card-label">Active Balance</p>
+                  <p className="stat-card-value">{money(activeTotals.balance)}</p>
+                </div>
+              </div>
 
-          <div>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-                <ShoppingBag className="h-4 w-4 text-[var(--text-muted)]" />
-                Orders
-              </h3>
-              {completedOrders.length > 0 && (
+              <div className="space-y-4">
+                {activeOrders.map((o) => (
+                  <OrderDetailCard
+                    key={o.id}
+                    order={o}
+                    payments={payments}
+                    repairs={repairs}
+                    onPay={() => {
+                      setPayOrderId(o.id);
+                      setPayForm({ amount: "", remarks: "" });
+                      setPayMsg("");
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {historyOrder && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setHistoryOrderId("")} />
+          <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+            <div
+              className="max-h-[88vh] w-full max-w-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-2 flex justify-end">
                 <button
                   type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setShowCompletedHistory((v) => !v)}
+                  className="btn-icon !bg-white"
+                  onClick={() => setHistoryOrderId("")}
+                  aria-label="Close"
                 >
-                  <History className="h-3.5 w-3.5" />
-                  {showCompletedHistory
-                    ? "Hide completed hisaab"
-                    : `See completed hisaab (${completedOrders.length})`}
+                  <X className="h-4 w-4" />
                 </button>
-              )}
+              </div>
+              <OrderDetailCard
+                order={historyOrder}
+                payments={payments}
+                repairs={repairs}
+                onPay={() => {
+                  setPayOrderId(historyOrder.id);
+                  setPayForm({ amount: "", remarks: "" });
+                  setPayMsg("");
+                }}
+              />
             </div>
-            {activeOrders.length === 0 ? (
-              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-                {orders.length === 0
-                  ? "No orders for this kaariger yet."
-                  : "No active orders — everything is fully paid. See completed hisaab above."}
-              </div>
-            ) : (
-              <div className="data-table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>Date</th>
-                      <th>Status</th>
-                      <th className="text-right">Deal</th>
-                      <th className="text-right">Paid</th>
-                      <th className="text-right">Balance</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeOrders.map((o) => (
-                      <OrderRow
-                        key={o.id}
-                        order={o}
-                        paid={orderPaidMap.get(o.id) || 0}
-                        onPay={() => {
-                          setPayOrderId(o.id);
-                          setPayForm({ amount: "", remarks: "" });
-                          setPayMsg("");
-                        }}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {showCompletedHistory && completedOrders.length > 0 && (
-              <div className="mt-4">
-                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Completed Hisaab — fully paid
-                </p>
-                <div className="data-table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Product</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                        <th className="text-right">Deal</th>
-                        <th className="text-right">Paid</th>
-                        <th className="text-right">Balance</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {completedOrders.map((o) => (
-                        <OrderRow key={o.id} order={o} paid={orderPaidMap.get(o.id) || 0} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
-
-          <div>
-            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-              <Package className="h-4 w-4 text-[var(--text-muted)]" />
-              Material, Runner, Fitting &amp; Astar
-            </h3>
-            {!hasMaterialCategories ? (
-              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-                No material, runner, fitting or astar charges recorded yet.
-              </div>
-            ) : (
-              <div className="surface space-y-4 p-4">
-                {materialCategories.material.rows.length > 0 && (
-                  <CategoryBlock
-                    title="Material"
-                    rows={materialCategories.material.rows}
-                    total={materialCategories.material.total}
-                  />
-                )}
-                {materialCategories.astar.rows.length > 0 && (
-                  <CategoryBlock
-                    title="Astar"
-                    rows={materialCategories.astar.rows}
-                    total={materialCategories.astar.total}
-                  />
-                )}
-                {(materialCategories.runner.rows.length > 0 || materialCategories.fitting.rows.length > 0) && (
-                  <CategoryBlock
-                    title="Runner / Fitting"
-                    rows={[...materialCategories.runner.rows, ...materialCategories.fitting.rows]}
-                    total={materialCategories.runner.total + materialCategories.fitting.total}
-                  />
-                )}
-                <div className="flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3">
-                  <span className="font-display font-bold text-amber-700">Grand Total</span>
-                  <span className="font-display text-lg font-bold text-amber-700">
-                    {money(materialCategories.grandTotal)}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-              <Wrench className="h-4 w-4 text-[var(--text-muted)]" />
-              Repairing Deductions
-            </h3>
-            {repairs.length === 0 ? (
-              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-                No repairing deductions for this kaariger yet.
-              </div>
-            ) : (
-              <div className="surface space-y-0 divide-y divide-[var(--border)] overflow-hidden !p-0">
-                {repairs.map((r, i) => {
-                  return (
-                    <div key={r.id} className="flex items-center gap-3 p-3.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-danger">
-                        {i + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold">
-                          {r.productName}
-                          {r.faultyQuantity > 0
-                            ? ` · ${r.faultyQuantity} pcs × ${money(r.faultyPricePerPiece)}`
-                            : ""}
-                        </p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          {new Date(r.createdAt).toLocaleDateString("en-IN")}{" "}
-                          {new Date(r.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · by{" "}
-                          {r.createdBy}
-                          {r.notes ? ` · ${r.notes}` : ""}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="font-bold text-danger">−{money(r.totalRepairCost)}</p>
-                        <p className="text-xs text-[var(--text-faint)]">left {money(r.dealAfterThisRepair)}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div className="flex items-center justify-between bg-red-50 p-4">
-                  <span className="font-display font-bold text-danger">Grand Total Deducted</span>
-                  <span className="font-display text-lg font-bold text-danger">{money(totals.repaired)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-              <Package className="h-4 w-4 text-[var(--text-muted)]" />
-              Kharcha Timeline
-            </h3>
-            {payments.length === 0 ? (
-              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-                No kharcha paid to this kaariger yet.
-              </div>
-            ) : (
-              <div className="surface space-y-0 divide-y divide-[var(--border)] overflow-hidden !p-0">
-                {payments.map((p, i) => {
-                  const order = orders.find((o) => o.id === p.orderId);
-                  return (
-                    <div key={p.id} className="flex items-center gap-3 p-3.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-jade-soft text-xs font-bold text-jade-deep">
-                        {i + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold">
-                          {money(p.amount)} paid {order ? `· ${order.productName}` : ""}
-                        </p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          {p.date} {p.time} · {p.createdBy}
-                          {p.remarks ? ` · ${p.remarks}` : ""}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div className="flex items-center justify-between bg-jade-soft/50 p-4">
-                  <span className="font-display font-bold text-jade-deep">Grand Total Kharcha</span>
-                  <span className="font-display text-lg font-bold text-jade-deep">{money(totals.paid)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        </>
       )}
 
       {payOrderId && (
@@ -681,74 +541,203 @@ export default function HisaabPage() {
   );
 }
 
-function OrderRow({
+/** Full, self-contained breakdown for a single order — products, deductions,
+ * repairs and kharcha timeline all scoped to just this one order. Orders are
+ * never merged together; each gets rendered as its own card. */
+function OrderDetailCard({
   order,
-  paid,
+  payments,
+  repairs,
   onPay,
 }: {
   order: KaarigerOrder;
-  paid: number;
+  payments: KaarigerPayment[];
+  repairs: OrderRepair[];
   onPay?: () => void;
 }) {
+  const orderPayments = payments
+    .filter((p) => p.orderId === order.id)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const orderRepairs = repairs.filter((r) => r.orderId === order.id);
+
   const net = orderNetDeal(order);
+  const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
   const balance = Math.max(0, net - paid);
-  const isCompleted = order.status === "COMPLETED";
+  const isCompleted = order.status === "COMPLETED" || balance <= 0;
+
   return (
-    <tr>
-      <td className="font-medium">{order.productName}</td>
-      <td className="text-[var(--text-muted)]">
-        {order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN") : "—"}
-      </td>
-      <td>
-        <span className={orderStatusBadge(order.status)}>{order.status.replace(/_/g, " ")}</span>
-      </td>
-      <td className="text-right">{money(net)}</td>
-      <td className="text-right text-jade-deep">{money(paid)}</td>
-      <td className="text-right font-semibold">
-        {isCompleted ? <span className="text-jade-deep">All paid</span> : money(balance)}
-      </td>
-      {onPay && (
-        <td className="text-right">
+    <div className="surface space-y-4 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-display text-base font-bold">{order.productName}</p>
+            <span className={orderStatusBadge(order.status)}>{order.status.replace(/_/g, " ")}</span>
+          </div>
+          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+            {formatDate(order.createdAt)} · {order.approvedQuantity}/{order.targetQuantity} pcs
+          </p>
+        </div>
+        {onPay && (
           <button type="button" className="btn btn-secondary btn-sm whitespace-nowrap" onClick={onPay}>
             <IndianRupee className="h-3.5 w-3.5" />
             Pay
           </button>
-        </td>
-      )}
-    </tr>
-  );
-}
+        )}
+      </div>
 
-function CategoryBlock({
-  title,
-  rows,
-  total,
-}: {
-  title: string;
-  rows: { label: string; quantity: number; lineTotal: number }[];
-  total: number;
-}) {
-  return (
-    <div>
-      <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">{title}</p>
-      <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-        <table className="w-full text-sm">
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className={i % 2 === 1 ? "bg-[var(--surface-mist)]" : undefined}>
-                <td className="px-3 py-2 font-medium">{r.label}</td>
-                <td className="px-3 py-2 text-[var(--text-muted)]">{r.quantity} pcs</td>
-                <td className="px-3 py-2 text-right font-semibold text-danger">−{money(r.lineTotal)}</td>
-              </tr>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl bg-[var(--surface-mist)] px-3 py-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Deal</p>
+          <p className="font-display text-sm font-bold">{money(net)}</p>
+        </div>
+        <div className="rounded-xl bg-jade-soft/60 px-3 py-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">Paid</p>
+          <p className="font-display text-sm font-bold text-jade-deep">{money(paid)}</p>
+        </div>
+        <div className={`rounded-xl px-3 py-2 ${isCompleted ? "bg-jade-soft/60" : "bg-amber-50"}`}>
+          <p
+            className={`text-[10px] font-bold uppercase tracking-wider ${
+              isCompleted ? "text-jade-deep" : "text-amber-700"
+            }`}
+          >
+            Balance
+          </p>
+          <p className={`font-display text-sm font-bold ${isCompleted ? "text-jade-deep" : "text-amber-700"}`}>
+            {isCompleted ? "All Paid" : money(balance)}
+          </p>
+        </div>
+      </div>
+
+      {order.products && order.products.length > 0 && (
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+            <ShoppingBag className="h-3.5 w-3.5" />
+            Products
+          </p>
+          <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+            <table className="w-full text-sm">
+              <tbody>
+                {order.products.map((p, i) => (
+                  <tr key={i} className={i % 2 === 1 ? "bg-[var(--surface-mist)]" : undefined}>
+                    <td className="px-3 py-2 font-medium">{p.productName}</td>
+                    <td className="px-3 py-2 text-[var(--text-muted)]">
+                      {p.quantity} × ₹{p.pricePerPiece}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold">{money(p.lineTotal)}</td>
+                  </tr>
+                ))}
+                <tr className="bg-jade-soft/40">
+                  <td colSpan={2} className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
+                    Products Total
+                  </td>
+                  <td className="px-3 py-2 text-right font-bold text-jade-deep">
+                    {money(order.productsTotal ?? 0)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {order.materialDeductions && order.materialDeductions.length > 0 && (
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+            <Package className="h-3.5 w-3.5" />
+            Runner / Fitting / Astar / Material
+          </p>
+          <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+            <table className="w-full text-sm">
+              <tbody>
+                {order.materialDeductions.map((it, i) => (
+                  <tr key={i} className={i % 2 === 1 ? "bg-[var(--surface-mist)]" : undefined}>
+                    <td className="px-3 py-2 font-medium">{it.label}</td>
+                    <td className="px-3 py-2 text-[var(--text-muted)]">
+                      {it.quantity} × ₹{it.pricePerPiece}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
+                  </tr>
+                ))}
+                <tr className="bg-red-50">
+                  <td colSpan={2} className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-danger">
+                    Deductions Total
+                  </td>
+                  <td className="px-3 py-2 text-right font-bold text-danger">
+                    −{money(order.materialDeductionsTotal ?? 0)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {orderRepairs.length > 0 && (
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+            <Wrench className="h-3.5 w-3.5" />
+            Repairing Deductions
+          </p>
+          <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+            {orderRepairs.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {r.faultyQuantity > 0 ? `${r.faultyQuantity} pcs × ${money(r.faultyPricePerPiece)}` : "—"}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {formatDate(r.createdAt)} {formatTime(r.createdAt)} · by {r.createdBy}
+                    {r.notes ? ` · ${r.notes}` : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 font-bold text-danger">−{money(r.totalRepairCost)}</span>
+              </div>
             ))}
-            <tr className="bg-amber-50/70">
-              <td colSpan={2} className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-amber-700">
-                {title} Total
-              </td>
-              <td className="px-3 py-2 text-right font-bold text-amber-700">−{money(total)}</td>
-            </tr>
-          </tbody>
-        </table>
+            <div className="flex items-center justify-between bg-red-50 px-3 py-2 text-sm">
+              <span className="font-bold text-danger">Repair Total</span>
+              <span className="font-bold text-danger">
+                −{money(order.repairDeductionTotal || orderRepairs.reduce((s, r) => s + r.totalRepairCost, 0))}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {orderPayments.length > 0 && (
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+            <IndianRupee className="h-3.5 w-3.5" />
+            Kharcha Timeline
+          </p>
+          <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+            {orderPayments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {p.date} · {p.time} · by {p.createdBy}
+                  </p>
+                  {p.remarks && <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>}
+                </div>
+                <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
+              <span className="font-bold text-jade-deep">Kharcha Total</span>
+              <span className="font-bold text-jade-deep">{money(paid)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between border-t border-[var(--border)] pt-3">
+        <span className="font-display font-bold">Final Balance</span>
+        {isCompleted ? (
+          <span className="rounded-lg bg-jade-soft px-3 py-1 font-display text-sm font-bold text-jade-deep">
+            ✓ All Paid
+          </span>
+        ) : (
+          <span className="font-display text-lg font-bold text-amber-700">{money(balance)}</span>
+        )}
       </div>
     </div>
   );
