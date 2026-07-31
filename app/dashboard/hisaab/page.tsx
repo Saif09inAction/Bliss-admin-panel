@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
-import { IndianRupee, Package, Plus, Receipt, ShoppingBag, Wallet, Wrench, X } from "lucide-react";
+import { History, IndianRupee, Package, Plus, Receipt, ShoppingBag, Wallet, Wrench, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
@@ -47,6 +47,7 @@ export default function HisaabPage() {
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
+  const [showCompletedHistory, setShowCompletedHistory] = useState(false);
 
   async function loadKaarigers() {
     const snap = await getDocs(collection(getDb(), "employees"));
@@ -171,6 +172,7 @@ export default function HisaabPage() {
 
   useEffect(() => {
     loadKaarigerData(kaarigerId);
+    setShowCompletedHistory(false);
   }, [kaarigerId]);
 
   async function submitPayment(e: React.FormEvent) {
@@ -241,6 +243,12 @@ export default function HisaabPage() {
     payments.forEach((p) => map.set(p.orderId, (map.get(p.orderId) || 0) + p.amount));
     return map;
   }, [payments]);
+
+  // Fully paid orders move out of the active list into a "completed hisaab"
+  // history the admin can pull up on demand, so the main view stays focused
+  // on what still needs attention.
+  const activeOrders = useMemo(() => orders.filter((o) => o.status !== "COMPLETED"), [orders]);
+  const completedOrders = useMemo(() => orders.filter((o) => o.status === "COMPLETED"), [orders]);
 
   const totals = useMemo(() => {
     const deal = orders.reduce((s, o) => s + orderNetDeal(o), 0);
@@ -338,6 +346,20 @@ export default function HisaabPage() {
             )}
           </div>
 
+          {(selectedKaariger?.creditBalance || 0) > 0 && (
+            <div className="flex items-start gap-3 rounded-2xl border border-jade/30 bg-jade-soft/50 p-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
+                <Wallet size={16} />
+              </div>
+              <p className="text-sm text-jade-deep">
+                <strong>{selectedKaariger?.name}</strong> has been paid{" "}
+                <strong>{money(selectedKaariger?.creditBalance || 0)}</strong> extra on a previous bill. This
+                will be automatically deducted (adjusted) from their next hisaab when a new bill is created — no
+                action needed.
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="stat-card">
               <p className="stat-card-label">Total Deal</p>
@@ -358,13 +380,29 @@ export default function HisaabPage() {
           </div>
 
           <div>
-            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-              <ShoppingBag className="h-4 w-4 text-[var(--text-muted)]" />
-              Orders
-            </h3>
-            {orders.length === 0 ? (
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                <ShoppingBag className="h-4 w-4 text-[var(--text-muted)]" />
+                Orders
+              </h3>
+              {completedOrders.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowCompletedHistory((v) => !v)}
+                >
+                  <History className="h-3.5 w-3.5" />
+                  {showCompletedHistory
+                    ? "Hide completed hisaab"
+                    : `See completed hisaab (${completedOrders.length})`}
+                </button>
+              )}
+            </div>
+            {activeOrders.length === 0 ? (
               <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-                No orders for this kaariger yet.
+                {orders.length === 0
+                  ? "No orders for this kaariger yet."
+                  : "No active orders — everything is fully paid. See completed hisaab above."}
               </div>
             ) : (
               <div className="data-table-wrap">
@@ -381,41 +419,47 @@ export default function HisaabPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.map((o) => {
-                      const net = orderNetDeal(o);
-                      const paid = orderPaidMap.get(o.id) || 0;
-                      const balance = Math.max(0, net - paid);
-                      return (
-                        <tr key={o.id}>
-                          <td className="font-medium">{o.productName}</td>
-                          <td className="text-[var(--text-muted)]">
-                            {o.createdAt ? new Date(o.createdAt).toLocaleDateString("en-IN") : "—"}
-                          </td>
-                          <td>
-                            <span className={orderStatusBadge(o.status)}>{o.status.replace(/_/g, " ")}</span>
-                          </td>
-                          <td className="text-right">{money(net)}</td>
-                          <td className="text-right text-jade-deep">{money(paid)}</td>
-                          <td className="text-right font-semibold">{money(balance)}</td>
-                          <td className="text-right">
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm whitespace-nowrap"
-                              onClick={() => {
-                                setPayOrderId(o.id);
-                                setPayForm({ amount: "", remarks: "" });
-                                setPayMsg("");
-                              }}
-                            >
-                              <IndianRupee className="h-3.5 w-3.5" />
-                              Pay
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {activeOrders.map((o) => (
+                      <OrderRow
+                        key={o.id}
+                        order={o}
+                        paid={orderPaidMap.get(o.id) || 0}
+                        onPay={() => {
+                          setPayOrderId(o.id);
+                          setPayForm({ amount: "", remarks: "" });
+                          setPayMsg("");
+                        }}
+                      />
+                    ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {showCompletedHistory && completedOrders.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Completed Hisaab — fully paid
+                </p>
+                <div className="data-table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th className="text-right">Deal</th>
+                        <th className="text-right">Paid</th>
+                        <th className="text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {completedOrders.map((o) => (
+                        <OrderRow key={o.id} order={o} paid={orderPaidMap.get(o.id) || 0} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
@@ -611,6 +655,44 @@ export default function HisaabPage() {
         </>
       )}
     </div>
+  );
+}
+
+function OrderRow({
+  order,
+  paid,
+  onPay,
+}: {
+  order: KaarigerOrder;
+  paid: number;
+  onPay?: () => void;
+}) {
+  const net = orderNetDeal(order);
+  const balance = Math.max(0, net - paid);
+  const isCompleted = order.status === "COMPLETED";
+  return (
+    <tr>
+      <td className="font-medium">{order.productName}</td>
+      <td className="text-[var(--text-muted)]">
+        {order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN") : "—"}
+      </td>
+      <td>
+        <span className={orderStatusBadge(order.status)}>{order.status.replace(/_/g, " ")}</span>
+      </td>
+      <td className="text-right">{money(net)}</td>
+      <td className="text-right text-jade-deep">{money(paid)}</td>
+      <td className="text-right font-semibold">
+        {isCompleted ? <span className="text-jade-deep">All paid</span> : money(balance)}
+      </td>
+      {onPay && (
+        <td className="text-right">
+          <button type="button" className="btn btn-secondary btn-sm whitespace-nowrap" onClick={onPay}>
+            <IndianRupee className="h-3.5 w-3.5" />
+            Pay
+          </button>
+        </td>
+      )}
+    </tr>
   );
 }
 
