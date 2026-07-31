@@ -869,9 +869,11 @@ export default function OrdersPage() {
       </div>
 
       <div>
-        <label className="label flex items-center gap-1.5">
-          <Wallet className="h-3.5 w-3.5" />
-          Kharcha given now (optional)
+        <label className="label">
+          <span className="inline-flex items-center gap-1.5">
+            <Wallet className="h-3.5 w-3.5" />
+            Kharcha given now (optional)
+          </span>
         </label>
         <input
           className="input"

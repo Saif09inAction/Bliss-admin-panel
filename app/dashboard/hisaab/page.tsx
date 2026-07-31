@@ -322,7 +322,7 @@ export default function HisaabPage() {
         <p className="section-sub">Full payment & kharcha history per kaariger</p>
       </PageToolbar>
 
-      <div className="surface grid gap-4 sm:grid-cols-2">
+      <div className="card grid gap-5 sm:grid-cols-2">
         <div>
           <label className="label">Select kaariger</label>
           <SearchSelect
@@ -334,9 +334,11 @@ export default function HisaabPage() {
           />
         </div>
         <div>
-          <label className="label flex items-center gap-1.5">
-            <History className="h-3.5 w-3.5" />
-            See previous hisaab
+          <label className="label">
+            <span className="inline-flex items-center gap-1.5">
+              <History className="h-3.5 w-3.5" />
+              See previous hisaab
+            </span>
           </label>
           <SearchSelect
             value={historyOrderId}
