@@ -13,6 +13,7 @@ import {
   ClipboardList,
   IndianRupee,
   Package,
+  Pencil,
   Plus,
   Trash2,
   X,
@@ -55,6 +56,17 @@ export default function OrdersPage() {
   const [paymentForm, setPaymentForm] = useState({ amount: "", remarks: "" });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "DONE">("ALL");
+  const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
+  const [editForm, setEditForm] = useState({
+    productName: "",
+    targetQuantity: "",
+    approvedQuantity: "",
+    deliveredQuantity: "",
+    totalDealAmount: "",
+    status: "",
+    notes: "",
+    kaarigerId: "",
+  });
 
   const [form, setForm] = useState({
     kaarigerId: "",
@@ -170,8 +182,13 @@ export default function OrdersPage() {
 
   async function createOrder(e: React.FormEvent) {
     e.preventDefault();
+    const productName = form.productName.trim();
+    const qty = Number(form.targetQuantity) || 0;
+    if (!productName || qty <= 0) {
+      alert("Product name and quantity are required.");
+      return;
+    }
     const kaariger = kaarigers.find((k) => k.phone === form.kaarigerId);
-    if (!kaariger) return;
 
     const orderMaterials: OrderMaterial[] = form.selectedMaterials
       .filter((s) => s.materialId && Number(s.quantity) > 0)
@@ -185,19 +202,24 @@ export default function OrdersPage() {
         };
       });
 
-    const qty = Number(form.targetQuantity) || 0;
     const inputAmount = Number(form.totalDealAmount) || 0;
-    const pricePerPiece = form.pricingType === "PER_PIECE" ? inputAmount : (qty > 0 ? inputAmount / qty : 0);
-    const totalDealAmount = form.pricingType === "PER_PIECE" ? inputAmount * qty : inputAmount;
+    const pricePerPiece =
+      form.pricingType === "PER_PIECE"
+        ? inputAmount
+        : qty > 0 && inputAmount > 0
+          ? inputAmount / qty
+          : 0;
+    const totalDealAmount =
+      form.pricingType === "PER_PIECE" ? inputAmount * qty : inputAmount;
     const id = uuid();
 
     const order: KaarigerOrder = {
       id,
-      kaarigerId: kaariger.phone.trim(),
-      kaarigerName: kaariger.name,
-      productName: form.productName.trim(),
+      kaarigerId: kaariger?.phone.trim() || form.kaarigerId || "",
+      kaarigerName: kaariger?.name || "",
+      productName,
       targetQuantity: qty,
-      color: form.color.trim(),
+      color: "",
       rawMaterials: orderMaterials,
       totalDealAmount,
       pricePerPiece,
@@ -206,7 +228,7 @@ export default function OrdersPage() {
       approvedQuantity: 0,
       createdBy: session?.name || "Admin",
       createdAt: Date.now(),
-      notes: form.notes || undefined,
+      notes: form.notes.trim() || undefined,
     };
 
     await setDoc(doc(getDb(), "kaariger_orders", id), order);
@@ -244,6 +266,51 @@ export default function OrdersPage() {
     await setDoc(doc(getDb(), "kaariger_payments", id), payment);
     setPaymentForm({ amount: "", remarks: "" });
     loadPayments(selectedOrder);
+  }
+
+  function openEditOrder(order: KaarigerOrder) {
+    setEditOrder(order);
+    setEditForm({
+      productName: order.productName,
+      targetQuantity: String(order.targetQuantity),
+      approvedQuantity: String(order.approvedQuantity),
+      deliveredQuantity: order.deliveredQuantity != null ? String(order.deliveredQuantity) : "",
+      totalDealAmount: String(order.totalDealAmount || ""),
+      status: order.status,
+      notes: order.notes || "",
+      kaarigerId: order.kaarigerId,
+    });
+  }
+
+  async function saveEditOrder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editOrder) return;
+    const kaariger = kaarigers.find((k) => k.phone === editForm.kaarigerId);
+    const productName = editForm.productName.trim();
+    const targetQuantity = Number(editForm.targetQuantity) || 0;
+    if (!productName || targetQuantity <= 0) {
+      alert("Product name and quantity are required.");
+      return;
+    }
+    const deliveredRaw = editForm.deliveredQuantity.trim();
+    await setDoc(
+      doc(getDb(), "kaariger_orders", editOrder.id),
+      {
+        productName,
+        targetQuantity,
+        approvedQuantity: Number(editForm.approvedQuantity) || 0,
+        deliveredQuantity: deliveredRaw === "" ? null : Number(deliveredRaw) || 0,
+        totalDealAmount: Number(editForm.totalDealAmount) || 0,
+        status: editForm.status,
+        notes: editForm.notes.trim() || "",
+        kaarigerId: editForm.kaarigerId,
+        kaarigerName: kaariger?.name || editOrder.kaarigerName,
+        color: "",
+      },
+      { merge: true }
+    );
+    setEditOrder(null);
+    loadOrders();
   }
 
   function addMaterialRow() {
@@ -344,8 +411,8 @@ export default function OrdersPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
         <div className="sm:col-span-2 lg:col-span-1">
-          <label className="label">Kaariger</label>
-          <select className="input" value={form.kaarigerId} onChange={(e) => setForm({ ...form, kaarigerId: e.target.value })} required>
+          <label className="label">Kaariger (optional)</label>
+          <select className="input" value={form.kaarigerId} onChange={(e) => setForm({ ...form, kaarigerId: e.target.value })}>
             <option value="">Select kaariger</option>
             {kaarigers.map((k) => (
               <option key={k.phone} value={k.phone}>{k.name} ({k.phone})</option>
@@ -353,28 +420,24 @@ export default function OrdersPage() {
           </select>
         </div>
         <div>
-          <label className="label">Product Name</label>
-          <input className="input" value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} required />
+          <label className="label">Product / SKU name *</label>
+          <input className="input" value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })} required placeholder="Same spelling merges in inventory" />
         </div>
         <div>
-          <label className="label">Target Quantity</label>
-          <input className="input" type="number" value={form.targetQuantity} onChange={(e) => setForm({ ...form, targetQuantity: e.target.value })} required />
+          <label className="label">Target Quantity *</label>
+          <input className="input" type="number" min={1} value={form.targetQuantity} onChange={(e) => setForm({ ...form, targetQuantity: e.target.value })} required />
         </div>
         <div>
-          <label className="label">Color</label>
-          <input className="input" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} />
-        </div>
-        <div>
-          <label className="label">Pricing</label>
+          <label className="label">Pricing (optional)</label>
           <select className="input" value={form.pricingType} onChange={(e) => setForm({ ...form, pricingType: e.target.value as "OVERALL" | "PER_PIECE" })}>
             <option value="OVERALL">Overall deal</option>
             <option value="PER_PIECE">Per piece</option>
           </select>
         </div>
         <div className="sm:col-span-2 lg:col-span-1">
-          <label className="label">{form.pricingType === "PER_PIECE" ? "Price Per Piece (₹)" : "Total Deal Amount (₹)"}</label>
-          <input className="input" type="number" value={form.totalDealAmount} onChange={(e) => setForm({ ...form, totalDealAmount: e.target.value })} required />
-          {form.pricingType === "PER_PIECE" && Number(form.targetQuantity) > 0 && (
+          <label className="label">{form.pricingType === "PER_PIECE" ? "Price Per Piece ₹ (optional)" : "Total Deal Amount ₹ (optional)"}</label>
+          <input className="input" type="number" value={form.totalDealAmount} onChange={(e) => setForm({ ...form, totalDealAmount: e.target.value })} placeholder="0" />
+          {form.pricingType === "PER_PIECE" && Number(form.targetQuantity) > 0 && Number(form.totalDealAmount) > 0 && (
             <p className="mt-1.5 text-xs text-[var(--text-muted)]">
               Total deal: ₹{previewTotal.toLocaleString("en-IN")} ({form.totalDealAmount || 0}/pc × {form.targetQuantity} pcs)
             </p>
@@ -382,10 +445,14 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      <p className="rounded-xl bg-[var(--surface-mist)] px-3 py-2 text-xs text-[var(--text-muted)]">
+        Colours are set by staff when approving delivery. Materials &amp; notes are optional.
+      </p>
+
       {inStockMaterials.length > 0 ? (
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <label className="label mb-0">Raw Materials (in stock only)</label>
+            <label className="label mb-0">Raw Materials (optional)</label>
             <button type="button" className="btn-ghost btn-sm" onClick={addMaterialRow}>
               <Plus className="h-3.5 w-3.5" />
               Add
@@ -447,7 +514,7 @@ export default function OrdersPage() {
       )}
 
       <div>
-        <label className="label">Notes</label>
+        <label className="label">Instructions / notes (optional)</label>
         <input className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional instructions" />
       </div>
 
@@ -621,14 +688,24 @@ export default function OrdersPage() {
                     <p className="mt-1 text-xs text-[var(--jade-deep)]">Last verified by {selected.verifiedBy}</p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  className="btn-ghost btn-sm shrink-0"
-                  onClick={() => setSelectedOrder(null)}
-                  aria-label="Close order detail"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => openEditOrder(selected)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm shrink-0"
+                    onClick={() => setSelectedOrder(null)}
+                    aria-label="Close order detail"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
@@ -740,6 +817,120 @@ export default function OrdersPage() {
           )}
         </div>
       </div>
+
+      {editOrder && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditOrder(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={saveEditOrder}
+              className="surface max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <h3 className="font-display text-lg font-bold">Edit order</h3>
+                <button type="button" className="btn-icon" onClick={() => setEditOrder(null)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div>
+                <label className="label">Product / SKU *</label>
+                <input
+                  className="input"
+                  value={editForm.productName}
+                  onChange={(e) => setEditForm({ ...editForm, productName: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Kaariger</label>
+                <select
+                  className="input"
+                  value={editForm.kaarigerId}
+                  onChange={(e) => setEditForm({ ...editForm, kaarigerId: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {kaarigers.map((k) => (
+                    <option key={k.phone} value={k.phone}>
+                      {k.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Target qty *</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={editForm.targetQuantity}
+                    onChange={(e) => setEditForm({ ...editForm, targetQuantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Approved qty</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={editForm.approvedQuantity}
+                    onChange={(e) => setEditForm({ ...editForm, approvedQuantity: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Delivered (pending)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={editForm.deliveredQuantity}
+                    onChange={(e) => setEditForm({ ...editForm, deliveredQuantity: e.target.value })}
+                    placeholder="Empty if none"
+                  />
+                </div>
+                <div>
+                  <label className="label">Deal ₹</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={editForm.totalDealAmount}
+                    onChange={(e) => setEditForm({ ...editForm, totalDealAmount: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Status</label>
+                <select
+                  className="input"
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                >
+                  {["ASSIGNED", "PENDING_APPROVAL", "COMPLETED", "CANCELLED"].map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Notes</label>
+                <input
+                  className="input"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditOrder(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Save changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
     </div>
   );
 }

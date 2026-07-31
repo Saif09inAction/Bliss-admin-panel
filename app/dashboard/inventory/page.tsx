@@ -8,7 +8,7 @@ import {
   onSnapshot,
   setDoc,
 } from "firebase/firestore";
-import { Boxes, Package, Palette, Plus, Trash2, X } from "lucide-react";
+import { Boxes, Package, Palette, Pencil, Plus, Trash2, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { FinishedProduct } from "@/lib/types";
@@ -35,6 +35,15 @@ export default function InventoryPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedSku, setSelectedSku] = useState<{
+    key: string;
+    displayName: string;
+    totalQty: number;
+    totalValue: number;
+    colors: { color: string; quantity: number; ids: string[]; unitPrice: number }[];
+  } | null>(null);
+  const [editProduct, setEditProduct] = useState<FinishedProduct | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", color: "", quantity: "", unitPrice: "" });
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "finished_products"), (snap) => {
@@ -73,6 +82,83 @@ export default function InventoryPage() {
         p.lastUpdatedBy.toLowerCase().includes(q)
     );
   }, [products, search]);
+
+  type SkuGroup = {
+    key: string;
+    displayName: string;
+    totalQty: number;
+    totalValue: number;
+    colors: { color: string; quantity: number; ids: string[]; unitPrice: number }[];
+  };
+
+  const skuGroups = useMemo((): SkuGroup[] => {
+    const map = new Map<string, FinishedProduct[]>();
+    for (const p of filtered) {
+      const key = p.name.trim().toLowerCase();
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(p);
+    }
+    return Array.from(map.entries())
+      .map(([, list]) => {
+        const colorMap = new Map<string, FinishedProduct[]>();
+        for (const p of list) {
+          const ck = p.color.trim().toLowerCase();
+          if (!colorMap.has(ck)) colorMap.set(ck, []);
+          colorMap.get(ck)!.push(p);
+        }
+        const colors = Array.from(colorMap.entries()).map(([, rows]) => ({
+          color: rows[0].color || "No colour",
+          quantity: rows.reduce((s, r) => s + r.quantity, 0),
+          ids: rows.map((r) => r.id),
+          unitPrice: rows[0].unitPrice,
+        }));
+        return {
+          key: list[0].name.trim().toLowerCase(),
+          displayName: list[0].name,
+          totalQty: colors.reduce((s, c) => s + c.quantity, 0),
+          totalValue: list.reduce((s, p) => s + p.quantity * p.unitPrice, 0),
+          colors: colors.sort((a, b) => a.color.localeCompare(b.color)),
+        };
+      })
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [filtered]);
+
+  function openEdit(p: FinishedProduct) {
+    setEditProduct(p);
+    setEditForm({
+      name: p.name,
+      color: p.color,
+      quantity: String(p.quantity),
+      unitPrice: String(p.unitPrice || ""),
+    });
+  }
+
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editProduct) return;
+    const name = editForm.name.trim();
+    const color = editForm.color.trim();
+    const quantity = Number(editForm.quantity);
+    const unitPrice = Number(editForm.unitPrice) || 0;
+    if (!name || !Number.isFinite(quantity) || quantity < 0) {
+      alert("Valid name and quantity required.");
+      return;
+    }
+    await setDoc(
+      doc(getDb(), "finished_products", editProduct.id),
+      {
+        ...editProduct,
+        name,
+        color,
+        quantity,
+        unitPrice,
+        lastUpdatedBy: session?.name || "Admin",
+        lastUpdatedTime: Date.now(),
+      },
+      { merge: true }
+    );
+    setEditProduct(null);
+  }
 
   const totalQty = filtered.reduce((s, p) => s + p.quantity, 0);
   const totalValue = filtered.reduce((s, p) => s + p.quantity * p.unitPrice, 0);
@@ -168,8 +254,8 @@ export default function InventoryPage() {
         }
       >
         <p className="section-sub">
-          {totalQty.toLocaleString("en-IN")} units · {filtered.length} product
-          {filtered.length === 1 ? "" : "s"}
+          {totalQty.toLocaleString("en-IN")} units · {skuGroups.length} SKU
+          {skuGroups.length === 1 ? "" : "s"}
         </p>
       </PageToolbar>
 
@@ -215,12 +301,42 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      {/* SKU grouped list — click for colour breakdown */}
+      <div>
+        <p className="mobile-section-label">SKUs · same spelling merges (case ignored)</p>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {skuGroups.map((g) => (
+            <button
+              key={g.key}
+              type="button"
+              className="mobile-card text-left transition hover:border-[var(--jade)]"
+              onClick={() => setSelectedSku(g)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-display font-bold">{g.displayName}</p>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                    {g.colors.length} colour{g.colors.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <p className="font-display text-xl font-bold">{g.totalQty.toLocaleString("en-IN")}</p>
+              </div>
+            </button>
+          ))}
+          {skuGroups.length === 0 && (
+            <p className="col-span-full py-8 text-center text-sm text-[var(--text-muted)]">
+              {search ? "No products match." : "No products in store yet."}
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className="data-table-wrap hidden md:block">
         <div className="overflow-x-auto">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Product</th>
+                <th>Product / SKU</th>
                 <th>Color</th>
                 <th>Quantity</th>
                 <th>Unit Price</th>
@@ -253,15 +369,25 @@ export default function InventoryPage() {
                   <td className="text-[var(--text-muted)]">{p.lastUpdatedBy || "—"}</td>
                   <td className="text-[var(--text-muted)]">{formatUpdated(p.lastUpdatedTime)}</td>
                   <td className="text-right">
-                    <button
-                      type="button"
-                      className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
-                      disabled={deletingId === p.id}
-                      onClick={() => removeProduct(p)}
-                      aria-label="Delete"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="inline-flex gap-1">
+                      <button
+                        type="button"
+                        className="btn-icon !h-8 !w-8"
+                        onClick={() => openEdit(p)}
+                        aria-label="Edit"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                        disabled={deletingId === p.id}
+                        onClick={() => removeProduct(p)}
+                        aria-label="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -275,51 +401,106 @@ export default function InventoryPage() {
         )}
       </div>
 
-      <div className="md:hidden">
-        <p className="mobile-section-label">Products · A–Z</p>
-        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
-          {filtered.map((p, idx) => (
-            <div
-              key={p.id}
-              className={`p-3.5 ${idx < filtered.length - 1 ? "border-b border-[var(--border)]" : ""}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold">{p.name}</p>
-                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                    {p.color ? `${p.color} · ` : ""}
-                    ₹{p.unitPrice.toLocaleString("en-IN")}/pc
-                    {p.lastUpdatedBy ? ` · ${p.lastUpdatedBy}` : ""}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-display text-lg font-bold">{p.quantity.toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-faint)]">units</p>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-medium text-[var(--text-muted)]">
-                  Value ₹{(p.quantity * p.unitPrice).toLocaleString("en-IN")}
+      {selectedSku && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setSelectedSku(null)} />
+          <div className="fixed inset-x-4 top-1/2 z-50 mx-auto w-full max-w-md -translate-y-1/2 surface p-5 sm:inset-x-auto">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-lg font-bold">{selectedSku.displayName}</h3>
+                <p className="text-sm text-[var(--text-muted)]">
+                  Total {selectedSku.totalQty.toLocaleString("en-IN")} pcs
                 </p>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm !px-2.5"
-                  disabled={deletingId === p.id}
-                  onClick={() => removeProduct(p)}
+              </div>
+              <button type="button" className="btn-icon" onClick={() => setSelectedSku(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {selectedSku.colors.map((c) => (
+                <div
+                  key={c.color}
+                  className="flex items-center justify-between rounded-xl border border-[var(--border)] px-3 py-2.5"
                 >
-                  <Trash2 size={13} />
-                  Delete
+                  <span className="font-medium">{c.color}</span>
+                  <span className="font-bold">{c.quantity.toLocaleString("en-IN")} pcs</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-[var(--text-faint)]">
+              Edit individual colour lines in the table below (desktop) or from add/edit inventory.
+            </p>
+          </div>
+        </>
+      )}
+
+      {editProduct && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditProduct(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={saveEdit}
+              className="surface w-full max-w-md space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <h3 className="font-display text-lg font-bold">Edit inventory</h3>
+                <button type="button" className="btn-icon" onClick={() => setEditProduct(null)}>
+                  <X size={16} />
                 </button>
               </div>
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <p className="py-10 text-center text-sm text-[var(--text-muted)]">
-              {search ? "No products match your search." : "No products in store yet."}
-            </p>
-          )}
-        </div>
-      </div>
+              <div>
+                <label className="label">Product / SKU</label>
+                <input
+                  className="input"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Colour</label>
+                <input
+                  className="input"
+                  value={editForm.color}
+                  onChange={(e) => setEditForm({ ...editForm, color: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Quantity</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={editForm.quantity}
+                    onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Unit price ₹</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={editForm.unitPrice}
+                    onChange={(e) => setEditForm({ ...editForm, unitPrice: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditProduct(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
 
       {showForm && (
         <>

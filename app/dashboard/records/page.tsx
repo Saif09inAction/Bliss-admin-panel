@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDocs, setDoc } from "firebase/firestore";
 import {
   ArrowDownLeft,
   CheckCircle2,
   ClipboardList,
   Download,
+  Pencil,
   Truck,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
@@ -51,6 +52,38 @@ export default function RecordsPage() {
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
   const [search, setSearch] = useState("");
+  const [editPickup, setEditPickup] = useState<PickupRecord | null>(null);
+  const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
+  const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
+  const [pickupForm, setPickupForm] = useState({
+    productName: "",
+    color: "",
+    quantity: "",
+    partner: "",
+    staffName: "",
+    date: "",
+    time: "",
+  });
+  const [returnForm, setReturnForm] = useState({
+    productName: "",
+    color: "",
+    quantity: "",
+    partner: "",
+    returnType: "",
+    staffName: "",
+    date: "",
+    time: "",
+    notes: "",
+  });
+  const [orderForm, setOrderForm] = useState({
+    productName: "",
+    targetQuantity: "",
+    approvedQuantity: "",
+    status: "",
+    totalDealAmount: "",
+    kaarigerName: "",
+    notes: "",
+  });
 
   useEffect(() => {
     async function load() {
@@ -245,6 +278,161 @@ export default function RecordsPage() {
           ? filteredPickups.length
           : filteredReturns.length;
 
+  function openPickupEdit(p: PickupRecord) {
+    setEditPickup(p);
+    setPickupForm({
+      productName: p.productName,
+      color: p.color,
+      quantity: String(p.quantity),
+      partner: p.partner,
+      staffName: p.staffName,
+      date: p.date,
+      time: p.time,
+    });
+  }
+
+  async function savePickup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editPickup) return;
+    await setDoc(
+      doc(getDb(), "pickup_records", editPickup.id),
+      {
+        productName: pickupForm.productName.trim(),
+        color: pickupForm.color.trim(),
+        quantity: Number(pickupForm.quantity) || 0,
+        partner: pickupForm.partner.trim(),
+        staffName: pickupForm.staffName.trim(),
+        date: pickupForm.date,
+        time: pickupForm.time,
+      },
+      { merge: true }
+    );
+    setEditPickup(null);
+    const snap = await getDocs(collection(getDb(), "pickup_records"));
+    setPickups(
+      snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            productName: data.productName as string,
+            color: (data.color as string) || "",
+            quantity: (data.quantity as number) || 0,
+            partner: (data.partner as string) || "",
+            staffName: (data.staffName as string) || "",
+            date: (data.date as string) || "",
+            time: (data.time as string) || "",
+          };
+        })
+        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+    );
+  }
+
+  function openReturnEdit(r: ReturnRecord) {
+    setEditReturn(r);
+    setReturnForm({
+      productName: r.productName,
+      color: r.color,
+      quantity: String(r.quantity),
+      partner: r.partner,
+      returnType: r.returnType,
+      staffName: r.staffName,
+      date: r.date,
+      time: r.time,
+      notes: r.notes || "",
+    });
+  }
+
+  async function saveReturn(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editReturn) return;
+    await setDoc(
+      doc(getDb(), "return_records", editReturn.id),
+      {
+        productName: returnForm.productName.trim(),
+        color: returnForm.color.trim(),
+        quantity: Number(returnForm.quantity) || 0,
+        partner: returnForm.partner.trim(),
+        returnType: returnForm.returnType.trim(),
+        staffName: returnForm.staffName.trim(),
+        date: returnForm.date,
+        time: returnForm.time,
+        notes: returnForm.notes.trim(),
+      },
+      { merge: true }
+    );
+    setEditReturn(null);
+    const snap = await getDocs(collection(getDb(), "return_records"));
+    setReturns(
+      snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            productName: data.productName as string,
+            color: (data.color as string) || "",
+            quantity: (data.quantity as number) || 0,
+            partner: (data.partner as string) || "",
+            returnType: (data.returnType as string) || "",
+            staffName: (data.staffName as string) || "",
+            date: (data.date as string) || "",
+            time: (data.time as string) || "",
+            notes: data.notes as string | undefined,
+          };
+        })
+        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+    );
+  }
+
+  function openOrderEdit(o: KaarigerOrder) {
+    setEditOrder(o);
+    setOrderForm({
+      productName: o.productName,
+      targetQuantity: String(o.targetQuantity),
+      approvedQuantity: String(o.approvedQuantity),
+      status: o.status,
+      totalDealAmount: String(o.totalDealAmount || ""),
+      kaarigerName: o.kaarigerName,
+      notes: o.notes || "",
+    });
+  }
+
+  async function saveOrderRecord(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editOrder) return;
+    await setDoc(
+      doc(getDb(), "kaariger_orders", editOrder.id),
+      {
+        productName: orderForm.productName.trim(),
+        targetQuantity: Number(orderForm.targetQuantity) || 0,
+        approvedQuantity: Number(orderForm.approvedQuantity) || 0,
+        status: orderForm.status,
+        totalDealAmount: Number(orderForm.totalDealAmount) || 0,
+        kaarigerName: orderForm.kaarigerName.trim(),
+        notes: orderForm.notes.trim(),
+      },
+      { merge: true }
+    );
+    setEditOrder(null);
+    // refresh orders list in place
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === editOrder.id
+          ? {
+              ...o,
+              productName: orderForm.productName.trim(),
+              targetQuantity: Number(orderForm.targetQuantity) || 0,
+              approvedQuantity: Number(orderForm.approvedQuantity) || 0,
+              status: orderForm.status,
+              totalDealAmount: Number(orderForm.totalDealAmount) || 0,
+              kaarigerName: orderForm.kaarigerName.trim(),
+              notes: orderForm.notes.trim() || undefined,
+            }
+          : o
+      )
+    );
+  }
+
   return (
     <div className="stagger space-y-5">
       <PageToolbar
@@ -289,6 +477,7 @@ export default function RecordsPage() {
                     <th>Status</th>
                     <th>Verified By</th>
                     <th className="text-right">Deal</th>
+                    <th className="text-right">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -303,6 +492,11 @@ export default function RecordsPage() {
                       <td><span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span></td>
                       <td className="text-[var(--text-muted)]">{o.verifiedBy || "—"}</td>
                       <td className="text-right font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
+                      <td className="text-right">
+                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)}>
+                          <Pencil size={14} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -320,7 +514,12 @@ export default function RecordsPage() {
                     <p className="font-display font-bold">{o.productName}</p>
                     <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
                   </div>
-                  <span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span>
+                    <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)}>
+                      <Pencil size={14} />
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Progress" value={`${o.approvedQuantity} / ${o.targetQuantity} pcs`} />
@@ -421,6 +620,7 @@ export default function RecordsPage() {
                     <th>Partner</th>
                     <th>Staff</th>
                     <th>Date & Time</th>
+                    <th className="text-right">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -432,6 +632,11 @@ export default function RecordsPage() {
                       <td className="text-[var(--text-muted)]">{p.partner}</td>
                       <td>{p.staffName}</td>
                       <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
+                      <td className="text-right">
+                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)}>
+                          <Pencil size={14} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -444,9 +649,14 @@ export default function RecordsPage() {
           <div className="space-y-3 lg:hidden">
             {filteredPickups.map((p) => (
               <div key={p.id} className="record-card">
-                <p className="font-display font-bold">
-                  {p.productName} {p.color ? `(${p.color})` : ""}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-display font-bold">
+                    {p.productName} {p.color ? `(${p.color})` : ""}
+                  </p>
+                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)}>
+                    <Pencil size={14} />
+                  </button>
+                </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Partner" value={p.partner} />
                   <Field label="Quantity" value={String(p.quantity)} />
@@ -477,6 +687,7 @@ export default function RecordsPage() {
                     <th>Partner</th>
                     <th>Staff</th>
                     <th>Notes</th>
+                    <th className="text-right">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -489,6 +700,11 @@ export default function RecordsPage() {
                       <td className="text-[var(--text-muted)]">{r.partner}</td>
                       <td>{r.staffName}</td>
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
+                      <td className="text-right">
+                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)}>
+                          <Pencil size={14} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -501,9 +717,14 @@ export default function RecordsPage() {
           <div className="space-y-3 lg:hidden">
             {filteredReturns.map((r) => (
               <div key={r.id} className="record-card">
-                <p className="font-display font-bold">
-                  {r.productName} {r.color ? `(${r.color})` : ""}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-display font-bold">
+                    {r.productName} {r.color ? `(${r.color})` : ""}
+                  </p>
+                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)}>
+                    <Pencil size={14} />
+                  </button>
+                </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Type" value={r.returnType} />
                   <Field label="Partner" value={r.partner} />
@@ -516,6 +737,107 @@ export default function RecordsPage() {
             {filteredReturns.length === 0 && (
               <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
             )}
+          </div>
+        </>
+      )}
+
+      {editPickup && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditPickup(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form onSubmit={savePickup} className="surface w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-display text-lg font-bold">Edit pickup</h3>
+              {(["productName", "color", "quantity", "partner", "staffName", "date", "time"] as const).map((key) => (
+                <div key={key}>
+                  <label className="label capitalize">{key.replace(/([A-Z])/g, " $1")}</label>
+                  <input
+                    className="input"
+                    type={key === "quantity" ? "number" : "text"}
+                    value={pickupForm[key]}
+                    onChange={(e) => setPickupForm({ ...pickupForm, [key]: e.target.value })}
+                  />
+                </div>
+              ))}
+              <div className="flex gap-2 pt-1">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditPickup(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">Save</button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {editReturn && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditReturn(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form onSubmit={saveReturn} className="surface max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-display text-lg font-bold">Edit return</h3>
+              {(["productName", "color", "quantity", "partner", "returnType", "staffName", "date", "time", "notes"] as const).map((key) => (
+                <div key={key}>
+                  <label className="label capitalize">{key.replace(/([A-Z])/g, " $1")}</label>
+                  <input
+                    className="input"
+                    type={key === "quantity" ? "number" : "text"}
+                    value={returnForm[key]}
+                    onChange={(e) => setReturnForm({ ...returnForm, [key]: e.target.value })}
+                  />
+                </div>
+              ))}
+              <div className="flex gap-2 pt-1">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditReturn(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">Save</button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {editOrder && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditOrder(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form onSubmit={saveOrderRecord} className="surface w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-display text-lg font-bold">Edit order record</h3>
+              <div>
+                <label className="label">Product / SKU</label>
+                <input className="input" value={orderForm.productName} onChange={(e) => setOrderForm({ ...orderForm, productName: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Kaariger name</label>
+                <input className="input" value={orderForm.kaarigerName} onChange={(e) => setOrderForm({ ...orderForm, kaarigerName: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Target</label>
+                  <input className="input" type="number" value={orderForm.targetQuantity} onChange={(e) => setOrderForm({ ...orderForm, targetQuantity: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label">Approved</label>
+                  <input className="input" type="number" value={orderForm.approvedQuantity} onChange={(e) => setOrderForm({ ...orderForm, approvedQuantity: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="label">Status</label>
+                <select className="input" value={orderForm.status} onChange={(e) => setOrderForm({ ...orderForm, status: e.target.value })}>
+                  {["ASSIGNED", "PENDING_APPROVAL", "COMPLETED", "CANCELLED"].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Deal ₹</label>
+                <input className="input" type="number" value={orderForm.totalDealAmount} onChange={(e) => setOrderForm({ ...orderForm, totalDealAmount: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Notes</label>
+                <input className="input" value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditOrder(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary flex-1">Save</button>
+              </div>
+            </form>
           </div>
         </>
       )}

@@ -78,9 +78,11 @@ export interface OrderApprovalRecord {
   kaarigerId: string;
   kaarigerName: string;
   batchQuantity: number;
+  rejectedQuantity?: number;
   approvedTotalAfter: number;
   targetQuantity: number;
   color: string;
+  colorBreakdown?: string;
   verifiedByName: string;
   verifiedByPhone: string;
   verifiedAt: number;
