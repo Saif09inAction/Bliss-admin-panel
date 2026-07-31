@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, setDoc } from "firebase/firestore";
 import {
   AlertCircle,
   Banknote,
@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { Employee, PaymentTransaction } from "@/lib/types";
+import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import PageToolbar from "@/components/admin/PageToolbar";
@@ -28,9 +28,19 @@ import {
   nowTimeStr,
   type SalaryFilter,
 } from "@/lib/salary-utils";
+import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
+import {
+  computeEarnedSalary,
+  type DayKind,
+  type EarnedSalarySummary,
+} from "@/lib/deduction-utils";
 
 function newPaymentId() {
   return `pay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function money(n: number) {
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
 function StatusBadge({ status }: { status: ReturnType<typeof salaryStatus> }) {
@@ -48,6 +58,17 @@ function WorkerAvatar({ name }: { name: string }) {
   );
 }
 
+type PayMode = "EARNED" | "FULL";
+
+type SalaryRow = {
+  employee: Employee;
+  paid: number;
+  earned: EarnedSalarySummary;
+  earnedDue: number;
+  fullDue: number;
+  status: ReturnType<typeof salaryStatus>;
+};
+
 export default function SalaryPage() {
   const { session } = useAuth();
   const { year: initYear, month: initMonth } = currentMonthParts();
@@ -55,45 +76,91 @@ export default function SalaryPage() {
   const [month, setMonth] = useState(initMonth);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
+  const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [settings, setSettings] = useState<AttendanceSettings>(defaultSettings());
+  const [overrides, setOverrides] = useState<Map<string, DayKind>>(new Map());
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SalaryFilter>("ALL");
-  const [payTarget, setPayTarget] = useState<Employee | null>(null);
+  const [payTarget, setPayTarget] = useState<SalaryRow | null>(null);
+  const [payMode, setPayMode] = useState<PayMode>("EARNED");
   const [payAmount, setPayAmount] = useState("");
   const [payRemarks, setPayRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-
-  async function load() {
-    const db = getDb();
-    const [empSnap, paySnap] = await Promise.all([
-      getDocs(collection(db, "employees")),
-      getDocs(collection(db, "payments")),
-    ]);
-    setStaff(
-      empSnap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            id: (data.id as string) || d.id,
-            name: data.name as string,
-            phone: data.phone as string,
-            joiningDate: (data.joiningDate as string) || "",
-            monthlySalary: (data.monthlySalary as number) || 0,
-            attendancePercentage: (data.attendancePercentage as number) || 0,
-            role: ((data.role as string) || "STAFF") as Employee["role"],
-          };
-        })
-        .filter((e) => e.role === "STAFF")
-        .sort((a, b) => a.name.localeCompare(b.name))
-    );
-    setPayments(paySnap.docs.map((d) => parsePayment(d.id, d.data())));
-  }
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    load();
+    const db = getDb();
+    let cancelled = false;
+
+    async function loadStatic() {
+      setLoading(true);
+      try {
+        const [empSnap, paySnap, attSnap, settingsSnap] = await Promise.all([
+          getDocs(collection(db, "employees")),
+          getDocs(collection(db, "payments")),
+          getDocs(collection(db, "attendance")),
+          getDocs(collection(db, "settings")),
+        ]);
+        if (cancelled) return;
+
+        setStaff(
+          empSnap.docs
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: (data.id as string) || d.id,
+                name: data.name as string,
+                phone: data.phone as string,
+                joiningDate: (data.joiningDate as string) || "",
+                monthlySalary: (data.monthlySalary as number) || 0,
+                attendancePercentage: (data.attendancePercentage as number) || 0,
+                role: ((data.role as string) || "STAFF") as Employee["role"],
+              };
+            })
+            .filter((e) => e.role === "STAFF")
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+        setPayments(paySnap.docs.map((d) => parsePayment(d.id, d.data())));
+        setAttendance(attSnap.docs.map((d) => parseAttendance(d.id, d.data())));
+
+        const attSettings = settingsSnap.docs.find((d) => d.id === "attendance");
+        if (attSettings) {
+          const data = attSettings.data();
+          setSettings({
+            dailySignInTime: (data.dailySignInTime as string) || "09:00",
+            dailySignOutTime: (data.dailySignOutTime as string) || "18:00",
+          });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadStatic();
+    const unsubCal = onSnapshot(collection(db, "calendar_days"), (snap) => {
+      const map = new Map<string, DayKind>();
+      snap.docs.forEach((d) => {
+        const kind = d.data().kind as DayKind;
+        if (kind === "HOLIDAY" || kind === "WORKING") map.set(d.id, kind);
+      });
+      setOverrides(map);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubCal();
+    };
   }, []);
 
   const monthPrefix = monthKey(year, month);
+  const today = todayDateStr();
+  const asOfDate = useMemo(() => {
+    const end = `${monthPrefix}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, "0")}`;
+    // Current month → up to today; past months → full month; future → nothing earned
+    if (today < `${monthPrefix}-01`) return `${monthPrefix}-00`; // before month
+    return today < end ? today : end;
+  }, [monthPrefix, year, month, today]);
 
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
@@ -105,12 +172,25 @@ export default function SalaryPage() {
     const q = search.trim().toLowerCase();
     const statusRank: Record<string, number> = { UNPAID: 0, PARTIAL: 1, NONE: 2, PAID: 3 };
     return staff
-      .map((e) => {
+      .map((e): SalaryRow => {
         const empPayments = payments.filter((p) => p.employeeId === e.phone);
         const paid = salaryPaidInMonth(empPayments, monthPrefix);
-        const status = salaryStatus(e.monthlySalary, paid);
-        const remaining = Math.max(0, e.monthlySalary - paid);
-        return { employee: e, paid, status, remaining };
+        const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
+        const earned = computeEarnedSalary({
+          monthlySalary: e.monthlySalary,
+          year,
+          month,
+          joiningDate: e.joiningDate,
+          asOfDate,
+          records: empAtt,
+          settings,
+          overrides,
+        });
+        const earnedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+        const fullDue = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
+        // Status vs earned-till-now (what they should have received so far)
+        const status = salaryStatus(earned.earnedNet, paid);
+        return { employee: e, paid, earned, earnedDue, fullDue, status };
       })
       .filter(({ employee, status }) => {
         const matchSearch =
@@ -130,7 +210,7 @@ export default function SalaryPage() {
         if (ra !== rb) return ra - rb;
         return a.employee.name.localeCompare(b.employee.name);
       });
-  }, [staff, payments, monthPrefix, search, filter]);
+  }, [staff, payments, attendance, monthPrefix, search, filter, year, month, asOfDate, settings, overrides]);
 
   const summary = useMemo(() => {
     let totalDue = 0;
@@ -141,24 +221,36 @@ export default function SalaryPage() {
         payments.filter((p) => p.employeeId === e.phone),
         monthPrefix
       );
+      const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
+      const earned = computeEarnedSalary({
+        monthlySalary: e.monthlySalary,
+        year,
+        month,
+        joiningDate: e.joiningDate,
+        asOfDate,
+        records: empAtt,
+        settings,
+        overrides,
+      });
       totalPaid += paid;
-      const remaining = Math.max(0, e.monthlySalary - paid);
-      totalDue += remaining;
-      if (salaryStatus(e.monthlySalary, paid) !== "PAID" && e.monthlySalary > 0) unpaidCount++;
+      totalDue += Math.max(0, earned.earnedNet - paid);
+      if (salaryStatus(earned.earnedNet, paid) !== "PAID" && e.monthlySalary > 0) unpaidCount++;
     }
     return { totalDue, totalPaid, unpaidCount };
-  }, [staff, payments, monthPrefix]);
+  }, [staff, payments, attendance, monthPrefix, year, month, asOfDate, settings, overrides]);
 
-  function openPay(employee: Employee) {
-    const paid = salaryPaidInMonth(
-      payments.filter((p) => p.employeeId === employee.phone),
-      monthPrefix
-    );
-    const remaining = Math.max(0, employee.monthlySalary - paid);
-    setPayTarget(employee);
-    setPayAmount(String(remaining));
+  function openPay(row: SalaryRow, mode: PayMode = "EARNED") {
+    setPayTarget(row);
+    setPayMode(mode);
+    setPayAmount(String(mode === "EARNED" ? row.earnedDue : row.fullDue));
     setPayRemarks("");
     setMsg("");
+  }
+
+  function switchPayMode(mode: PayMode) {
+    if (!payTarget) return;
+    setPayMode(mode);
+    setPayAmount(String(mode === "EARNED" ? payTarget.earnedDue : payTarget.fullDue));
   }
 
   async function submitPayment(e: React.FormEvent) {
@@ -172,20 +264,26 @@ export default function SalaryPage() {
     setSaving(true);
     setMsg("");
     try {
+      const modeLabel = payMode === "EARNED" ? "earned till now" : "full month";
       const payment: PaymentTransaction = {
         id: newPaymentId(),
-        employeeId: payTarget.phone,
+        employeeId: payTarget.employee.phone,
         amount,
         type: "SALARY_PAYMENT",
         date: todayDateStr(),
         time: nowTimeStr(),
-        remarks: payRemarks.trim() || undefined,
+        remarks: payRemarks.trim() || `${monthLabel(year, month)} · ${modeLabel}`,
         createdBy: session?.name || "Admin",
       };
-      await setDoc(doc(getDb(), "payments", payment.id), payment);
+      await setDoc(doc(getDb(), "payments", payment.id), {
+        ...payment,
+        remarks: payment.remarks || "",
+      });
       setPayTarget(null);
-      setMsg(`Salary of ₹${amount.toLocaleString("en-IN")} recorded for ${payTarget.name}.`);
-      await load();
+      setMsg(`Salary of ${money(amount)} recorded for ${payTarget.employee.name}.`);
+      // Refresh payments
+      const paySnap = await getDocs(collection(getDb(), "payments"));
+      setPayments(paySnap.docs.map((d) => parsePayment(d.id, d.data())));
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Payment failed.");
     } finally {
@@ -197,11 +295,10 @@ export default function SalaryPage() {
     <div className="space-y-5">
       <PageToolbar title="Salary">
         <p className="section-sub">
-          {staff.length} staff · {summary.unpaidCount} pending this month
+          Earned from join date · late hours deducted · {summary.unpaidCount} pending
         </p>
       </PageToolbar>
 
-      {/* Summary stats */}
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="stat-card">
           <div className="flex items-center gap-2">
@@ -210,16 +307,16 @@ export default function SalaryPage() {
             </div>
             <p className="stat-card-label !mt-0">Paid This Month</p>
           </div>
-          <p className="stat-card-value mt-2">₹{summary.totalPaid.toLocaleString("en-IN")}</p>
+          <p className="stat-card-value mt-2">{money(summary.totalPaid)}</p>
         </div>
         <div className="stat-card">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(232,168,56,0.15)]">
               <Clock size={16} className="text-warning" />
             </div>
-            <p className="stat-card-label !mt-0">Pending Dues</p>
+            <p className="stat-card-label !mt-0">Earned Due</p>
           </div>
-          <p className="stat-card-value mt-2">₹{summary.totalDue.toLocaleString("en-IN")}</p>
+          <p className="stat-card-value mt-2">{money(summary.totalDue)}</p>
         </div>
         <div className="stat-card sm:col-span-1">
           <div className="flex items-center gap-2">
@@ -232,7 +329,6 @@ export default function SalaryPage() {
         </div>
       </div>
 
-      {/* Month navigator + filters */}
       <div className="surface space-y-4 p-4 sm:p-5">
         <div className="flex items-center justify-between gap-4">
           <button
@@ -286,104 +382,140 @@ export default function SalaryPage() {
         </div>
       )}
 
-      {/* Desktop table */}
-      <div className="hidden lg:block data-table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Staff Member</th>
-              <th>Monthly Salary</th>
-              <th>Paid</th>
-              <th>Due</th>
-              <th>Status</th>
-              <th className="text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ employee, paid, status, remaining }) => (
-              <tr key={employee.phone}>
-                <td>
-                  <div className="flex items-center gap-3">
-                    <WorkerAvatar name={employee.name} />
-                    <div>
-                      <p className="font-semibold capitalize">{employee.name}</p>
-                      <p className="text-xs text-[var(--text-muted)]">{employee.phone}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="font-medium">₹{employee.monthlySalary.toLocaleString("en-IN")}</td>
-                <td className="font-medium text-jade-deep">₹{paid.toLocaleString("en-IN")}</td>
-                <td className="font-medium text-warning">₹{remaining.toLocaleString("en-IN")}</td>
-                <td>
-                  <StatusBadge status={status} />
-                </td>
-                <td className="text-right">
-                  {status !== "PAID" && employee.monthlySalary > 0 ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => openPay(employee)}
-                    >
-                      <Banknote size={14} />
-                      Pay ₹{remaining.toLocaleString("en-IN")}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-[var(--text-faint)]">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 && (
-          <p className="py-12 text-center text-sm text-[var(--text-muted)]">No staff match your filters.</p>
-        )}
-      </div>
+      {loading ? (
+        <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">Loading salary…</div>
+      ) : (
+        <>
+          {/* Desktop table */}
+          <div className="hidden lg:block data-table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Staff Member</th>
+                  <th>Monthly</th>
+                  <th>₹ / hr</th>
+                  <th>Worked</th>
+                  <th>Late cut</th>
+                  <th>Earned</th>
+                  <th>Paid</th>
+                  <th>Due</th>
+                  <th>Status</th>
+                  <th className="text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const { employee, paid, earned, earnedDue, status } = row;
+                  return (
+                    <tr key={employee.phone}>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          <WorkerAvatar name={employee.name} />
+                          <div>
+                            <p className="font-semibold capitalize">{employee.name}</p>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              {employee.phone}
+                              {employee.joiningDate ? ` · joined ${employee.joiningDate}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="font-medium">{money(employee.monthlySalary)}</td>
+                      <td className="text-sm text-[var(--text-muted)]">{money(earned.perHourRate)}</td>
+                      <td className="text-sm">
+                        {earned.daysWorked}d
+                        <span className="text-[var(--text-faint)]"> / {earned.workingDaysInMonth}</span>
+                      </td>
+                      <td className="font-medium text-danger">
+                        {earned.totalDeduction > 0 ? `−${money(earned.totalDeduction)}` : "—"}
+                      </td>
+                      <td className="font-medium text-jade-deep">{money(earned.earnedNet)}</td>
+                      <td className="font-medium">{money(paid)}</td>
+                      <td className="font-medium text-warning">{money(earnedDue)}</td>
+                      <td>
+                        <StatusBadge status={status} />
+                      </td>
+                      <td className="text-right">
+                        {employee.monthlySalary > 0 && (earnedDue > 0 || row.fullDue > 0) ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => openPay(row, "EARNED")}
+                          >
+                            <Banknote size={14} />
+                            Pay {money(earnedDue)}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-[var(--text-faint)]">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {rows.length === 0 && (
+              <p className="py-12 text-center text-sm text-[var(--text-muted)]">
+                No staff match your filters.
+              </p>
+            )}
+          </div>
 
-      {/* Mobile — unpaid first, dense rows */}
-      <div className="space-y-3 lg:hidden">
-        <p className="mobile-section-label">
-          {filter === "ALL" ? "Unpaid → Partial → Paid · A–Z" : `${filter.charAt(0)}${filter.slice(1).toLowerCase()} · A–Z`}
-        </p>
-        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
-          {rows.map(({ employee, paid, status, remaining }, idx) => (
-            <div
-              key={employee.phone}
-              className={`p-3.5 ${idx < rows.length - 1 ? "border-b border-[var(--border)]" : ""}`}
-            >
-              <div className="flex items-start gap-3">
-                <WorkerAvatar name={employee.name} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold capitalize">{employee.name}</p>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Due ₹{remaining.toLocaleString("en-IN")} · Paid ₹{paid.toLocaleString("en-IN")}
-                      </p>
+          {/* Mobile */}
+          <div className="space-y-3 lg:hidden">
+            <p className="mobile-section-label">Earned till now · late deducted</p>
+            <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
+              {rows.map((row, idx) => {
+                const { employee, paid, earned, earnedDue, status } = row;
+                return (
+                  <div
+                    key={employee.phone}
+                    className={`p-3.5 ${idx < rows.length - 1 ? "border-b border-[var(--border)]" : ""}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <WorkerAvatar name={employee.name} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold capitalize">{employee.name}</p>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              {earned.daysWorked}d worked · {money(earned.perHourRate)}/hr
+                              {earned.totalDeduction > 0
+                                ? ` · late −${money(earned.totalDeduction)}`
+                                : ""}
+                            </p>
+                            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                              Earned {money(earned.earnedNet)} · Paid {money(paid)} · Due{" "}
+                              <span className="font-semibold text-warning">{money(earnedDue)}</span>
+                            </p>
+                          </div>
+                          <StatusBadge status={status} />
+                        </div>
+                        {employee.monthlySalary > 0 && (earnedDue > 0 || row.fullDue > 0) && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm mt-2.5 w-full"
+                            onClick={() => openPay(row, "EARNED")}
+                          >
+                            <Banknote size={14} />
+                            Pay earned {money(earnedDue)}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <StatusBadge status={status} />
                   </div>
-                  {status !== "PAID" && employee.monthlySalary > 0 && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm mt-2.5 w-full"
-                      onClick={() => openPay(employee)}
-                    >
-                      <Banknote size={14} />
-                      Pay ₹{remaining.toLocaleString("en-IN")}
-                    </button>
-                  )}
-                </div>
-              </div>
+                );
+              })}
+              {rows.length === 0 && (
+                <p className="py-12 text-center text-sm text-[var(--text-muted)]">
+                  No staff match your filters.
+                </p>
+              )}
             </div>
-          ))}
-          {rows.length === 0 && (
-            <p className="py-12 text-center text-sm text-[var(--text-muted)]">No staff match your filters.</p>
-          )}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
 
-      {/* Pay salary modal */}
       {payTarget && (
         <>
           <div
@@ -394,14 +526,14 @@ export default function SalaryPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
             <form
               onSubmit={submitPayment}
-              className="surface w-full max-w-md space-y-5 p-5 sm:p-6"
+              className="surface max-h-[90vh] w-full max-w-md space-y-5 overflow-y-auto p-5 sm:p-6"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-display text-xl font-bold">Pay Salary</h3>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
-                    {payTarget.name} · {monthLabel(year, month)}
+                    {payTarget.employee.name} · {monthLabel(year, month)}
                   </p>
                 </div>
                 <button
@@ -414,27 +546,94 @@ export default function SalaryPage() {
                 </button>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label className="label">Amount (₹)</label>
-                  <input
-                    className="input"
-                    type="number"
-                    value={payAmount}
-                    onChange={(e) => setPayAmount(e.target.value)}
-                    required
-                    min={1}
-                  />
+              <div className="rounded-xl bg-[var(--surface-mist)] p-3 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-[var(--text-muted)]">Monthly salary</span>
+                  <span className="font-semibold">{money(payTarget.employee.monthlySalary)}</span>
                 </div>
-                <div className="sm:col-span-2">
-                  <label className="label">Remarks (optional)</label>
-                  <input
-                    className="input"
-                    value={payRemarks}
-                    onChange={(e) => setPayRemarks(e.target.value)}
-                    placeholder="e.g. July salary"
-                  />
+                <div className="flex justify-between">
+                  <span className="text-[var(--text-muted)]">Per hour</span>
+                  <span className="font-semibold">{money(payTarget.earned.perHourRate)}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--text-muted)]">Days worked</span>
+                  <span className="font-semibold">
+                    {payTarget.earned.daysWorked} / {payTarget.earned.workingDaysInMonth}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--text-muted)]">Late / early cut</span>
+                  <span className="font-semibold text-danger">
+                    {payTarget.earned.totalDeduction > 0
+                      ? `−${money(payTarget.earned.totalDeduction)}`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-[var(--border)] pt-1.5">
+                  <span className="text-[var(--text-muted)]">Earned till now</span>
+                  <span className="font-bold text-jade-deep">
+                    {money(payTarget.earned.earnedNet)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--text-muted)]">Already paid</span>
+                  <span className="font-semibold">{money(payTarget.paid)}</span>
+                </div>
+              </div>
+
+              <div>
+                <p className="label mb-2">Pay option</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => switchPayMode("EARNED")}
+                    className={`rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                      payMode === "EARNED"
+                        ? "border-jade bg-jade-soft text-jade-deep"
+                        : "border-[var(--border)] bg-white"
+                    }`}
+                  >
+                    <p className="font-bold">Earned till now</p>
+                    <p className="mt-0.5 text-xs opacity-80">{money(payTarget.earnedDue)}</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchPayMode("FULL")}
+                    className={`rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                      payMode === "FULL"
+                        ? "border-jade bg-jade-soft text-jade-deep"
+                        : "border-[var(--border)] bg-white"
+                    }`}
+                  >
+                    <p className="font-bold">Full month</p>
+                    <p className="mt-0.5 text-xs opacity-80">
+                      {money(payTarget.fullDue)}
+                      <span className="opacity-70"> (after late)</span>
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Amount (₹)</label>
+                <input
+                  className="input"
+                  type="number"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  required
+                  min={1}
+                  step="1"
+                />
+              </div>
+              <div>
+                <label className="label">Remarks (optional)</label>
+                <input
+                  className="input"
+                  value={payRemarks}
+                  onChange={(e) => setPayRemarks(e.target.value)}
+                  placeholder="Optional note"
+                />
               </div>
 
               <div className="flex gap-3 pt-1">

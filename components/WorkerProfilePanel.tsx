@@ -31,7 +31,7 @@ import {
   parseAttendance,
 } from "@/lib/attendance-utils";
 import {
-  computeMonthDeductions,
+  computeEarnedSalary,
   formatDurationMinutes,
   type DayKind,
 } from "@/lib/deduction-utils";
@@ -41,6 +41,7 @@ import {
   parsePayment,
   salaryPaidInMonth,
   salaryStatus,
+  todayDateStr,
 } from "@/lib/salary-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
 
@@ -149,24 +150,36 @@ export default function WorkerProfilePanel({
     [attendanceRecords, year, month]
   );
 
-  const deductions = useMemo(
-    () =>
-      computeMonthDeductions(
-        employee.monthlySalary,
-        year,
-        month,
-        attendanceRecords,
-        settings,
-        overrides
-      ),
-    [employee.monthlySalary, year, month, attendanceRecords, settings, overrides]
-  );
+  const earned = useMemo(() => {
+    const monthEnd = monthDateRange(year, month).end;
+    const today = todayDateStr();
+    const asOf = today < `${monthPrefix}-01` ? `${monthPrefix}-00` : today < monthEnd ? today : monthEnd;
+    return computeEarnedSalary({
+      monthlySalary: employee.monthlySalary,
+      year,
+      month,
+      joiningDate: employee.joiningDate,
+      asOfDate: asOf,
+      records: attendanceRecords,
+      settings,
+      overrides,
+    });
+  }, [
+    employee.monthlySalary,
+    employee.joiningDate,
+    year,
+    month,
+    monthPrefix,
+    attendanceRecords,
+    settings,
+    overrides,
+  ]);
 
   const paidThisMonth = useMemo(
     () => salaryPaidInMonth(payments, monthPrefix),
     [payments, monthPrefix]
   );
-  const netSalary = deductions.netSalary;
+  const netSalary = earned.earnedNet;
   const payStatus = salaryStatus(netSalary, paidThisMonth);
   const salaryRemaining = Math.max(0, netSalary - paidThisMonth);
 
@@ -258,16 +271,16 @@ export default function WorkerProfilePanel({
                   </h3>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <StatTile
-                      label="Gross"
+                      label="Monthly"
                       value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
                     />
                     <StatTile
-                      label="Deducted"
-                      value={`₹${Math.round(deductions.totalDeduction).toLocaleString("en-IN")}`}
+                      label="Late cut"
+                      value={`₹${Math.round(earned.totalDeduction).toLocaleString("en-IN")}`}
                       accent="danger"
                     />
                     <StatTile
-                      label="Net pay"
+                      label="Earned till now"
                       value={`₹${Math.round(netSalary).toLocaleString("en-IN")}`}
                       accent="jade"
                     />
@@ -276,6 +289,10 @@ export default function WorkerProfilePanel({
                       value={`₹${paidThisMonth.toLocaleString("en-IN")}`}
                     />
                   </div>
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    {earned.daysWorked} days worked · ₹
+                    {Math.round(earned.perHourRate).toLocaleString("en-IN")}/hr · from join date
+                  </p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <StatTile
                       label="Remaining"
@@ -337,51 +354,62 @@ export default function WorkerProfilePanel({
                     Time away &amp; deductions
                   </h3>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    Based on late / early leave · holidays &amp; Sundays excluded ·{" "}
-                    {deductions.workingDays} working days this month
+                    Late / early leave cut from days worked · holidays &amp; Sundays excluded ·{" "}
+                    {earned.workingDaysInMonth} working days this month
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <StatTile
                       label="Late"
-                      value={formatDurationMinutes(deductions.totalLateMinutes)}
+                      value={formatDurationMinutes(earned.totalLateMinutes)}
                       accent="warn"
                     />
                     <StatTile
                       label="Left early"
-                      value={formatDurationMinutes(deductions.totalEarlyMinutes)}
+                      value={formatDurationMinutes(earned.totalEarlyMinutes)}
                       accent="warn"
                     />
                     <StatTile
                       label="Not in shop"
-                      value={formatDurationMinutes(deductions.totalLostMinutes)}
+                      value={formatDurationMinutes(earned.totalLostMinutes)}
                       accent="danger"
                     />
                     <StatTile
                       label="Money cut"
-                      value={`₹${Math.round(deductions.totalDeduction).toLocaleString("en-IN")}`}
+                      value={`₹${Math.round(earned.totalDeduction).toLocaleString("en-IN")}`}
                       accent="danger"
                     />
                   </div>
 
-                  {deductions.days.length > 0 ? (
+                  {earned.days.some((d) => d.deduction > 0) ? (
                     <div className="mt-4 space-y-2">
                       <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                        Day-wise
+                        Day-wise cuts
                       </p>
-                      {deductions.days.slice(0, 8).map((d) => (
-                        <div
-                          key={d.date}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-semibold">{d.date}</p>
-                            <p className="truncate text-xs text-[var(--text-muted)]">{d.note}</p>
+                      {earned.days
+                        .filter((d) => d.deduction > 0)
+                        .slice(0, 8)
+                        .map((d) => (
+                          <div
+                            key={d.date}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-semibold">{d.date}</p>
+                              <p className="truncate text-xs text-[var(--text-muted)]">
+                                {d.lateMinutes > 0
+                                  ? `${formatDurationMinutes(d.lateMinutes)} late`
+                                  : ""}
+                                {d.lateMinutes > 0 && d.earlyMinutes > 0 ? " · " : ""}
+                                {d.earlyMinutes > 0
+                                  ? `${formatDurationMinutes(d.earlyMinutes)} early`
+                                  : ""}
+                              </p>
+                            </div>
+                            <span className="shrink-0 font-bold text-danger">
+                              −₹{Math.round(d.deduction).toLocaleString("en-IN")}
+                            </span>
                           </div>
-                          <span className="shrink-0 font-bold text-danger">
-                            −₹{Math.round(d.amount).toLocaleString("en-IN")}
-                          </span>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   ) : (
                     <p className="mt-3 rounded-xl border border-jade/20 bg-jade-soft/50 px-3 py-2 text-sm text-jade-deep">
