@@ -174,7 +174,7 @@ export default function WorkersPage() {
 
       closeForm();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save worker.");
+      setError(err instanceof Error ? err.message : "Failed to save brother.");
     } finally {
       setSaving(false);
     }
