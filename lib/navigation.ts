@@ -73,6 +73,14 @@ export const SIDEBAR_NAV: NavRoute[] = [
     group: "catalog",
   },
   {
+    href: "/dashboard/catalog",
+    label: "Catalog",
+    title: "Product Catalog",
+    subtitle: "Manage product names",
+    icon: "catalog",
+    group: "catalog",
+  },
+  {
     href: "/dashboard/inventory",
     label: "Inventory",
     title: "Store Inventory",
@@ -172,6 +180,12 @@ export const ADMIN_MODULES = [
     description: "Stock levels & suppliers",
     href: "/dashboard/materials",
     icon: "inventory",
+  },
+  {
+    title: "Product Catalog",
+    description: "Manage product names",
+    href: "/dashboard/catalog",
+    icon: "catalog",
   },
   {
     title: "Store Inventory",

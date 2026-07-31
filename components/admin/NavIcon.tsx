@@ -12,6 +12,7 @@ import {
   Palmtree,
   Wrench,
   Shield,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ const ICONS: Record<string, LucideIcon> = {
   repair: Wrench,
   list: ScrollText,
   admins: Shield,
+  catalog: BookOpen,
 };
 
 export default function NavIcon({
