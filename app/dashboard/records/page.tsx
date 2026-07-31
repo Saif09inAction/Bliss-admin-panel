@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, setDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 import {
   ArrowDownLeft,
   CheckCircle2,
   ClipboardList,
   Download,
   Pencil,
+  Trash2,
   Truck,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
@@ -433,6 +434,52 @@ export default function RecordsPage() {
     );
   }
 
+
+  async function deleteOrderRecord(o: KaarigerOrder) {
+    if (!confirm(`Delete order "${o.productName}" for ${o.kaarigerName}? Related payments/repairs/approvals will also be removed.`)) return;
+    const db = getDb();
+    await deleteDoc(doc(db, "kaariger_orders", o.id));
+    try {
+      const [paySnap, repairSnap, approvalSnap] = await Promise.all([
+        getDocs(query(collection(db, "kaariger_payments"), where("orderId", "==", o.id))),
+        getDocs(query(collection(db, "order_repairs"), where("orderId", "==", o.id))),
+        getDocs(query(collection(db, "order_approval_records"), where("orderId", "==", o.id))),
+      ]);
+      await Promise.all([
+        ...paySnap.docs.map((d) => deleteDoc(d.ref)),
+        ...repairSnap.docs.map((d) => deleteDoc(d.ref)),
+        ...approvalSnap.docs.map((d) => deleteDoc(d.ref)),
+      ]);
+      if (approvalSnap.size) {
+        setApprovals((prev) => prev.filter((a) => a.orderId !== o.id));
+      }
+    } catch {
+      // best-effort related cleanup
+    }
+    setOrders((prev) => prev.filter((x) => x.id !== o.id));
+    if (editOrder?.id === o.id) setEditOrder(null);
+  }
+
+  async function deleteApprovalRecord(a: OrderApprovalRecord) {
+    if (!confirm(`Delete approval record for "${a.productName}"?`)) return;
+    await deleteDoc(doc(getDb(), "order_approval_records", a.id));
+    setApprovals((prev) => prev.filter((x) => x.id !== a.id));
+  }
+
+  async function deletePickupRecord(rec: PickupRecord) {
+    if (!confirm(`Delete pickup "${rec.productName}" ×${rec.quantity}?`)) return;
+    await deleteDoc(doc(getDb(), "pickup_records", rec.id));
+    setPickups((prev) => prev.filter((x) => x.id !== rec.id));
+    if (editPickup?.id === rec.id) setEditPickup(null);
+  }
+
+  async function deleteReturnRecord(rec: ReturnRecord) {
+    if (!confirm(`Delete return "${rec.productName}" ×${rec.quantity}?`)) return;
+    await deleteDoc(doc(getDb(), "return_records", rec.id));
+    setReturns((prev) => prev.filter((x) => x.id !== rec.id));
+    if (editReturn?.id === rec.id) setEditReturn(null);
+  }
+
   return (
     <div className="stagger space-y-5">
       <PageToolbar
@@ -477,7 +524,7 @@ export default function RecordsPage() {
                     <th>Status</th>
                     <th>Verified By</th>
                     <th className="text-right">Deal</th>
-                    <th className="text-right">Edit</th>
+                    <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -493,9 +540,14 @@ export default function RecordsPage() {
                       <td className="text-[var(--text-muted)]">{o.verifiedBy || "—"}</td>
                       <td className="text-right font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
                       <td className="text-right">
-                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)}>
-                          <Pencil size={14} />
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
+                            <Pencil size={14} />
+                          </button>
+                          <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -516,8 +568,11 @@ export default function RecordsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span>
-                    <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)}>
+                    <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
                       <Pencil size={14} />
+                    </button>
+                    <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -550,6 +605,7 @@ export default function RecordsPage() {
                     <th>Progress</th>
                     <th>Approved By</th>
                     <th>Date</th>
+                    <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -570,6 +626,11 @@ export default function RecordsPage() {
                           year: "numeric",
                         })}
                       </td>
+                      <td className="text-right">
+                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteApprovalRecord(a)} aria-label="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -582,8 +643,20 @@ export default function RecordsPage() {
           <div className="space-y-3 lg:hidden">
             {filteredApprovals.map((a) => (
               <div key={a.id} className="record-card">
-                <p className="font-display font-bold">{a.productName}</p>
-                <p className="text-sm text-[var(--text-muted)]">{a.kaarigerName}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-display font-bold">{a.productName}</p>
+                    <p className="text-sm text-[var(--text-muted)]">{a.kaarigerName}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-icon !h-8 !w-8 !text-danger"
+                    onClick={() => deleteApprovalRecord(a)}
+                    aria-label="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Batch" value={`${a.batchQuantity} pcs`} />
                   <Field label="Progress" value={`${a.approvedTotalAfter}/${a.targetQuantity}`} />
@@ -620,7 +693,7 @@ export default function RecordsPage() {
                     <th>Partner</th>
                     <th>Staff</th>
                     <th>Date & Time</th>
-                    <th className="text-right">Edit</th>
+                    <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -633,9 +706,14 @@ export default function RecordsPage() {
                       <td>{p.staffName}</td>
                       <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
                       <td className="text-right">
-                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)}>
-                          <Pencil size={14} />
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
+                            <Pencil size={14} />
+                          </button>
+                          <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -653,8 +731,11 @@ export default function RecordsPage() {
                   <p className="font-display font-bold">
                     {p.productName} {p.color ? `(${p.color})` : ""}
                   </p>
-                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)}>
+                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
                     <Pencil size={14} />
+                  </button>
+                  <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
+                    <Trash2 size={14} />
                   </button>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -687,7 +768,7 @@ export default function RecordsPage() {
                     <th>Partner</th>
                     <th>Staff</th>
                     <th>Notes</th>
-                    <th className="text-right">Edit</th>
+                    <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -701,9 +782,14 @@ export default function RecordsPage() {
                       <td>{r.staffName}</td>
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
                       <td className="text-right">
-                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)}>
-                          <Pencil size={14} />
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
+                            <Pencil size={14} />
+                          </button>
+                          <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -721,8 +807,11 @@ export default function RecordsPage() {
                   <p className="font-display font-bold">
                     {r.productName} {r.color ? `(${r.color})` : ""}
                   </p>
-                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)}>
+                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
                     <Pencil size={14} />
+                  </button>
+                  <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
+                    <Trash2 size={14} />
                   </button>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">

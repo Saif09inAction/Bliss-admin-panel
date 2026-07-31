@@ -88,6 +88,14 @@ export const SIDEBAR_NAV: NavRoute[] = [
     icon: "list",
     group: "ops",
   },
+  {
+    href: "/dashboard/admins",
+    label: "Admins",
+    title: "Admins",
+    subtitle: "Panel login access",
+    icon: "admins",
+    group: "people",
+  },
 ];
 
 export const BOTTOM_NAV: NavRoute[] = [
@@ -188,5 +196,11 @@ export const ADMIN_MODULES = [
     description: "Orders, pickups, returns, CSV",
     href: "/dashboard/records",
     icon: "list",
+  },
+  {
+    title: "Admins",
+    description: "Create panel logins",
+    href: "/dashboard/admins",
+    icon: "admins",
   },
 ];

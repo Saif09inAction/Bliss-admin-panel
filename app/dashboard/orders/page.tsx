@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   query,
@@ -275,6 +276,33 @@ export default function OrdersPage() {
     await setDoc(doc(getDb(), "kaariger_payments", id), payment);
     setPaymentForm({ amount: "", remarks: "" });
     loadPayments(selectedOrder);
+  }
+
+
+  async function deleteOrder(order: KaarigerOrder) {
+    if (!confirm(`Delete order "${order.productName}" for ${order.kaarigerName}? Related payments and repairs will also be removed.`)) {
+      return;
+    }
+    const db = getDb();
+    await deleteDoc(doc(db, "kaariger_orders", order.id));
+    // Clean related docs
+    try {
+      const [paySnap, repairSnap, approvalSnap] = await Promise.all([
+        getDocs(query(collection(db, "kaariger_payments"), where("orderId", "==", order.id))),
+        getDocs(query(collection(db, "order_repairs"), where("orderId", "==", order.id))),
+        getDocs(query(collection(db, "order_approval_records"), where("orderId", "==", order.id))),
+      ]);
+      await Promise.all([
+        ...paySnap.docs.map((d) => deleteDoc(d.ref)),
+        ...repairSnap.docs.map((d) => deleteDoc(d.ref)),
+        ...approvalSnap.docs.map((d) => deleteDoc(d.ref)),
+      ]);
+    } catch {
+      // order already deleted; related cleanup best-effort
+    }
+    setOrders((prev) => prev.filter((o) => o.id !== order.id));
+    if (selectedOrder === order.id) setSelectedOrder(null);
+    if (editOrder?.id === order.id) setEditOrder(null);
   }
 
   function openEditOrder(order: KaarigerOrder) {
@@ -716,6 +744,14 @@ export default function OrdersPage() {
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm !bg-danger/10 !text-danger hover:!bg-danger/20"
+                    onClick={() => deleteOrder(selected)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
                   </button>
                   <button
                     type="button"

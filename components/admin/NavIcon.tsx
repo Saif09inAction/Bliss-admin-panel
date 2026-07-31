@@ -11,6 +11,7 @@ import {
   ScrollText,
   Palmtree,
   Wrench,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,6 +26,7 @@ const ICONS: Record<string, LucideIcon> = {
   orders: ClipboardList,
   repair: Wrench,
   list: ScrollText,
+  admins: Shield,
 };
 
 export default function NavIcon({
