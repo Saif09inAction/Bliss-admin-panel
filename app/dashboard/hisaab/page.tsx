@@ -87,54 +87,74 @@ export default function HisaabPage() {
           getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", id))),
           getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", id))),
         ]);
-        setOrders(
-          orderSnap.docs
-            .map((d) => {
-              const data = d.data();
-              return {
-                id: (data.id as string) || d.id,
-                kaarigerId: data.kaarigerId as string,
-                kaarigerName: data.kaarigerName as string,
-                productName: (data.productName as string) || "",
-                targetQuantity: (data.targetQuantity as number) || 0,
-                color: (data.color as string) || "",
-                rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
-                totalDealAmount: (data.totalDealAmount as number) || 0,
-                pricePerPiece: data.pricePerPiece as number | undefined,
-                pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
-                status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || "ASSIGNED"),
-                approvedQuantity: (data.approvedQuantity as number) || 0,
-                createdBy: (data.createdBy as string) || "",
-                createdAt: (data.createdAt as number) || 0,
-                notes: data.notes as string | undefined,
-                originalDealAmount: data.originalDealAmount as number | undefined,
-                repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
-                products: (data.products as OrderProductLine[]) || [],
-                productsTotal: data.productsTotal as number | undefined,
-                materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
-                materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
-                kharchaGiven: data.kharchaGiven as number | undefined,
-              } satisfies KaarigerOrder;
-            })
-            .sort((a, b) => b.createdAt - a.createdAt)
-        );
-        setPayments(
-          paySnap.docs
-            .map((d) => {
-              const data = d.data();
-              return {
-                id: (data.id as string) || d.id,
-                orderId: data.orderId as string,
-                kaarigerId: data.kaarigerId as string,
-                amount: (data.amount as number) || 0,
-                date: (data.date as string) || "",
-                time: (data.time as string) || "",
-                remarks: data.remarks as string | undefined,
-                createdBy: (data.createdBy as string) || "",
-              } satisfies KaarigerPayment;
-            })
-            .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
-        );
+        const loadedOrders = orderSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              kaarigerId: data.kaarigerId as string,
+              kaarigerName: data.kaarigerName as string,
+              productName: (data.productName as string) || "",
+              targetQuantity: (data.targetQuantity as number) || 0,
+              color: (data.color as string) || "",
+              rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
+              totalDealAmount: (data.totalDealAmount as number) || 0,
+              pricePerPiece: data.pricePerPiece as number | undefined,
+              pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+              status: (data.status as string) === "APPROVED" ? "COMPLETED" : ((data.status as string) || "ASSIGNED"),
+              approvedQuantity: (data.approvedQuantity as number) || 0,
+              createdBy: (data.createdBy as string) || "",
+              createdAt: (data.createdAt as number) || 0,
+              notes: data.notes as string | undefined,
+              originalDealAmount: data.originalDealAmount as number | undefined,
+              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+              products: (data.products as OrderProductLine[]) || [],
+              productsTotal: data.productsTotal as number | undefined,
+              materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
+              materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+              kharchaGiven: data.kharchaGiven as number | undefined,
+            } satisfies KaarigerOrder;
+          })
+          .sort((a, b) => b.createdAt - a.createdAt);
+        setOrders(loadedOrders);
+
+        const loadedPayments = paySnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              orderId: data.orderId as string,
+              kaarigerId: data.kaarigerId as string,
+              amount: (data.amount as number) || 0,
+              date: (data.date as string) || "",
+              time: (data.time as string) || "",
+              remarks: data.remarks as string | undefined,
+              createdBy: (data.createdBy as string) || "",
+            } satisfies KaarigerPayment;
+          })
+          .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        setPayments(loadedPayments);
+
+        // Self-heal the stored credit balance: it should always equal total
+        // fresh kharcha cash minus total net deal across every order for this
+        // kaariger. An older bug could under-credit extra kharcha added to
+        // an order that was already completed, so correct any drift here.
+        // "Credit carried…" entries are excluded — they're a re-recording of
+        // cash counted once already at the order where the credit originated,
+        // not new money, so including them would double-count it.
+        const totalDealAll = loadedOrders.reduce((s, o) => s + orderNetDeal(o), 0);
+        const totalFreshCashPaid = loadedPayments
+          .filter((p) => p.remarks !== "Credit carried from previous overpaid bill")
+          .reduce((s, p) => s + p.amount, 0);
+        const correctCredit = Math.max(0, totalFreshCashPaid - totalDealAll);
+        const storedCredit = kaarigers.find((k) => k.phone === id)?.creditBalance || 0;
+        if (Math.abs(correctCredit - storedCredit) > 0.5) {
+          await updateDoc(doc(db, "employees", id), { creditBalance: correctCredit });
+          setKaarigers((prev) =>
+            prev.map((k) => (k.phone === id ? { ...k, creditBalance: correctCredit } : k))
+          );
+        }
+
         setRepairs(
           repairSnap.docs
             .map((d) => {
@@ -202,25 +222,28 @@ export default function HisaabPage() {
 
       // Auto-complete the order once fully paid, carrying any overpayment
       // forward as credit that's auto-applied to this kaariger's next bill.
+      // If the order was ALREADY completed, every rupee of this new kharcha
+      // is pure overpayment — the whole amount becomes credit, not just the
+      // excess past a threshold (that bug was under-crediting kaarigers).
+      let excess = 0;
       if (order.status !== "COMPLETED") {
         const netDeal = orderNetDeal(order);
         const totalPaidBefore = payments.filter((p) => p.orderId === order.id).reduce((s, p) => s + p.amount, 0);
         const totalPaidAfter = totalPaidBefore + amount;
         if (totalPaidAfter >= netDeal) {
-          const excess = totalPaidAfter - netDeal;
+          excess = totalPaidAfter - netDeal;
           await updateDoc(doc(getDb(), "kaariger_orders", order.id), { status: "COMPLETED" });
-          if (excess > 0) {
-            const currentCredit = selectedKaariger?.creditBalance || 0;
-            await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
-              creditBalance: currentCredit + excess,
-            });
-            setPayMsg(`Order completed. ${money(excess)} extra kharcha carried forward as credit.`);
-          } else {
-            setPayMsg("Order fully paid — marked as completed.");
-          }
-        } else {
-          setPayMsg("Kharcha recorded.");
         }
+      } else {
+        excess = amount;
+      }
+
+      if (excess > 0) {
+        const currentCredit = selectedKaariger?.creditBalance || 0;
+        await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
+          creditBalance: currentCredit + excess,
+        });
+        setPayMsg(`${money(excess)} extra kharcha carried forward as credit.`);
       } else {
         setPayMsg("Kharcha recorded.");
       }

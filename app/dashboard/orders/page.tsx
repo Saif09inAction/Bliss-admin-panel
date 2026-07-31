@@ -475,6 +475,11 @@ export default function OrdersPage() {
 
     // Auto-complete the order once fully paid, carrying any overpayment
     // forward as credit that's auto-applied to this kaariger's next bill.
+    // If the order was ALREADY completed, every rupee of this new kharcha is
+    // pure overpayment — the whole amount becomes credit, not just whatever
+    // is past a threshold (that bug was under-crediting kaarigers).
+    let excess = 0;
+    let justCompleted = false;
     if (order.status !== "COMPLETED") {
       const netDeal = Math.max(
         0,
@@ -483,22 +488,30 @@ export default function OrdersPage() {
       const totalPaidBefore = payments.reduce((s, p) => s + p.amount, 0);
       const totalPaidAfter = totalPaidBefore + amount;
       if (totalPaidAfter >= netDeal) {
-        const excess = totalPaidAfter - netDeal;
+        excess = totalPaidAfter - netDeal;
+        justCompleted = true;
         await updateDoc(doc(getDb(), "kaariger_orders", order.id), { status: "COMPLETED" });
-        if (excess > 0) {
-          const currentCredit = kaarigers.find((k) => k.phone === order.kaarigerId)?.creditBalance || 0;
-          await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
-            creditBalance: currentCredit + excess,
-          });
-          setPaymentMsg(
-            `Order completed. ${money(excess)} extra kharcha carried forward as credit for the next bill.`
-          );
-        } else {
-          setPaymentMsg("Order fully paid — marked as completed.");
-        }
-        loadOrders();
-        loadMeta();
       }
+    } else {
+      excess = amount;
+    }
+
+    if (excess > 0) {
+      const currentCredit = kaarigers.find((k) => k.phone === order.kaarigerId)?.creditBalance || 0;
+      await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
+        creditBalance: currentCredit + excess,
+      });
+      setPaymentMsg(
+        justCompleted
+          ? `Order completed. ${money(excess)} extra kharcha carried forward as credit for the next bill.`
+          : `${money(excess)} extra kharcha carried forward as credit for the next bill.`
+      );
+      loadOrders();
+      loadMeta();
+    } else if (justCompleted) {
+      setPaymentMsg("Order fully paid — marked as completed.");
+      loadOrders();
+      loadMeta();
     }
 
     setPaymentForm({ amount: "", remarks: "" });
