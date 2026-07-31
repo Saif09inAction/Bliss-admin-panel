@@ -15,6 +15,8 @@ export interface Employee {
   attendancePercentage: number;
   role: Role;
   password?: string;
+  /** Overpaid kharcha carried forward from a previous (kaariger) order — auto-applied to their next bill. */
+  creditBalance?: number;
 }
 
 export interface RawMaterial {

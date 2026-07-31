@@ -8,6 +8,7 @@ import {
   getDocs,
   query,
   setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import {
@@ -103,6 +104,7 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [payments, setPayments] = useState<KaarigerPayment[]>([]);
   const [paymentForm, setPaymentForm] = useState({ amount: "", remarks: "" });
+  const [paymentMsg, setPaymentMsg] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "DONE">("ALL");
   const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
@@ -209,6 +211,7 @@ export default function OrdersPage() {
           monthlySalary: 0,
           attendancePercentage: 0,
           role: "KAARIGER" as const,
+          creditBalance: (d.data().creditBalance as number) || 0,
         }))
     );
     setCatalogProducts(
@@ -247,7 +250,13 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (selectedOrder) loadPayments(selectedOrder);
+    setPaymentMsg("");
   }, [selectedOrder]);
+
+  const availableCredit = useMemo(
+    () => kaarigers.find((k) => k.phone === kaarigerId)?.creditBalance || 0,
+    [kaarigers, kaarigerId]
+  );
 
   const calc = useMemo(() => {
     const lines = productLines.map((l) => {
@@ -266,10 +275,23 @@ export default function OrdersPage() {
 
     const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
     const kharchaAmount = Number(kharcha) || 0;
-    const finalTotal = Math.max(0, afterDeductions - kharchaAmount);
+    // Any earlier overpaid kharcha (credit) is auto-applied here, on top of kharcha given now.
+    const remainingAfterKharcha = Math.max(0, afterDeductions - kharchaAmount);
+    const creditApplied = Math.min(availableCredit, remainingAfterKharcha);
+    const finalTotal = Math.max(0, remainingAfterKharcha - creditApplied);
 
-    return { lines, productsTotal, deductionLines, deductionsTotal, afterDeductions, kharchaAmount, finalTotal };
-  }, [productLines, deductions, kharcha]);
+    return {
+      lines,
+      productsTotal,
+      deductionLines,
+      deductionsTotal,
+      afterDeductions,
+      kharchaAmount,
+      remainingAfterKharcha,
+      creditApplied,
+      finalTotal,
+    };
+  }, [productLines, deductions, kharcha, availableCredit]);
 
   function addProductLine() {
     setProductLines((prev) => [...prev, emptyProductLine()]);
@@ -311,6 +333,13 @@ export default function OrdersPage() {
         lineTotal: l.lineTotal,
       }));
 
+      // Overpaid kharcha from an earlier bill is carried forward and auto-applied here.
+      const { creditApplied, finalTotal } = calc;
+      const isFullyPaidAtCreation = finalTotal <= 0;
+      // If kharcha given now exceeds this bill's own total, the extra becomes fresh credit too.
+      const overpayAtCreation = Math.max(0, calc.kharchaAmount - calc.afterDeductions);
+      const newCreditBalance = Math.max(0, availableCredit - creditApplied) + overpayAtCreation;
+
       const order: KaarigerOrder = {
         id,
         kaarigerId: kaariger.phone,
@@ -322,7 +351,7 @@ export default function OrdersPage() {
         totalDealAmount: calc.afterDeductions,
         pricePerPiece: targetQuantity > 0 ? calc.productsTotal / targetQuantity : 0,
         pricingType: "PER_PIECE",
-        status: "ASSIGNED",
+        status: isFullyPaidAtCreation ? "COMPLETED" : "ASSIGNED",
         approvedQuantity: 0,
         createdBy: session?.name || "Admin",
         createdAt: Date.now(),
@@ -350,9 +379,30 @@ export default function OrdersPage() {
         });
       }
 
+      if (creditApplied > 0) {
+        const creditPaymentId = uuid();
+        await setDoc(doc(getDb(), "kaariger_payments", creditPaymentId), {
+          id: creditPaymentId,
+          orderId: id,
+          kaarigerId: kaariger.phone,
+          amount: creditApplied,
+          date: todayStr(),
+          time: nowTimeStr(),
+          remarks: "Credit carried from previous overpaid bill",
+          createdBy: session?.name || "Admin",
+        });
+      }
+
+      if (newCreditBalance !== availableCredit) {
+        await updateDoc(doc(getDb(), "employees", kaariger.phone), {
+          creditBalance: newCreditBalance,
+        });
+      }
+
       setShowForm(false);
       resetForm();
       loadOrders();
+      loadMeta();
     } catch (err) {
       setFormMsg(err instanceof Error ? err.message : "Failed to send.");
     } finally {
@@ -366,18 +416,51 @@ export default function OrdersPage() {
     const order = orders.find((o) => o.id === selectedOrder);
     if (!order) return;
 
+    const amount = Number(paymentForm.amount) || 0;
+    if (amount <= 0) return;
+
+    setPaymentMsg("");
     const id = uuid();
     const payment: KaarigerPayment = {
       id,
       orderId: order.id,
       kaarigerId: order.kaarigerId,
-      amount: Number(paymentForm.amount) || 0,
+      amount,
       date: todayStr(),
       time: nowTimeStr(),
       remarks: paymentForm.remarks || undefined,
       createdBy: session.name,
     };
     await setDoc(doc(getDb(), "kaariger_payments", id), payment);
+
+    // Auto-complete the order once fully paid, carrying any overpayment
+    // forward as credit that's auto-applied to this kaariger's next bill.
+    if (order.status !== "COMPLETED") {
+      const netDeal = Math.max(
+        0,
+        (order.originalDealAmount ?? order.totalDealAmount) - (order.repairDeductionTotal || 0)
+      );
+      const totalPaidBefore = payments.reduce((s, p) => s + p.amount, 0);
+      const totalPaidAfter = totalPaidBefore + amount;
+      if (totalPaidAfter >= netDeal) {
+        const excess = totalPaidAfter - netDeal;
+        await updateDoc(doc(getDb(), "kaariger_orders", order.id), { status: "COMPLETED" });
+        if (excess > 0) {
+          const currentCredit = kaarigers.find((k) => k.phone === order.kaarigerId)?.creditBalance || 0;
+          await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
+            creditBalance: currentCredit + excess,
+          });
+          setPaymentMsg(
+            `Order completed. ${money(excess)} extra kharcha carried forward as credit for the next bill.`
+          );
+        } else {
+          setPaymentMsg("Order fully paid — marked as completed.");
+        }
+        loadOrders();
+        loadMeta();
+      }
+    }
+
     setPaymentForm({ amount: "", remarks: "" });
     loadPayments(selectedOrder);
   }
@@ -706,9 +789,20 @@ export default function OrdersPage() {
           <div className="my-2 border-t border-jade/20" />
           <Row label="Subtotal" value={money(calc.afterDeductions)} bold />
           <Row label="Less: Kharcha" value={`−${money(calc.kharchaAmount)}`} />
+          {availableCredit > 0 && (
+            <Row
+              label={`Less: Credit carried (${money(availableCredit)} available)`}
+              value={`−${money(calc.creditApplied)}`}
+            />
+          )}
           <div className="my-2 border-t border-jade/20" />
           <Row label="Final balance to pay" value={money(calc.finalTotal)} bold accent />
         </div>
+        {availableCredit > 0 && (
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+            This kaariger has {money(availableCredit)} credit from an earlier overpaid bill — it&apos;s auto-applied above.
+          </p>
+        )}
       </div>
 
       {formMsg && (
@@ -1098,6 +1192,9 @@ export default function OrdersPage() {
                     Add Kharcha
                   </button>
                 </form>
+                {paymentMsg && (
+                  <p className="mt-2 rounded-xl bg-jade-soft px-3 py-2 text-sm text-jade-deep">{paymentMsg}</p>
+                )}
               </div>
             </div>
             </>

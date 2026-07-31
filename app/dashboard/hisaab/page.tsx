@@ -55,6 +55,7 @@ export default function HisaabPage() {
             monthlySalary: 0,
             attendancePercentage: 0,
             role: "KAARIGER" as const,
+            creditBalance: (d.data().creditBalance as number) || 0,
           }))
           .sort((a, b) => a.name.localeCompare(b.name))
       );
@@ -213,10 +214,18 @@ export default function HisaabPage() {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
               <Wallet size={20} />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="font-display text-lg font-bold">{selectedKaariger?.name}</p>
               <p className="text-sm text-[var(--text-muted)]">{selectedKaariger?.phone} · {orders.length} order{orders.length === 1 ? "" : "s"}</p>
             </div>
+            {(selectedKaariger?.creditBalance || 0) > 0 && (
+              <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">Credit available</p>
+                <p className="font-display text-base font-bold text-jade-deep">
+                  {money(selectedKaariger?.creditBalance || 0)}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
