@@ -171,6 +171,7 @@ export default function RepairingPage() {
     const fQty = Number(faultyQty) || 0;
     const fPrice = Number(faultyPrice) || 0;
     const faultyTotal = fQty * fPrice;
+    // Only include lines the admin actually filled (qty + price). Empty rows are skipped.
     const items: RepairLineItem[] = EXTRA_ITEMS.map(({ type, label }) => {
       const qty = Number(extras[type].qty) || 0;
       const price = Number(extras[type].price) || 0;
@@ -181,7 +182,7 @@ export default function RepairingPage() {
         pricePerPiece: price,
         lineTotal: qty * price,
       };
-    }).filter((it) => it.quantity > 0 && it.pricePerPiece >= 0);
+    }).filter((it) => it.quantity > 0 && it.pricePerPiece > 0);
 
     const extrasTotal = items.reduce((s, it) => s + it.lineTotal, 0);
     const totalRepairCost = faultyTotal + extrasTotal;
@@ -200,8 +201,9 @@ export default function RepairingPage() {
       setMsg("Select an order first.");
       return;
     }
+    // Only filled lines count — faulty / materials / notes are all optional
     if (calc.fQty <= 0 && calc.items.length === 0) {
-      setMsg("Enter faulty quantity and/or at least one material line.");
+      setMsg("Enter faulty qty or at least one material with qty + ₹/pc.");
       return;
     }
     if (calc.fQty > 0 && calc.fPrice < 0) {
@@ -209,7 +211,7 @@ export default function RepairingPage() {
       return;
     }
     if (calc.totalRepairCost <= 0) {
-      setMsg("Repair total must be greater than 0.");
+      setMsg("Add a price so the deduction is greater than ₹0.");
       return;
     }
 
@@ -222,7 +224,8 @@ export default function RepairingPage() {
       const dealAfter = Math.max(0, original - newDeduction);
       const id = uuid();
 
-      const repair: OrderRepair = {
+      // Never write undefined — Firestore rejects it (empty notes must be "")
+      const repair = {
         id,
         orderId: selectedOrder.id,
         kaarigerId: selectedOrder.kaarigerId,
@@ -235,7 +238,7 @@ export default function RepairingPage() {
         totalRepairCost: calc.totalRepairCost,
         originalDealAmount: original,
         dealAfterThisRepair: dealAfter,
-        notes: notes.trim() || undefined,
+        notes: notes.trim(),
         createdBy: session?.name || "Admin",
         createdAt: Date.now(),
       };
@@ -244,7 +247,6 @@ export default function RepairingPage() {
       await updateDoc(doc(getDb(), "kaariger_orders", selectedOrder.id), {
         originalDealAmount: original,
         repairDeductionTotal: newDeduction,
-        // Keep totalDealAmount as original for history; net is original - repairDeductionTotal
       });
 
       setMsg(`Repair saved. Deducted ${money(calc.totalRepairCost)}. Remaining deal ${money(dealAfter)}.`);
@@ -339,7 +341,7 @@ export default function RepairingPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Faulty product qty</label>
+              <label className="label">Faulty product qty (optional)</label>
               <input
                 className="input"
                 type="number"
@@ -369,18 +371,21 @@ export default function RepairingPage() {
           )}
 
           <div>
-            <p className="label mb-2">Materials given by admin</p>
+            <p className="label mb-1">Materials given by admin (optional)</p>
+            <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+              Fill only what you need — empty rows are skipped.
+            </p>
             <div className="space-y-2">
               {EXTRA_ITEMS.map(({ type, label }) => (
                 <div
                   key={type}
-                  className="grid grid-cols-[1fr_72px_88px] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                  className="grid grid-cols-[minmax(0,1fr)_4.5rem_5.5rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
                 >
                   <p className="pb-2 text-sm font-semibold">{label}</p>
                   <div>
                     <label className="label !text-[10px]">Qty</label>
                     <input
-                      className="input !py-2"
+                      className="input !w-full !py-2"
                       type="number"
                       min={0}
                       value={extras[type].qty}
@@ -390,12 +395,13 @@ export default function RepairingPage() {
                           [type]: { ...extras[type], qty: e.target.value },
                         })
                       }
+                      placeholder="0"
                     />
                   </div>
                   <div>
                     <label className="label !text-[10px]">₹ / pc</label>
                     <input
-                      className="input !py-2"
+                      className="input !w-full !py-2"
                       type="number"
                       min={0}
                       step="0.01"
@@ -406,6 +412,7 @@ export default function RepairingPage() {
                           [type]: { ...extras[type], price: e.target.value },
                         })
                       }
+                      placeholder="0"
                     />
                   </div>
                 </div>
@@ -419,7 +426,7 @@ export default function RepairingPage() {
               className="input"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. stitching defect batch"
+              placeholder="Optional — leave blank if not needed"
             />
           </div>
 
