@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import { Package, Receipt, ShoppingBag, Wallet } from "lucide-react";
+import { Package, Receipt, ShoppingBag, Wallet, Wrench } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, OrderProductLine, RepairLineItem } from "@/lib/types";
+import type { Employee, KaarigerOrder, KaarigerPayment, OrderMaterial, OrderProductLine, OrderRepair, RepairLineItem } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
@@ -38,6 +38,7 @@ export default function HisaabPage() {
   const [kaarigerId, setKaarigerId] = useState("");
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
   const [payments, setPayments] = useState<KaarigerPayment[]>([]);
+  const [repairs, setRepairs] = useState<OrderRepair[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -64,15 +65,17 @@ export default function HisaabPage() {
     if (!kaarigerId) {
       setOrders([]);
       setPayments([]);
+      setRepairs([]);
       return;
     }
     (async () => {
       setLoading(true);
       try {
         const db = getDb();
-        const [orderSnap, paySnap] = await Promise.all([
+        const [orderSnap, paySnap, repairSnap] = await Promise.all([
           getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaarigerId))),
           getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaarigerId))),
+          getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", kaarigerId))),
         ]);
         setOrders(
           orderSnap.docs
@@ -122,6 +125,36 @@ export default function HisaabPage() {
             })
             .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
         );
+        setRepairs(
+          repairSnap.docs
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: (data.id as string) || d.id,
+                orderId: (data.orderId as string) || "",
+                kaarigerId: (data.kaarigerId as string) || "",
+                kaarigerName: (data.kaarigerName as string) || "",
+                productName: (data.productName as string) || "",
+                faultyQuantity: (data.faultyQuantity as number) || 0,
+                faultyPricePerPiece: (data.faultyPricePerPiece as number) || 0,
+                faultyTotal: (data.faultyTotal as number) || 0,
+                items: ((data.items as RepairLineItem[]) || []).map((it) => ({
+                  type: it.type,
+                  label: it.label,
+                  quantity: Number(it.quantity) || 0,
+                  pricePerPiece: Number(it.pricePerPiece) || 0,
+                  lineTotal: Number(it.lineTotal) || 0,
+                })),
+                totalRepairCost: (data.totalRepairCost as number) || 0,
+                originalDealAmount: (data.originalDealAmount as number) || 0,
+                dealAfterThisRepair: (data.dealAfterThisRepair as number) || 0,
+                notes: data.notes as string | undefined,
+                createdBy: (data.createdBy as string) || "",
+                createdAt: (data.createdAt as number) || 0,
+              } satisfies OrderRepair;
+            })
+            .sort((a, b) => b.createdAt - a.createdAt)
+        );
       } finally {
         setLoading(false);
       }
@@ -140,9 +173,10 @@ export default function HisaabPage() {
   const totals = useMemo(() => {
     const deal = orders.reduce((s, o) => s + orderNetDeal(o), 0);
     const paid = payments.reduce((s, p) => s + p.amount, 0);
+    const repaired = repairs.reduce((s, r) => s + r.totalRepairCost, 0);
     const balance = Math.max(0, deal - paid);
-    return { deal, paid, balance };
-  }, [orders, payments]);
+    return { deal, paid, repaired, balance };
+  }, [orders, payments, repairs]);
 
   return (
     <div className="space-y-5">
@@ -185,7 +219,7 @@ export default function HisaabPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="stat-card">
               <p className="stat-card-label">Total Deal</p>
               <p className="stat-card-value">{money(totals.deal)}</p>
@@ -193,6 +227,10 @@ export default function HisaabPage() {
             <div className="stat-card">
               <p className="stat-card-label">Total Kharcha Paid</p>
               <p className="stat-card-value text-jade-deep">{money(totals.paid)}</p>
+            </div>
+            <div className="stat-card">
+              <p className="stat-card-label">Repairing Deductions</p>
+              <p className="stat-card-value text-danger">{money(totals.repaired)}</p>
             </div>
             <div className="stat-card">
               <p className="stat-card-label">Total Balance</p>
@@ -244,6 +282,50 @@ export default function HisaabPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+              <Wrench className="h-4 w-4 text-[var(--text-muted)]" />
+              Repairing Deductions
+            </h3>
+            {repairs.length === 0 ? (
+              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+                No repairing deductions for this kaariger yet.
+              </div>
+            ) : (
+              <div className="surface space-y-0 divide-y divide-[var(--border)] overflow-hidden !p-0">
+                {repairs.map((r, i) => {
+                  return (
+                    <div key={r.id} className="flex items-center gap-3 p-3.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-danger">
+                        {i + 1}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold">
+                          {r.productName}
+                          {r.faultyQuantity > 0
+                            ? ` · ${r.faultyQuantity} pcs × ${money(r.faultyPricePerPiece)}`
+                            : ""}
+                        </p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {new Date(r.createdAt).toLocaleDateString("en-IN")} · by {r.createdBy}
+                          {r.notes ? ` · ${r.notes}` : ""}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-bold text-danger">−{money(r.totalRepairCost)}</p>
+                        <p className="text-xs text-[var(--text-faint)]">left {money(r.dealAfterThisRepair)}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between bg-red-50 p-4">
+                  <span className="font-display font-bold text-danger">Grand Total Deducted</span>
+                  <span className="font-display text-lg font-bold text-danger">{money(totals.repaired)}</span>
+                </div>
               </div>
             )}
           </div>
