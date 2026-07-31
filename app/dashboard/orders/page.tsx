@@ -775,7 +775,7 @@ export default function OrdersPage() {
                   ) : null}
                 </div>
                 <div className="stat-card !p-3">
-                  <p className="stat-card-label">Paid</p>
+                  <p className="stat-card-label">Kharcha paid</p>
                   <p className="stat-card-value !text-xl text-[var(--jade-deep)]">
                     ₹{paidTotal.toLocaleString("en-IN")}
                   </p>
@@ -832,7 +832,7 @@ export default function OrdersPage() {
               <div>
                 <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold">
                   <IndianRupee className="h-4 w-4 text-[var(--text-muted)]" />
-                  Advance Payments
+                  Kharcha
                 </h3>
                 {payments.length > 0 ? (
                   <div className="space-y-2">
@@ -853,7 +853,7 @@ export default function OrdersPage() {
                   </div>
                 ) : (
                   <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-4 text-center text-sm text-[var(--text-muted)]">
-                    No payments recorded yet
+                    No kharcha recorded yet
                   </p>
                 )}
 
@@ -874,7 +874,7 @@ export default function OrdersPage() {
                   />
                   <button type="submit" className="btn btn-primary whitespace-nowrap">
                     <Plus className="h-4 w-4" />
-                    Add Payment
+                    Add Kharcha
                   </button>
                 </form>
               </div>

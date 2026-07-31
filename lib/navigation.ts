@@ -163,7 +163,7 @@ export const ADMIN_MODULES = [
   },
   {
     title: "Salary",
-    description: "Payouts, advances & dues",
+    description: "Payouts, kharcha & dues",
     href: "/dashboard/salary",
     icon: "salary",
   },
@@ -181,7 +181,7 @@ export const ADMIN_MODULES = [
   },
   {
     title: "Kaariger Orders",
-    description: "Create orders & advances",
+    description: "Create orders & kharcha",
     href: "/dashboard/orders",
     icon: "orders",
   },
