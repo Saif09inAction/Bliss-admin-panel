@@ -194,14 +194,17 @@ export default function OrdersPage() {
 
     const orderMaterials: OrderMaterial[] = form.selectedMaterials
       .filter((s) => s.materialId && Number(s.quantity) > 0)
-      .map((s) => {
-        const mat = materials.find((m) => m.id === s.materialId)!;
-        return {
-          materialId: mat.id,
-          materialName: mat.name,
-          quantity: Number(s.quantity),
-          unit: mat.unit,
-        };
+      .flatMap((s) => {
+        const mat = materials.find((m) => m.id === s.materialId);
+        if (!mat) return [];
+        return [
+          {
+            materialId: mat.id,
+            materialName: mat.name,
+            quantity: Number(s.quantity),
+            unit: mat.unit,
+          },
+        ];
       });
 
     const inputAmount = Number(form.totalDealAmount) || 0;
@@ -230,22 +233,26 @@ export default function OrdersPage() {
       approvedQuantity: 0,
       createdBy: session?.name || "Admin",
       createdAt: Date.now(),
-      notes: form.notes.trim() || undefined,
+      notes: form.notes.trim(),
     };
 
-    await setDoc(doc(getDb(), "kaariger_orders", id), order);
-    setShowForm(false);
-    setForm({
-      kaarigerId: "",
-      productName: "",
-      targetQuantity: "",
-      color: "",
-      totalDealAmount: "",
-      pricingType: "OVERALL",
-      notes: "",
-      selectedMaterials: [],
-    });
-    loadOrders();
+    try {
+      await setDoc(doc(getDb(), "kaariger_orders", id), order);
+      setShowForm(false);
+      setForm({
+        kaarigerId: "",
+        productName: "",
+        targetQuantity: "",
+        color: "",
+        totalDealAmount: "",
+        pricingType: "OVERALL",
+        notes: "",
+        selectedMaterials: [],
+      });
+      loadOrders();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to create order.");
+    }
   }
 
   async function addPayment(e: React.FormEvent) {
@@ -453,23 +460,26 @@ export default function OrdersPage() {
 
       {inStockMaterials.length > 0 ? (
         <div>
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <label className="label mb-0">Raw Materials (optional)</label>
-            <button type="button" className="btn-ghost btn-sm" onClick={addMaterialRow}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={addMaterialRow}>
               <Plus className="h-3.5 w-3.5" />
               Add
             </button>
           </div>
           {form.selectedMaterials.length === 0 && (
             <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-2 text-xs text-[var(--text-muted)]">
-              No materials added yet. Optional — tap Add to assign stock.
+              Optional — leave empty to create order without materials.
             </p>
           )}
           <div className="space-y-2">
             {form.selectedMaterials.map((row, i) => (
-              <div key={i} className="flex gap-2">
+              <div
+                key={i}
+                className="grid grid-cols-[minmax(0,1fr)_4.75rem_2.75rem] items-center gap-2"
+              >
                 <select
-                  className="input min-w-0 flex-1"
+                  className="input !w-full min-w-0"
                   value={row.materialId}
                   onChange={(e) => {
                     const next = [...form.selectedMaterials];
@@ -477,17 +487,18 @@ export default function OrdersPage() {
                     setForm({ ...form, selectedMaterials: next });
                   }}
                 >
-                  <option value="">Material</option>
+                  <option value="">Select material…</option>
                   {inStockMaterials.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.name} ({m.quantity} {m.unit} available)
+                      {m.name} ({m.quantity} {m.unit})
                     </option>
                   ))}
                 </select>
                 <input
-                  className="input w-24 shrink-0"
+                  className="input !w-full text-center"
                   type="number"
                   step="0.01"
+                  min={0}
                   placeholder="Qty"
                   value={row.quantity}
                   onChange={(e) => {
@@ -498,29 +509,36 @@ export default function OrdersPage() {
                 />
                 <button
                   type="button"
-                  className="btn-icon shrink-0 !h-[46px] !w-[46px]"
+                  className="btn-icon !h-11 !w-11 shrink-0 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
                   onClick={() => removeMaterialRow(i)}
-                  aria-label="Remove material row"
+                  aria-label="Remove material"
+                  title="Remove"
                 >
-                  <Trash2 className="h-4 w-4 text-[var(--danger)]" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
           </div>
         </div>
       ) : (
-        <div className="alert-banner">
-          <p className="alert-banner-title">No materials in stock</p>
-          <p className="alert-banner-sub">Add stock under Raw Materials before assigning materials to an order.</p>
+        <div className="rounded-xl border border-dashed border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)]">
+          No materials in stock yet — you can still create the order without materials.
         </div>
       )}
 
       <div>
         <label className="label">Instructions / notes (optional)</label>
-        <input className="input" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional instructions" />
+        <input
+          className="input"
+          value={form.notes}
+          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          placeholder="Optional instructions"
+        />
       </div>
 
-      <button type="submit" className="btn btn-primary w-full">Create Order</button>
+      <button type="submit" className="btn btn-primary w-full">
+        Create Order
+      </button>
     </form>
   );
 
