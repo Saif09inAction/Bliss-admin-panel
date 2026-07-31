@@ -81,9 +81,9 @@ export default function LoginPage() {
             <div>
               <label className="label !text-white/45">Password</label>
               <div className="relative">
-                <Lock size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+                <Lock size={15} className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-white/30" />
                 <input
-                  className="input !border-white/10 !bg-white/[0.04] !pl-10 !text-white placeholder:!text-white/25"
+                  className="input login-password !border-white/10 !bg-white/[0.04] !pl-10 !text-white placeholder:!text-white/25"
                   type="password"
                   autoComplete="current-password"
                   value={password}

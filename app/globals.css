@@ -752,6 +752,15 @@ body {
   @apply overflow-hidden;
 }
 
+/* iOS Safari: password dots stay invisible with small font / white text on dark glass */
+.login-password {
+  font-size: 16px !important;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  caret-color: #fff;
+  letter-spacing: normal;
+}
+
 .hero-gradient {
   background: transparent;
 }
