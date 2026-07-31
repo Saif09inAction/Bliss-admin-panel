@@ -757,7 +757,7 @@ function GrandTotalBox({ order, paid, net }: { order: KaarigerOrder; paid: numbe
         <Row label="Total Kharcha Paid" value={money(paid)} />
         <div className="my-1.5 border-t border-jade/20" />
         {diff > 0 ? (
-          <Row label="Extra paid by kaariger" value={`+${money(diff)}`} bold accent="green" />
+          <Row label="Extra paid" value={`+${money(diff)}`} bold accent="green" />
         ) : diff < 0 ? (
           <Row label="Total remaining" value={money(-diff)} bold accent="amber" />
         ) : (
