@@ -401,7 +401,9 @@ export default function HisaabPage() {
                             : ""}
                         </p>
                         <p className="text-xs text-[var(--text-muted)]">
-                          {new Date(r.createdAt).toLocaleDateString("en-IN")} · by {r.createdBy}
+                          {new Date(r.createdAt).toLocaleDateString("en-IN")}{" "}
+                          {new Date(r.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} · by{" "}
+                          {r.createdBy}
                           {r.notes ? ` · ${r.notes}` : ""}
                         </p>
                       </div>
