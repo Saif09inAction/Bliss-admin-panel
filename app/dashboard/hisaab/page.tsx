@@ -729,16 +729,61 @@ function OrderDetailCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between border-t border-[var(--border)] pt-3">
-        <span className="font-display font-bold">Final Balance</span>
-        {isCompleted ? (
-          <span className="rounded-lg bg-jade-soft px-3 py-1 font-display text-sm font-bold text-jade-deep">
-            ✓ All Paid
-          </span>
+      <GrandTotalBox order={order} paid={paid} net={net} />
+    </div>
+  );
+}
+
+/** Products − Runner/Fitting/Astar/Material − Repairing = Total, compared
+ * against total kharcha paid: shows exactly how much extra was paid, how
+ * much is still remaining, or that it's fully cleared. */
+function GrandTotalBox({ order, paid, net }: { order: KaarigerOrder; paid: number; net: number }) {
+  const productsTotal = order.productsTotal ?? 0;
+  const deductionsTotal = order.materialDeductionsTotal ?? 0;
+  const repairTotal = order.repairDeductionTotal || 0;
+  const diff = paid - net;
+
+  return (
+    <div className="rounded-2xl border border-jade/20 bg-jade-soft/30 p-4">
+      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">Grand Total</p>
+      <div className="space-y-1 text-sm">
+        <Row label="Product cost total" value={money(productsTotal)} />
+        {deductionsTotal > 0 && (
+          <Row label="Less: Runner/Fitting/Astar/Material" value={`−${money(deductionsTotal)}`} />
+        )}
+        {repairTotal > 0 && <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />}
+        <div className="my-1.5 border-t border-jade/20" />
+        <Row label="Total" value={money(net)} bold />
+        <Row label="Total Kharcha Paid" value={money(paid)} />
+        <div className="my-1.5 border-t border-jade/20" />
+        {diff > 0 ? (
+          <Row label="Extra paid by kaariger" value={`+${money(diff)}`} bold accent="green" />
+        ) : diff < 0 ? (
+          <Row label="Total remaining" value={money(-diff)} bold accent="amber" />
         ) : (
-          <span className="font-display text-lg font-bold text-amber-700">{money(balance)}</span>
+          <Row label="Fully cleared" value="₹0" bold accent="green" />
         )}
       </div>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  bold,
+  accent,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  accent?: "green" | "amber";
+}) {
+  const accentClass = accent === "green" ? "text-jade-deep" : accent === "amber" ? "text-amber-700" : "";
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[var(--text-muted)]">{label}</span>
+      <span className={`${bold ? "font-bold" : "font-medium"} ${accentClass}`}>{value}</span>
     </div>
   );
 }
