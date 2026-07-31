@@ -9,38 +9,110 @@ import {
 } from "./attendance-utils";
 
 export type DayKind = "HOLIDAY" | "WORKING";
+export type HolidayScope = "ALL" | "SELECTED";
 
 /** Override stored in Firestore calendar_days/{yyyy-MM-dd} */
 export interface CalendarDayOverride {
   date: string;
   kind: DayKind;
+  /** ALL = every staff; SELECTED = only employeeIds */
+  appliesTo: HolidayScope;
+  /** Employee phones when appliesTo === SELECTED */
+  employeeIds: string[];
 }
 
-/**
- * Default: Sunday = holiday, Mon–Sat = working.
- * Firestore overrides win when present.
- */
-export function resolveDayKind(
-  dateStr: string,
-  overrides: Map<string, DayKind> | Record<string, DayKind>
-): DayKind {
-  const override =
-    overrides instanceof Map ? overrides.get(dateStr) : overrides[dateStr];
-  if (override === "HOLIDAY" || override === "WORKING") return override;
+export type OverrideMap = Map<string, CalendarDayOverride>;
 
+/** Accept legacy Map<date, DayKind> or full override objects. */
+export type OverrideSource =
+  | OverrideMap
+  | Map<string, DayKind>
+  | Record<string, DayKind | CalendarDayOverride>;
+
+export function parseCalendarOverride(
+  date: string,
+  data: Record<string, unknown>
+): CalendarDayOverride | null {
+  const kind = data.kind as DayKind;
+  if (kind !== "HOLIDAY" && kind !== "WORKING") return null;
+  const appliesTo =
+    data.appliesTo === "SELECTED" ? "SELECTED" : "ALL";
+  const employeeIds = Array.isArray(data.employeeIds)
+    ? (data.employeeIds as unknown[])
+        .map((x) => String(x).trim())
+        .filter(Boolean)
+    : [];
+  return {
+    date: (data.date as string) || date,
+    kind,
+    appliesTo,
+    employeeIds,
+  };
+}
+
+function defaultKindForDate(dateStr: string): DayKind {
   const [y, m, d] = dateStr.split("-").map(Number);
   const dow = new Date(y, m - 1, d).getDay(); // 0 = Sunday
   return dow === 0 ? "HOLIDAY" : "WORKING";
 }
 
-export function isWorkingDay(
+function lookupOverride(
   dateStr: string,
-  overrides: Map<string, DayKind> | Record<string, DayKind>
-): boolean {
-  return resolveDayKind(dateStr, overrides) === "WORKING";
+  overrides: OverrideSource
+): CalendarDayOverride | null {
+  const raw =
+    overrides instanceof Map ? overrides.get(dateStr) : overrides[dateStr];
+  if (!raw) return null;
+  if (typeof raw === "string") {
+    if (raw !== "HOLIDAY" && raw !== "WORKING") return null;
+    return { date: dateStr, kind: raw, appliesTo: "ALL", employeeIds: [] };
+  }
+  return {
+    date: raw.date || dateStr,
+    kind: raw.kind,
+    appliesTo: raw.appliesTo === "SELECTED" ? "SELECTED" : "ALL",
+    employeeIds: raw.employeeIds || [],
+  };
 }
 
-/** Shift length in minutes (supports overnight shifts). */
+/**
+ * Resolve holiday/working for a date.
+ * Pass employeePhone for per-employee holidays; omit for global calendar view
+ * (SELECTED holidays still show as holiday on the calendar).
+ */
+export function resolveDayKind(
+  dateStr: string,
+  overrides: OverrideSource,
+  employeePhone?: string
+): DayKind {
+  const override = lookupOverride(dateStr, overrides);
+  if (!override) return defaultKindForDate(dateStr);
+
+  if (override.appliesTo === "ALL" || !employeePhone) {
+    return override.kind;
+  }
+
+  const listed = override.employeeIds.some(
+    (id) => id === employeePhone || id.toLowerCase() === employeePhone.toLowerCase()
+  );
+  if (listed) return override.kind;
+  // Selected holiday/working does not apply to this employee → default rule
+  return defaultKindForDate(dateStr);
+}
+
+export function isWorkingDay(
+  dateStr: string,
+  overrides: OverrideSource,
+  employeePhone?: string
+): boolean {
+  return resolveDayKind(dateStr, overrides, employeePhone) === "WORKING";
+}
+
+export function overrideAppliesToAll(override: CalendarDayOverride | null): boolean {
+  return !override || override.appliesTo === "ALL";
+}
+
+/** Shift length in minutes (supports overnight shifts). Admin-set sign-in/out. */
 export function shiftMinutes(settings: AttendanceSettings): number {
   const start = timeToMinutes(normalizeTime(settings.dailySignInTime));
   const end = timeToMinutes(normalizeTime(settings.dailySignOutTime));
@@ -50,18 +122,24 @@ export function shiftMinutes(settings: AttendanceSettings): number {
   return Math.max(mins, 1);
 }
 
+/** Calendar days in month (31 for July, 30 for June, 28/29 Feb). */
+export function calendarDaysInMonth(year: number, month: number): number {
+  return Math.max(daysInMonth(year, month), 1);
+}
+
 export function countWorkingDaysInMonth(
   year: number,
   month: number,
-  overrides: Map<string, DayKind> | Record<string, DayKind>,
-  upToDate?: string
+  overrides: OverrideSource,
+  upToDate?: string,
+  employeePhone?: string
 ): number {
   const total = daysInMonth(year, month);
   let count = 0;
   for (let d = 1; d <= total; d++) {
     const key = dateKey(year, month, d);
     if (upToDate && key > upToDate) continue;
-    if (isWorkingDay(key, overrides)) count++;
+    if (isWorkingDay(key, overrides, employeePhone)) count++;
   }
   return Math.max(count, 1);
 }
@@ -85,6 +163,8 @@ export type DayDeduction = {
 };
 
 export type MonthDeductionSummary = {
+  /** Days in the calendar month (28–31). Used for ₹/day and ₹/hour. */
+  calendarDays: number;
   workingDays: number;
   shiftMinutes: number;
   perMinuteRate: number;
@@ -97,8 +177,8 @@ export type MonthDeductionSummary = {
 };
 
 /**
- * Deduct salary for late arrival + early leave on working days only.
- * Holidays (incl. default Sundays) are excluded.
+ * Deduct salary for late arrival + early leave.
+ * Rates = monthlySalary ÷ (calendar days in month × shift minutes).
  */
 export function computeMonthDeductions(
   monthlySalary: number,
@@ -106,13 +186,21 @@ export function computeMonthDeductions(
   month: number,
   records: Attendance[],
   settings: AttendanceSettings,
-  overrides: Map<string, DayKind> | Record<string, DayKind>
+  overrides: OverrideSource,
+  employeePhone?: string
 ): MonthDeductionSummary {
   const byDate = new Map(records.map((r) => [r.date, r]));
-  const workingDays = countWorkingDaysInMonth(year, month, overrides);
+  const calendarDays = calendarDaysInMonth(year, month);
+  const workingDays = countWorkingDaysInMonth(
+    year,
+    month,
+    overrides,
+    undefined,
+    employeePhone
+  );
   const shiftMins = shiftMinutes(settings);
   const perMinuteRate =
-    monthlySalary > 0 ? monthlySalary / (workingDays * shiftMins) : 0;
+    monthlySalary > 0 ? monthlySalary / (calendarDays * shiftMins) : 0;
 
   const days: DayDeduction[] = [];
   let totalLate = 0;
@@ -121,7 +209,7 @@ export function computeMonthDeductions(
   const total = daysInMonth(year, month);
   for (let d = 1; d <= total; d++) {
     const key = dateKey(year, month, d);
-    if (!isWorkingDay(key, overrides)) continue;
+    if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
     const rec = byDate.get(key);
     if (!rec?.signInTime) continue;
@@ -153,6 +241,7 @@ export function computeMonthDeductions(
   const netSalary = Math.max(0, Math.round((monthlySalary - totalDeduction) * 100) / 100);
 
   return {
+    calendarDays,
     workingDays,
     shiftMinutes: shiftMins,
     perMinuteRate,
@@ -176,33 +265,30 @@ export type EarnedDay = {
 };
 
 export type EarnedSalarySummary = {
-  /** Working days in the full month (used to split monthly → day/hour). */
+  /** Calendar days in month — July=31, June=30, etc. */
+  calendarDaysInMonth: number;
+  /** Working days for this employee (excludes their holidays / Sundays). */
   workingDaysInMonth: number;
   shiftMinutes: number;
   perDayRate: number;
   perHourRate: number;
   perMinuteRate: number;
-  /** Working days from join…today with a sign-in. */
   daysWorked: number;
-  /** Sum of day rates for days worked (before late cuts). */
   grossEarned: number;
   totalLateMinutes: number;
   totalEarlyMinutes: number;
   totalLostMinutes: number;
   totalDeduction: number;
-  /** What staff has earned till now after late/early cuts. */
   earnedNet: number;
-  /** Full-month target after late/early (for “Pay full” option). */
   fullMonthNet: number;
   days: EarnedDay[];
 };
 
 /**
- * Prorate monthly salary by working days/hours from join date up to `asOfDate`.
- * Only days with a sign-in count as worked. Late + early leave cut that day's pay.
- *
- * Example: joined yesterday on time → 1 × dayRate.
- * Today late 1 hour → dayRate − 1h + yesterday = pay amount.
+ * Prorate monthly salary by calendar days in the month.
+ * dayRate = monthly ÷ daysInMonth (31 in July).
+ * hourRate uses admin shift length from attendance settings.
+ * Only signed-in working days (for that employee) count as earned.
  */
 export function computeEarnedSalary(opts: {
   monthlySalary: number;
@@ -212,7 +298,8 @@ export function computeEarnedSalary(opts: {
   asOfDate: string;
   records: Attendance[];
   settings: AttendanceSettings;
-  overrides: Map<string, DayKind> | Record<string, DayKind>;
+  overrides: OverrideSource;
+  employeePhone?: string;
 }): EarnedSalarySummary {
   const {
     monthlySalary,
@@ -223,13 +310,21 @@ export function computeEarnedSalary(opts: {
     records,
     settings,
     overrides,
+    employeePhone,
   } = opts;
 
-  const workingDaysInMonth = countWorkingDaysInMonth(year, month, overrides);
+  const calendarDays = calendarDaysInMonth(year, month);
+  const workingDaysInMonth = countWorkingDaysInMonth(
+    year,
+    month,
+    overrides,
+    undefined,
+    employeePhone
+  );
   const shiftMins = shiftMinutes(settings);
-  const perDayRate = monthlySalary > 0 ? monthlySalary / workingDaysInMonth : 0;
+  const perDayRate = monthlySalary > 0 ? monthlySalary / calendarDays : 0;
   const perMinuteRate =
-    monthlySalary > 0 ? monthlySalary / (workingDaysInMonth * shiftMins) : 0;
+    monthlySalary > 0 ? monthlySalary / (calendarDays * shiftMins) : 0;
   const perHourRate = perMinuteRate * 60;
 
   const monthStart = dateKey(year, month, 1);
@@ -249,7 +344,7 @@ export function computeEarnedSalary(opts: {
     for (let d = 1; d <= total; d++) {
       const key = dateKey(year, month, d);
       if (key < join || key > until) continue;
-      if (!isWorkingDay(key, overrides)) continue;
+      if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
       const rec = byDate.get(key);
       if (!rec?.signInTime) continue;
@@ -278,19 +373,20 @@ export function computeEarnedSalary(opts: {
     }
   }
 
-  // Full-month late cut (all signed-in days in month) for “Pay full” baseline
   const fullMonthDeductions = computeMonthDeductions(
     monthlySalary,
     year,
     month,
     records,
     settings,
-    overrides
+    overrides,
+    employeePhone
   );
 
   const earnedNet = Math.max(0, Math.round((grossEarned - totalDeduction) * 100) / 100);
 
   return {
+    calendarDaysInMonth: calendarDays,
     workingDaysInMonth,
     shiftMinutes: shiftMins,
     perDayRate: Math.round(perDayRate * 100) / 100,

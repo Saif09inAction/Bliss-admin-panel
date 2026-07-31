@@ -5,25 +5,37 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   setDoc,
 } from "firebase/firestore";
-import { ChevronLeft, ChevronRight, Palmtree, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Palmtree, Sparkles, Users } from "lucide-react";
 import { getDb } from "@/lib/firebase";
+import type { Employee } from "@/lib/types";
 import {
   dateKey,
   daysInMonth,
   monthLabel,
 } from "@/lib/attendance-utils";
 import {
+  parseCalendarOverride,
   resolveDayKind,
+  type CalendarDayOverride,
   type DayKind,
+  type HolidayScope,
+  type OverrideMap,
 } from "@/lib/deduction-utils";
 
-function dayButtonClass(kind: DayKind, isToday: boolean, isSelected: boolean): string {
+function dayButtonClass(
+  kind: DayKind,
+  isToday: boolean,
+  isSelected: boolean,
+  isPartial: boolean
+): string {
   const base = ["calendar-day", "holiday-cal-day"];
   if (kind === "HOLIDAY") base.push("holiday");
   else base.push("working");
+  if (isPartial) base.push("partial-holiday");
   if (isToday) base.push("is-today");
   if (isSelected) base.push("selected");
   return base.join(" ");
@@ -33,27 +45,62 @@ export default function HolidaysPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
-  const [overrides, setOverrides] = useState<Map<string, DayKind>>(new Map());
+  const [overrides, setOverrides] = useState<OverrideMap>(new Map());
+  const [staff, setStaff] = useState<Employee[]>([]);
   const [selected, setSelected] = useState<string | null>(
     dateKey(now.getFullYear(), now.getMonth(), now.getDate())
   );
+  const [scope, setScope] = useState<HolidayScope>("ALL");
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
-      const map = new Map<string, DayKind>();
+      const map: OverrideMap = new Map();
       snap.docs.forEach((d) => {
-        const data = d.data();
-        const kind = data.kind as DayKind;
-        if (kind === "HOLIDAY" || kind === "WORKING") {
-          map.set((data.date as string) || d.id, kind);
-        }
+        const parsed = parseCalendarOverride(d.id, d.data() as Record<string, unknown>);
+        if (parsed) map.set(parsed.date, parsed);
       });
       setOverrides(map);
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    getDocs(collection(getDb(), "employees")).then((snap) => {
+      setStaff(
+        snap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              name: (data.name as string) || "",
+              phone: (data.phone as string) || d.id,
+              joiningDate: (data.joiningDate as string) || "",
+              monthlySalary: (data.monthlySalary as number) || 0,
+              attendancePercentage: (data.attendancePercentage as number) || 0,
+              role: ((data.role as string) || "STAFF") as Employee["role"],
+            };
+          })
+          .filter((e) => e.role === "STAFF")
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    });
+  }, []);
+
+  // Sync side panel when selecting a date that already has an override
+  useEffect(() => {
+    if (!selected) return;
+    const ov = overrides.get(selected);
+    if (ov?.kind === "HOLIDAY" && ov.appliesTo === "SELECTED") {
+      setScope("SELECTED");
+      setSelectedEmployees(ov.employeeIds);
+    } else {
+      setScope("ALL");
+      setSelectedEmployees([]);
+    }
+  }, [selected, overrides]);
 
   const firstDow = new Date(year, month, 1).getDay();
   const totalDays = daysInMonth(year, month);
@@ -75,16 +122,22 @@ export default function HolidaysPage() {
     let holidays = 0;
     let working = 0;
     let sundays = 0;
+    let partial = 0;
     for (let d = 1; d <= totalDays; d++) {
       const key = dateKey(year, month, d);
+      const ov = overrides.get(key);
       const kind = resolveDayKind(key, overrides);
       if (kind === "HOLIDAY") holidays++;
       else working++;
       if (new Date(year, month, d).getDay() === 0) sundays++;
+      if (ov?.kind === "HOLIDAY" && ov.appliesTo === "SELECTED") partial++;
     }
-    return { holidays, working, sundays };
+    return { holidays, working, sundays, partial, calendarDays: totalDays };
   }, [year, month, totalDays, overrides]);
 
+  const selectedOverride: CalendarDayOverride | undefined = selected
+    ? overrides.get(selected)
+    : undefined;
   const selectedKind = selected ? resolveDayKind(selected, overrides) : null;
   const selectedIsSunday =
     selected != null &&
@@ -92,7 +145,7 @@ export default function HolidaysPage() {
       const [y, m, d] = selected.split("-").map(Number);
       return new Date(y, m - 1, d).getDay() === 0;
     })();
-  const selectedHasOverride = selected ? overrides.has(selected) : false;
+  const selectedHasOverride = !!selectedOverride;
 
   function shiftMonth(delta: number) {
     const next = new Date(year, month + delta, 1);
@@ -101,30 +154,63 @@ export default function HolidaysPage() {
     setSelected(null);
   }
 
-  async function setKind(dateStr: string, kind: DayKind) {
+  function toggleEmployee(phone: string) {
+    setSelectedEmployees((prev) =>
+      prev.includes(phone) ? prev.filter((p) => p !== phone) : [...prev, phone]
+    );
+  }
+
+  async function setKind(
+    dateStr: string,
+    kind: DayKind,
+    forceScope?: HolidayScope
+  ) {
     setSaving(true);
     setToast("");
     try {
       const [y, m, d] = dateStr.split("-").map(Number);
       const isSunday = new Date(y, m - 1, d).getDay() === 0;
       const defaultKind: DayKind = isSunday ? "HOLIDAY" : "WORKING";
+      const effectiveScope = forceScope ?? scope;
 
-      // If matching the default rule, remove override to keep data clean
-      if (kind === defaultKind) {
+      if (kind === "HOLIDAY" && effectiveScope === "SELECTED" && selectedEmployees.length === 0) {
+        setToast("Select at least one employee, or choose All staff.");
+        setSaving(false);
+        return;
+      }
+
+      const appliesTo: HolidayScope =
+        kind === "HOLIDAY" && effectiveScope === "SELECTED" ? "SELECTED" : "ALL";
+      const employeeIds =
+        appliesTo === "SELECTED" ? selectedEmployees : [];
+
+      // Default global rule with no custom scope → remove override
+      if (kind === defaultKind && appliesTo === "ALL") {
         await deleteDoc(doc(getDb(), "calendar_days", dateStr));
+        setToast(kind === "HOLIDAY" ? "Using Sunday default holiday" : "Marked as working day");
       } else {
         await setDoc(doc(getDb(), "calendar_days", dateStr), {
           date: dateStr,
           kind,
+          appliesTo,
+          employeeIds,
           updatedAt: Date.now(),
         });
+        if (kind === "HOLIDAY") {
+          setToast(
+            appliesTo === "ALL"
+              ? "Holiday for all staff"
+              : `Holiday for ${employeeIds.length} staff`
+          );
+        } else {
+          setToast("Marked as working day");
+        }
       }
-      setToast(kind === "HOLIDAY" ? "Marked as holiday" : "Marked as working day");
     } catch {
       setToast("Could not save. Try again.");
     } finally {
       setSaving(false);
-      setTimeout(() => setToast(""), 2200);
+      setTimeout(() => setToast(""), 2500);
     }
   }
 
@@ -136,12 +222,13 @@ export default function HolidaysPage() {
         <div>
           <h2 className="font-display text-xl font-bold tracking-tight text-ink">Holidays</h2>
           <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-            Tap any date to mark holiday or working day · Sundays are holidays by default
+            Set holiday for all staff or selected employees · {monthStats.calendarDays} days in{" "}
+            {monthLabel(year, month)}
           </p>
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_360px]">
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_380px]">
         <div className="surface overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
             <button type="button" className="btn-icon" onClick={() => shiftMonth(-1)} aria-label="Previous month">
@@ -150,7 +237,9 @@ export default function HolidaysPage() {
             <div className="text-center">
               <p className="font-display text-lg font-bold">{monthLabel(year, month)}</p>
               <p className="text-xs text-[var(--text-muted)]">
-                {monthStats.working} working · {monthStats.holidays} holidays
+                {monthStats.calendarDays} days · {monthStats.working} working ·{" "}
+                {monthStats.holidays} holidays
+                {monthStats.partial > 0 ? ` · ${monthStats.partial} staff-only` : ""}
               </p>
             </div>
             <button type="button" className="btn-icon" onClick={() => shiftMonth(1)} aria-label="Next month">
@@ -175,18 +264,30 @@ export default function HolidaysPage() {
                       return <div key={`e-${di}`} className="aspect-square" />;
                     }
                     const key = dateKey(year, month, day);
+                    const ov = overrides.get(key);
                     const kind = resolveDayKind(key, overrides);
+                    const isPartial =
+                      ov?.kind === "HOLIDAY" && ov.appliesTo === "SELECTED";
                     return (
                       <button
                         key={key}
                         type="button"
                         onClick={() => setSelected(key)}
-                        className={dayButtonClass(kind, key === todayKey, selected === key)}
-                        title={`${key} · ${kind === "HOLIDAY" ? "Holiday" : "Working"}`}
+                        className={dayButtonClass(
+                          kind,
+                          key === todayKey,
+                          selected === key,
+                          isPartial
+                        )}
+                        title={
+                          isPartial
+                            ? `${key} · Holiday for ${ov!.employeeIds.length} staff`
+                            : `${key} · ${kind === "HOLIDAY" ? "Holiday" : "Working"}`
+                        }
                       >
                         <span className="text-sm font-bold">{day}</span>
                         <span className="mt-0.5 hidden text-[9px] font-semibold uppercase sm:block">
-                          {kind === "HOLIDAY" ? "Off" : "Work"}
+                          {isPartial ? "Some" : kind === "HOLIDAY" ? "Off" : "Work"}
                         </span>
                       </button>
                     );
@@ -197,13 +298,13 @@ export default function HolidaysPage() {
 
             <div className="mt-5 flex flex-wrap items-center gap-4 text-xs text-[var(--text-muted)]">
               <span className="inline-flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-[rgba(232,93,76,0.85)]" /> Holiday / off
+                <span className="h-3 w-3 rounded-full bg-[rgba(232,93,76,0.85)]" /> All-staff holiday
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-[rgba(232,168,56,0.9)]" /> Selected staff
               </span>
               <span className="inline-flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full bg-jade" /> Working day
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full ring-2 ring-ink/30" /> Today
               </span>
             </div>
           </div>
@@ -230,9 +331,70 @@ export default function HolidaysPage() {
                   <span className="font-semibold text-white">
                     {selectedKind === "HOLIDAY" ? "Holiday" : "Working day"}
                   </span>
+                  {selectedOverride?.appliesTo === "SELECTED" &&
+                    ` · ${selectedOverride.employeeIds.length} staff`}
                   {selectedIsSunday && !selectedHasOverride && " (Sunday default)"}
-                  {selectedHasOverride && " (custom override)"}
+                  {selectedHasOverride && selectedOverride?.appliesTo === "ALL" && " (all staff)"}
                 </p>
+
+                <div className="mt-4">
+                  <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-white/45">
+                    <Users size={12} /> Who gets this holiday?
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setScope("ALL")}
+                      className={`rounded-xl px-3 py-2 text-left text-sm ${
+                        scope === "ALL"
+                          ? "bg-jade/25 text-white ring-1 ring-jade/50"
+                          : "bg-white/5 text-white/70"
+                      }`}
+                    >
+                      <p className="font-bold">All staff</p>
+                      <p className="text-[10px] opacity-70">Everyone off</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setScope("SELECTED")}
+                      className={`rounded-xl px-3 py-2 text-left text-sm ${
+                        scope === "SELECTED"
+                          ? "bg-bronze/30 text-white ring-1 ring-bronze/50"
+                          : "bg-white/5 text-white/70"
+                      }`}
+                    >
+                      <p className="font-bold">Selected</p>
+                      <p className="text-[10px] opacity-70">Pick employees</p>
+                    </button>
+                  </div>
+                </div>
+
+                {scope === "SELECTED" && (
+                  <div className="mt-3 max-h-40 space-y-1 overflow-y-auto rounded-xl bg-white/5 p-2">
+                    {staff.length === 0 ? (
+                      <p className="px-2 py-3 text-xs text-white/50">No staff found</p>
+                    ) : (
+                      staff.map((e) => {
+                        const checked = selectedEmployees.includes(e.phone);
+                        return (
+                          <label
+                            key={e.phone}
+                            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-white/85 hover:bg-white/5"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleEmployee(e.phone)}
+                              className="accent-[var(--jade)]"
+                            />
+                            <span className="min-w-0 flex-1 truncate capitalize">{e.name}</span>
+                            <span className="text-[10px] text-white/40">{e.phone}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-5 grid gap-2">
                   <button
@@ -249,21 +411,27 @@ export default function HolidaysPage() {
                       H
                     </span>
                     Mark as holiday
+                    {scope === "SELECTED"
+                      ? ` (${selectedEmployees.length || "…" } staff)`
+                      : " (all)"}
                   </button>
                   <button
                     type="button"
                     disabled={saving}
                     className={`btn w-full !justify-start !rounded-2xl ${
-                      selectedKind === "WORKING"
+                      selectedKind === "WORKING" && selectedOverride?.appliesTo !== "SELECTED"
                         ? "!bg-jade/20 !text-white ring-1 ring-jade/40"
                         : "!bg-white/5 !text-white/80 hover:!bg-white/10"
                     }`}
-                    onClick={() => setKind(selected, "WORKING")}
+                    onClick={() => {
+                      setScope("ALL");
+                      void setKind(selected, "WORKING", "ALL");
+                    }}
                   >
                     <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-jade/30 text-sm font-bold text-ink">
                       W
                     </span>
-                    Mark as working day
+                    Mark as working day (all)
                   </button>
                 </div>
                 {toast && <p className="mt-3 text-xs text-jade-glow">{toast}</p>}
@@ -281,15 +449,20 @@ export default function HolidaysPage() {
               <div>
                 <p className="font-semibold text-[var(--text)]">How it works</p>
                 <ul className="mt-2 space-y-1.5 text-sm text-[var(--text-muted)]">
-                  <li>Every Sunday is a holiday unless you mark it working.</li>
-                  <li>Other days are working unless you mark them holiday.</li>
-                  <li>Late / early leave deductions skip holiday dates.</li>
+                  <li>Salary day rate = monthly ÷ days in month ({monthStats.calendarDays} this month).</li>
+                  <li>Choose All staff or pick specific employees for a holiday.</li>
+                  <li>Sundays are holidays by default unless marked working.</li>
+                  <li>Late deductions use admin working hours from Attendance settings.</li>
                 </ul>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="stat-card text-center">
+              <p className="stat-card-value">{monthStats.calendarDays}</p>
+              <p className="stat-card-label">Days in month</p>
+            </div>
             <div className="stat-card text-center">
               <p className="stat-card-value text-jade-deep">{monthStats.working}</p>
               <p className="stat-card-label">Working</p>
@@ -299,8 +472,8 @@ export default function HolidaysPage() {
               <p className="stat-card-label">Holidays</p>
             </div>
             <div className="stat-card text-center">
-              <p className="stat-card-value">{monthStats.sundays}</p>
-              <p className="stat-card-label">Sundays</p>
+              <p className="stat-card-value text-warning">{monthStats.partial}</p>
+              <p className="stat-card-label">Staff-only</p>
             </div>
           </div>
         </div>

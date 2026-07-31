@@ -31,8 +31,9 @@ import {
 import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
 import {
   computeEarnedSalary,
-  type DayKind,
+  parseCalendarOverride,
   type EarnedSalarySummary,
+  type OverrideMap,
 } from "@/lib/deduction-utils";
 
 function newPaymentId() {
@@ -78,7 +79,7 @@ export default function SalaryPage() {
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [settings, setSettings] = useState<AttendanceSettings>(defaultSettings());
-  const [overrides, setOverrides] = useState<Map<string, DayKind>>(new Map());
+  const [overrides, setOverrides] = useState<OverrideMap>(new Map());
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SalaryFilter>("ALL");
   const [payTarget, setPayTarget] = useState<SalaryRow | null>(null);
@@ -139,10 +140,10 @@ export default function SalaryPage() {
 
     loadStatic();
     const unsubCal = onSnapshot(collection(db, "calendar_days"), (snap) => {
-      const map = new Map<string, DayKind>();
+      const map: OverrideMap = new Map();
       snap.docs.forEach((d) => {
-        const kind = d.data().kind as DayKind;
-        if (kind === "HOLIDAY" || kind === "WORKING") map.set(d.id, kind);
+        const parsed = parseCalendarOverride(d.id, d.data() as Record<string, unknown>);
+        if (parsed) map.set(parsed.date, parsed);
       });
       setOverrides(map);
     });
@@ -185,6 +186,7 @@ export default function SalaryPage() {
           records: empAtt,
           settings,
           overrides,
+          employeePhone: e.phone,
         });
         const earnedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
         const fullDue = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
@@ -231,6 +233,7 @@ export default function SalaryPage() {
         records: empAtt,
         settings,
         overrides,
+        employeePhone: e.phone,
       });
       totalPaid += paid;
       totalDue += Math.max(0, earned.earnedNet - paid);
@@ -424,7 +427,7 @@ export default function SalaryPage() {
                       <td className="text-sm text-[var(--text-muted)]">{money(earned.perHourRate)}</td>
                       <td className="text-sm">
                         {earned.daysWorked}d
-                        <span className="text-[var(--text-faint)]"> / {earned.workingDaysInMonth}</span>
+                        <span className="text-[var(--text-faint)]"> / {earned.calendarDaysInMonth} days</span>
                       </td>
                       <td className="font-medium text-danger">
                         {earned.totalDeduction > 0 ? `−${money(earned.totalDeduction)}` : "—"}
@@ -479,7 +482,7 @@ export default function SalaryPage() {
                           <div className="min-w-0">
                             <p className="truncate font-semibold capitalize">{employee.name}</p>
                             <p className="text-xs text-[var(--text-muted)]">
-                              {earned.daysWorked}d worked · {money(earned.perHourRate)}/hr
+                              {earned.daysWorked}d worked · {money(earned.perDayRate)}/day · {money(earned.perHourRate)}/hr
                               {earned.totalDeduction > 0
                                 ? ` · late −${money(earned.totalDeduction)}`
                                 : ""}
@@ -552,13 +555,17 @@ export default function SalaryPage() {
                   <span className="font-semibold">{money(payTarget.employee.monthlySalary)}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-[var(--text-muted)]">Per day (month ÷ days)</span>
+                  <span className="font-semibold">{money(payTarget.earned.perDayRate)}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Per hour</span>
                   <span className="font-semibold">{money(payTarget.earned.perHourRate)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Days worked</span>
                   <span className="font-semibold">
-                    {payTarget.earned.daysWorked} / {payTarget.earned.workingDaysInMonth}
+                    {payTarget.earned.daysWorked} worked / {payTarget.earned.calendarDaysInMonth} days in month
                   </span>
                 </div>
                 <div className="flex justify-between">

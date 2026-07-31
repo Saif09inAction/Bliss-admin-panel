@@ -33,7 +33,8 @@ import {
 import {
   computeEarnedSalary,
   formatDurationMinutes,
-  type DayKind,
+  parseCalendarOverride,
+  type OverrideMap,
 } from "@/lib/deduction-utils";
 import {
   currentMonthParts,
@@ -61,7 +62,7 @@ export default function WorkerProfilePanel({
   const { year, month } = currentMonthParts();
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
-  const [overrides, setOverrides] = useState<Map<string, DayKind>>(new Map());
+  const [overrides, setOverrides] = useState<OverrideMap>(new Map());
   const [settings, setSettings] = useState<AttendanceSettings>(
     settingsProp || defaultSettings()
   );
@@ -99,12 +100,10 @@ export default function WorkerProfilePanel({
     loadSettings();
 
     const unsubCal = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
-      const map = new Map<string, DayKind>();
+      const map: OverrideMap = new Map();
       snap.docs.forEach((d) => {
-        const kind = d.data().kind as DayKind;
-        if (kind === "HOLIDAY" || kind === "WORKING") {
-          map.set((d.data().date as string) || d.id, kind);
-        }
+        const parsed = parseCalendarOverride(d.id, d.data() as Record<string, unknown>);
+        if (parsed) map.set(parsed.date, parsed);
       });
       if (!cancelled) setOverrides(map);
     });
@@ -163,10 +162,12 @@ export default function WorkerProfilePanel({
       records: attendanceRecords,
       settings,
       overrides,
+      employeePhone: employee.phone,
     });
   }, [
     employee.monthlySalary,
     employee.joiningDate,
+    employee.phone,
     year,
     month,
     monthPrefix,
@@ -290,7 +291,7 @@ export default function WorkerProfilePanel({
                     />
                   </div>
                   <p className="mt-2 text-xs text-[var(--text-muted)]">
-                    {earned.daysWorked} days worked · ₹
+                    {earned.daysWorked} days worked · {earned.calendarDaysInMonth} days/mo · ₹
                     {Math.round(earned.perHourRate).toLocaleString("en-IN")}/hr · from join date
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
@@ -355,7 +356,7 @@ export default function WorkerProfilePanel({
                   </h3>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
                     Late / early leave cut from days worked · holidays &amp; Sundays excluded ·{" "}
-                    {earned.workingDaysInMonth} working days this month
+                    {earned.calendarDaysInMonth} days in month · rates use admin shift hours
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <StatTile
