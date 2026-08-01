@@ -192,6 +192,8 @@ export interface PickupRecord {
   color: string;
   quantity: number;
   partner: string;
+  /** Courier / delivery partner — BlueDart, Shiprocket, etc. */
+  deliveryPartner: string;
   staffName: string;
   date: string;
   time: string;
@@ -203,6 +205,8 @@ export interface ReturnRecord {
   color: string;
   quantity: number;
   partner: string;
+  /** Courier / delivery partner — BlueDart, Shiprocket, etc. */
+  deliveryPartner: string;
   returnType: string;
   staffName: string;
   date: string;

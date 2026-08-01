@@ -57,19 +57,17 @@ export default function RecordsPage() {
   const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
   const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
   const [pickupForm, setPickupForm] = useState({
-    productName: "",
-    color: "",
     quantity: "",
     partner: "",
+    deliveryPartner: "",
     staffName: "",
     date: "",
     time: "",
   });
   const [returnForm, setReturnForm] = useState({
-    productName: "",
-    color: "",
     quantity: "",
     partner: "",
+    deliveryPartner: "",
     returnType: "",
     staffName: "",
     date: "",
@@ -149,10 +147,11 @@ export default function RecordsPage() {
             const data = d.data();
             return {
               id: d.id,
-              productName: data.productName as string,
+              productName: (data.productName as string) || "",
               color: (data.color as string) || "",
               quantity: (data.quantity as number) || 0,
               partner: (data.partner as string) || "",
+              deliveryPartner: (data.deliveryPartner as string) || "",
               staffName: (data.staffName as string) || "",
               date: (data.date as string) || "",
               time: (data.time as string) || "",
@@ -167,10 +166,11 @@ export default function RecordsPage() {
             const data = d.data();
             return {
               id: d.id,
-              productName: data.productName as string,
+              productName: (data.productName as string) || "",
               color: (data.color as string) || "",
               quantity: (data.quantity as number) || 0,
               partner: (data.partner as string) || "",
+              deliveryPartner: (data.deliveryPartner as string) || "",
               returnType: (data.returnType as string) || "",
               staffName: (data.staffName as string) || "",
               date: (data.date as string) || "",
@@ -216,14 +216,14 @@ export default function RecordsPage() {
     } else if (tab === "pickups") {
       downloadCsv(
         "pickups.csv",
-        ["Product", "Color", "Qty", "Partner", "Staff", "Date", "Time"],
-        pickups.map((p) => [p.productName, p.color, String(p.quantity), p.partner, p.staffName, p.date, p.time])
+        ["Partner", "Delivery Partner", "Qty", "Staff", "Date", "Time"],
+        pickups.map((p) => [p.partner, p.deliveryPartner, String(p.quantity), p.staffName, p.date, p.time])
       );
     } else {
       downloadCsv(
         "returns.csv",
-        ["Product", "Color", "Qty", "Partner", "Type", "Staff", "Date", "Notes"],
-        returns.map((r) => [r.productName, r.color, String(r.quantity), r.partner, r.returnType, r.staffName, r.date, r.notes || ""])
+        ["Type", "Partner", "Delivery Partner", "Qty", "Staff", "Date", "Time", "Notes"],
+        returns.map((r) => [r.returnType, r.partner, r.deliveryPartner, String(r.quantity), r.staffName, r.date, r.time, r.notes || ""])
       );
     }
   }
@@ -253,8 +253,8 @@ export default function RecordsPage() {
     if (!q) return pickups;
     return pickups.filter(
       (p) =>
-        p.productName.toLowerCase().includes(q) ||
         p.partner.toLowerCase().includes(q) ||
+        p.deliveryPartner.toLowerCase().includes(q) ||
         p.staffName.toLowerCase().includes(q)
     );
   }, [pickups, q]);
@@ -263,8 +263,8 @@ export default function RecordsPage() {
     if (!q) return returns;
     return returns.filter(
       (r) =>
-        r.productName.toLowerCase().includes(q) ||
         r.partner.toLowerCase().includes(q) ||
+        r.deliveryPartner.toLowerCase().includes(q) ||
         r.staffName.toLowerCase().includes(q) ||
         r.returnType.toLowerCase().includes(q)
     );
@@ -282,10 +282,9 @@ export default function RecordsPage() {
   function openPickupEdit(p: PickupRecord) {
     setEditPickup(p);
     setPickupForm({
-      productName: p.productName,
-      color: p.color,
       quantity: String(p.quantity),
       partner: p.partner,
+      deliveryPartner: p.deliveryPartner,
       staffName: p.staffName,
       date: p.date,
       time: p.time,
@@ -298,10 +297,9 @@ export default function RecordsPage() {
     await setDoc(
       doc(getDb(), "pickup_records", editPickup.id),
       {
-        productName: pickupForm.productName.trim(),
-        color: pickupForm.color.trim(),
         quantity: Number(pickupForm.quantity) || 0,
         partner: pickupForm.partner.trim(),
+        deliveryPartner: pickupForm.deliveryPartner.trim(),
         staffName: pickupForm.staffName.trim(),
         date: pickupForm.date,
         time: pickupForm.time,
@@ -316,10 +314,11 @@ export default function RecordsPage() {
           const data = d.data();
           return {
             id: d.id,
-            productName: data.productName as string,
+            productName: (data.productName as string) || "",
             color: (data.color as string) || "",
             quantity: (data.quantity as number) || 0,
             partner: (data.partner as string) || "",
+            deliveryPartner: (data.deliveryPartner as string) || "",
             staffName: (data.staffName as string) || "",
             date: (data.date as string) || "",
             time: (data.time as string) || "",
@@ -332,10 +331,9 @@ export default function RecordsPage() {
   function openReturnEdit(r: ReturnRecord) {
     setEditReturn(r);
     setReturnForm({
-      productName: r.productName,
-      color: r.color,
       quantity: String(r.quantity),
       partner: r.partner,
+      deliveryPartner: r.deliveryPartner,
       returnType: r.returnType,
       staffName: r.staffName,
       date: r.date,
@@ -350,10 +348,9 @@ export default function RecordsPage() {
     await setDoc(
       doc(getDb(), "return_records", editReturn.id),
       {
-        productName: returnForm.productName.trim(),
-        color: returnForm.color.trim(),
         quantity: Number(returnForm.quantity) || 0,
         partner: returnForm.partner.trim(),
+        deliveryPartner: returnForm.deliveryPartner.trim(),
         returnType: returnForm.returnType.trim(),
         staffName: returnForm.staffName.trim(),
         date: returnForm.date,
@@ -370,10 +367,11 @@ export default function RecordsPage() {
           const data = d.data();
           return {
             id: d.id,
-            productName: data.productName as string,
+            productName: (data.productName as string) || "",
             color: (data.color as string) || "",
             quantity: (data.quantity as number) || 0,
             partner: (data.partner as string) || "",
+            deliveryPartner: (data.deliveryPartner as string) || "",
             returnType: (data.returnType as string) || "",
             staffName: (data.staffName as string) || "",
             date: (data.date as string) || "",
@@ -467,14 +465,14 @@ export default function RecordsPage() {
   }
 
   async function deletePickupRecord(rec: PickupRecord) {
-    if (!confirm(`Delete pickup "${rec.productName}" ×${rec.quantity}?`)) return;
+    if (!confirm(`Delete pickup of ${rec.quantity} pcs via ${rec.partner}?`)) return;
     await deleteDoc(doc(getDb(), "pickup_records", rec.id));
     setPickups((prev) => prev.filter((x) => x.id !== rec.id));
     if (editPickup?.id === rec.id) setEditPickup(null);
   }
 
   async function deleteReturnRecord(rec: ReturnRecord) {
-    if (!confirm(`Delete return "${rec.productName}" ×${rec.quantity}?`)) return;
+    if (!confirm(`Delete return of ${rec.quantity} pcs via ${rec.partner}?`)) return;
     await deleteDoc(doc(getDb(), "return_records", rec.id));
     setReturns((prev) => prev.filter((x) => x.id !== rec.id));
     if (editReturn?.id === rec.id) setEditReturn(null);
@@ -687,10 +685,9 @@ export default function RecordsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Product</th>
-                    <th>Color</th>
-                    <th>Qty</th>
                     <th>Partner</th>
+                    <th>Delivery Partner</th>
+                    <th>Qty</th>
                     <th>Staff</th>
                     <th>Date & Time</th>
                     <th className="text-right">Actions</th>
@@ -699,10 +696,9 @@ export default function RecordsPage() {
                 <tbody>
                   {filteredPickups.map((p) => (
                     <tr key={p.id}>
-                      <td className="font-semibold">{p.productName}</td>
-                      <td>{p.color || "—"}</td>
+                      <td className="font-semibold">{p.partner || "—"}</td>
+                      <td className="text-[var(--text-muted)]">{p.deliveryPartner || "—"}</td>
                       <td>{p.quantity}</td>
-                      <td className="text-[var(--text-muted)]">{p.partner}</td>
                       <td>{p.staffName}</td>
                       <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
                       <td className="text-right">
@@ -728,9 +724,7 @@ export default function RecordsPage() {
             {filteredPickups.map((p) => (
               <div key={p.id} className="record-card">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="font-display font-bold">
-                    {p.productName} {p.color ? `(${p.color})` : ""}
-                  </p>
+                  <p className="font-display font-bold">{p.partner || "—"}</p>
                   <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
                     <Pencil size={14} />
                   </button>
@@ -739,7 +733,7 @@ export default function RecordsPage() {
                   </button>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <Field label="Partner" value={p.partner} />
+                  <Field label="Delivery Partner" value={p.deliveryPartner || "—"} />
                   <Field label="Quantity" value={String(p.quantity)} />
                   <Field label="Staff" value={p.staffName} />
                   <Field label="Date" value={`${p.date} ${p.time}`} />
@@ -761,12 +755,12 @@ export default function RecordsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Product</th>
-                    <th>Color</th>
-                    <th>Qty</th>
                     <th>Type</th>
                     <th>Partner</th>
+                    <th>Delivery Partner</th>
+                    <th>Qty</th>
                     <th>Staff</th>
+                    <th>Date & Time</th>
                     <th>Notes</th>
                     <th className="text-right">Actions</th>
                   </tr>
@@ -774,12 +768,12 @@ export default function RecordsPage() {
                 <tbody>
                   {filteredReturns.map((r) => (
                     <tr key={r.id}>
-                      <td className="font-semibold">{r.productName}</td>
-                      <td>{r.color || "—"}</td>
-                      <td>{r.quantity}</td>
                       <td><span className="badge badge-neutral">{r.returnType}</span></td>
-                      <td className="text-[var(--text-muted)]">{r.partner}</td>
+                      <td className="font-semibold">{r.partner || "—"}</td>
+                      <td className="text-[var(--text-muted)]">{r.deliveryPartner || "—"}</td>
+                      <td>{r.quantity}</td>
                       <td>{r.staffName}</td>
+                      <td className="text-[var(--text-muted)]">{r.date} {r.time}</td>
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
@@ -804,9 +798,7 @@ export default function RecordsPage() {
             {filteredReturns.map((r) => (
               <div key={r.id} className="record-card">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="font-display font-bold">
-                    {r.productName} {r.color ? `(${r.color})` : ""}
-                  </p>
+                  <p className="font-display font-bold">{r.partner || "—"}</p>
                   <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
                     <Pencil size={14} />
                   </button>
@@ -816,9 +808,10 @@ export default function RecordsPage() {
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Type" value={r.returnType} />
-                  <Field label="Partner" value={r.partner} />
+                  <Field label="Delivery Partner" value={r.deliveryPartner || "—"} />
                   <Field label="Quantity" value={String(r.quantity)} />
                   <Field label="Staff" value={r.staffName} />
+                  <Field label="Date" value={`${r.date} ${r.time}`} />
                   {r.notes && <Field label="Notes" value={r.notes} />}
                 </div>
               </div>
@@ -836,7 +829,7 @@ export default function RecordsPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form onSubmit={savePickup} className="surface w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="font-display text-lg font-bold">Edit pickup</h3>
-              {(["productName", "color", "quantity", "partner", "staffName", "date", "time"] as const).map((key) => (
+              {(["quantity", "partner", "deliveryPartner", "staffName", "date", "time"] as const).map((key) => (
                 <div key={key}>
                   <label className="label capitalize">{key.replace(/([A-Z])/g, " $1")}</label>
                   <input
@@ -862,7 +855,7 @@ export default function RecordsPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form onSubmit={saveReturn} className="surface max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="font-display text-lg font-bold">Edit return</h3>
-              {(["productName", "color", "quantity", "partner", "returnType", "staffName", "date", "time", "notes"] as const).map((key) => (
+              {(["quantity", "partner", "deliveryPartner", "returnType", "staffName", "date", "time", "notes"] as const).map((key) => (
                 <div key={key}>
                   <label className="label capitalize">{key.replace(/([A-Z])/g, " $1")}</label>
                   <input
