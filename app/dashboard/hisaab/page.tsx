@@ -477,25 +477,49 @@ export default function HisaabPage() {
         <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">Loading hisaab…</div>
       ) : (
         <div className="space-y-5">
-          <div className="surface flex items-center gap-3 p-4">
+          <div className="surface flex flex-wrap items-center gap-3 p-4">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
               <Wallet size={20} />
             </div>
-            <div className="flex-1">
+            <div className="min-w-0 flex-1">
               <p className="font-display text-lg font-bold">{selectedKaariger?.name}</p>
               <p className="text-sm text-[var(--text-muted)]">
                 {selectedKaariger?.phone} · {activeOrders.length} active
                 {completedOrders.length > 0 ? ` · ${completedOrders.length} completed` : ""}
               </p>
             </div>
-            {(selectedKaariger?.creditBalance || 0) > 0 && (
-              <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">Credit available</p>
-                <p className="font-display text-base font-bold text-jade-deep">
-                  {money(selectedKaariger?.creditBalance || 0)}
-                </p>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {(selectedKaariger?.creditBalance || 0) > 0 && (
+                <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">Credit available</p>
+                  <p className="font-display text-base font-bold text-jade-deep">
+                    {money(selectedKaariger?.creditBalance || 0)}
+                  </p>
+                </div>
+              )}
+              {orders.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm whitespace-nowrap"
+                  onClick={() => {
+                    // Prefer an active bill that still has balance; otherwise the
+                    // newest order (extra kharcha on a settled bill becomes credit).
+                    const withBalance = activeOrders.find((o) => {
+                      const paid = orderPaidMap.get(o.id) || 0;
+                      return orderNetDeal(o) - paid > 0.5;
+                    });
+                    const target = withBalance || activeOrders[0] || completedOrders[0];
+                    if (!target) return;
+                    setPayOrderId(target.id);
+                    setPayForm({ amount: "", remarks: "" });
+                    setPayMsg("");
+                  }}
+                >
+                  <IndianRupee className="h-3.5 w-3.5" />
+                  Pay
+                </button>
+              )}
+            </div>
           </div>
 
           {(selectedKaariger?.creditBalance || 0) > 0 && (
@@ -577,11 +601,6 @@ export default function HisaabPage() {
                 order={historyOrder}
                 payments={payments}
                 repairs={repairs}
-                onPay={() => {
-                  setPayOrderId(historyOrder.id);
-                  setPayForm({ amount: "", remarks: "" });
-                  setPayMsg("");
-                }}
               />
             </div>
           </div>
