@@ -4,24 +4,26 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 import {
   ArrowDownLeft,
-  CheckCircle2,
   ClipboardList,
   Download,
+  Package,
   Pencil,
+  ShoppingBag,
   Trash2,
   Truck,
+  Wrench,
+  X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { KaarigerOrder, OrderApprovalRecord, PickupRecord, ReturnRecord } from "@/lib/types";
+import type { KaarigerOrder, OrderProductLine, PickupRecord, RepairLineItem, ReturnRecord } from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
-type Tab = "kaariger" | "approvals" | "pickups" | "returns";
+type Tab = "kaariger" | "pickups" | "returns";
 
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "kaariger", label: "Kaariger", icon: ClipboardList },
-  { id: "approvals", label: "Approvals", icon: CheckCircle2 },
   { id: "pickups", label: "Pickups", icon: Truck },
   { id: "returns", label: "Returns", icon: ArrowDownLeft },
 ];
@@ -46,16 +48,20 @@ function recordStatusBadge(status: string) {
   }
 }
 
+function money(n: number) {
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
+
 export default function RecordsPage() {
   const [tab, setTab] = useState<Tab>("kaariger");
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
-  const [approvals, setApprovals] = useState<OrderApprovalRecord[]>([]);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
   const [search, setSearch] = useState("");
   const [editPickup, setEditPickup] = useState<PickupRecord | null>(null);
   const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
   const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
+  const [viewOrder, setViewOrder] = useState<KaarigerOrder | null>(null);
   const [pickupForm, setPickupForm] = useState({
     quantity: "",
     partner: "",
@@ -87,9 +93,8 @@ export default function RecordsPage() {
   useEffect(() => {
     async function load() {
       const db = getDb();
-      const [oSnap, aSnap, pSnap, rSnap] = await Promise.all([
+      const [oSnap, pSnap, rSnap] = await Promise.all([
         getDocs(collection(db, "kaariger_orders")),
-        getDocs(collection(db, "order_approval_records")),
         getDocs(collection(db, "pickup_records")),
         getDocs(collection(db, "return_records")),
       ]);
@@ -98,6 +103,19 @@ export default function RecordsPage() {
         oSnap.docs
           .map((d) => {
             const data = d.data();
+            const products = ((data.products as OrderProductLine[]) || []).map((p) => ({
+              productName: p.productName,
+              quantity: Number(p.quantity) || 0,
+              pricePerPiece: Number(p.pricePerPiece) || 0,
+              lineTotal: Number(p.lineTotal) || 0,
+            }));
+            const materialDeductions = ((data.materialDeductions as RepairLineItem[]) || []).map((it) => ({
+              type: it.type,
+              label: it.label,
+              quantity: Number(it.quantity) || 0,
+              pricePerPiece: Number(it.pricePerPiece) || 0,
+              lineTotal: Number(it.lineTotal) || 0,
+            }));
             return {
               id: (data.id as string) || d.id,
               kaarigerId: data.kaarigerId as string,
@@ -114,31 +132,17 @@ export default function RecordsPage() {
               verifiedBy: data.verifiedBy as string | undefined,
               createdBy: (data.createdBy as string) || "",
               createdAt: (data.createdAt as number) || 0,
+              notes: data.notes as string | undefined,
+              originalDealAmount: data.originalDealAmount as number | undefined,
+              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+              products,
+              productsTotal: data.productsTotal as number | undefined,
+              materialDeductions,
+              materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+              kharchaGiven: data.kharchaGiven as number | undefined,
             };
           })
           .sort((a, b) => b.createdAt - a.createdAt)
-      );
-
-      setApprovals(
-        aSnap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: (data.id as string) || d.id,
-              orderId: data.orderId as string,
-              productName: data.productName as string,
-              kaarigerId: data.kaarigerId as string,
-              kaarigerName: data.kaarigerName as string,
-              batchQuantity: (data.batchQuantity as number) || 0,
-              approvedTotalAfter: (data.approvedTotalAfter as number) || 0,
-              targetQuantity: (data.targetQuantity as number) || 0,
-              color: (data.color as string) || "",
-              verifiedByName: data.verifiedByName as string,
-              verifiedByPhone: data.verifiedByPhone as string,
-              verifiedAt: (data.verifiedAt as number) || 0,
-            };
-          })
-          .sort((a, b) => b.verifiedAt - a.verifiedAt)
       );
 
       setPickups(
@@ -199,20 +203,6 @@ export default function RecordsPage() {
           String(o.totalDealAmount),
         ])
       );
-    } else if (tab === "approvals") {
-      downloadCsv(
-        "approval_history.csv",
-        ["Product", "Kaariger", "Batch Qty", "Progress", "Approved By", "Phone", "Date"],
-        approvals.map((a) => [
-          a.productName,
-          a.kaarigerName,
-          String(a.batchQuantity),
-          `${a.approvedTotalAfter}/${a.targetQuantity}`,
-          a.verifiedByName,
-          a.verifiedByPhone,
-          new Date(a.verifiedAt).toISOString(),
-        ])
-      );
     } else if (tab === "pickups") {
       downloadCsv(
         "pickups.csv",
@@ -239,16 +229,6 @@ export default function RecordsPage() {
     );
   }, [orders, q]);
 
-  const filteredApprovals = useMemo(() => {
-    if (!q) return approvals;
-    return approvals.filter(
-      (a) =>
-        a.productName.toLowerCase().includes(q) ||
-        a.kaarigerName.toLowerCase().includes(q) ||
-        a.verifiedByName.toLowerCase().includes(q)
-    );
-  }, [approvals, q]);
-
   const filteredPickups = useMemo(() => {
     if (!q) return pickups;
     return pickups.filter(
@@ -273,11 +253,9 @@ export default function RecordsPage() {
   const count =
     tab === "kaariger"
       ? filteredOrders.length
-      : tab === "approvals"
-        ? filteredApprovals.length
-        : tab === "pickups"
-          ? filteredPickups.length
-          : filteredReturns.length;
+      : tab === "pickups"
+        ? filteredPickups.length
+        : filteredReturns.length;
 
   function openPickupEdit(p: PickupRecord) {
     setEditPickup(p);
@@ -434,7 +412,7 @@ export default function RecordsPage() {
 
 
   async function deleteOrderRecord(o: KaarigerOrder) {
-    if (!confirm(`Delete order "${o.productName}" for ${o.kaarigerName}? Related payments/repairs/approvals will also be removed.`)) return;
+    if (!confirm(`Delete order "${o.productName}" for ${o.kaarigerName}? Related payments/repairs will also be removed.`)) return;
     const db = getDb();
     await deleteDoc(doc(db, "kaariger_orders", o.id));
     try {
@@ -448,20 +426,12 @@ export default function RecordsPage() {
         ...repairSnap.docs.map((d) => deleteDoc(d.ref)),
         ...approvalSnap.docs.map((d) => deleteDoc(d.ref)),
       ]);
-      if (approvalSnap.size) {
-        setApprovals((prev) => prev.filter((a) => a.orderId !== o.id));
-      }
     } catch {
       // best-effort related cleanup
     }
     setOrders((prev) => prev.filter((x) => x.id !== o.id));
     if (editOrder?.id === o.id) setEditOrder(null);
-  }
-
-  async function deleteApprovalRecord(a: OrderApprovalRecord) {
-    if (!confirm(`Delete approval record for "${a.productName}"?`)) return;
-    await deleteDoc(doc(getDb(), "order_approval_records", a.id));
-    setApprovals((prev) => prev.filter((x) => x.id !== a.id));
+    if (viewOrder?.id === o.id) setViewOrder(null);
   }
 
   async function deletePickupRecord(rec: PickupRecord) {
@@ -508,7 +478,7 @@ export default function RecordsPage() {
         ))}
       </div>
 
-      {/* Kaariger orders — table on desktop, cards on mobile */}
+      {/* Kaariger orders — table on desktop, cards on mobile. Click a row to see the full bill breakdown. */}
       {tab === "kaariger" && (
         <>
           <div className="data-table-wrap hidden lg:block">
@@ -519,26 +489,22 @@ export default function RecordsPage() {
                     <th>Product</th>
                     <th>Kaariger</th>
                     <th>Progress</th>
-                    <th>Status</th>
-                    <th>Verified By</th>
                     <th className="text-right">Deal</th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOrders.map((o) => (
-                    <tr key={o.id}>
+                    <tr key={o.id} className="cursor-pointer" onClick={() => setViewOrder(o)}>
                       <td>
                         <p className="font-semibold">{o.productName}</p>
                         {o.color && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{o.color}</p>}
                       </td>
                       <td className="text-[var(--text-muted)]">{o.kaarigerName}</td>
                       <td>{o.approvedQuantity} / {o.targetQuantity} pcs</td>
-                      <td><span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span></td>
-                      <td className="text-[var(--text-muted)]">{o.verifiedBy || "—"}</td>
                       <td className="text-right font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
                       <td className="text-right">
-                        <div className="inline-flex items-center gap-1">
+                        <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
                             <Pencil size={14} />
                           </button>
@@ -558,14 +524,18 @@ export default function RecordsPage() {
           </div>
           <div className="space-y-3 lg:hidden">
             {filteredOrders.map((o) => (
-              <div key={o.id} className="record-card">
+              <button
+                key={o.id}
+                type="button"
+                className="record-card block w-full text-left"
+                onClick={() => setViewOrder(o)}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-display font-bold">{o.productName}</p>
                     <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={recordStatusBadge(o.status)}>{statusLabel(o.status)}</span>
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
                       <Pencil size={14} />
                     </button>
@@ -577,100 +547,11 @@ export default function RecordsPage() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Progress" value={`${o.approvedQuantity} / ${o.targetQuantity} pcs`} />
                   <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
-                  <Field label="Verified By" value={o.verifiedBy || "—"} />
                   {o.color && <Field label="Color" value={o.color} />}
                 </div>
-              </div>
+              </button>
             ))}
             {filteredOrders.length === 0 && (
-              <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Approvals */}
-      {tab === "approvals" && (
-        <>
-          <div className="data-table-wrap hidden lg:block">
-            <div className="overflow-x-auto">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Kaariger</th>
-                    <th>Batch</th>
-                    <th>Progress</th>
-                    <th>Approved By</th>
-                    <th>Date</th>
-                    <th className="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredApprovals.map((a) => (
-                    <tr key={a.id}>
-                      <td className="font-semibold">{a.productName}</td>
-                      <td className="text-[var(--text-muted)]">{a.kaarigerName}</td>
-                      <td>{a.batchQuantity} pcs</td>
-                      <td>{a.approvedTotalAfter}/{a.targetQuantity}</td>
-                      <td>
-                        <p>{a.verifiedByName}</p>
-                        <p className="text-xs text-[var(--text-muted)]">{a.verifiedByPhone}</p>
-                      </td>
-                      <td className="text-[var(--text-muted)]">
-                        {new Date(a.verifiedAt).toLocaleDateString("en-IN", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </td>
-                      <td className="text-right">
-                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteApprovalRecord(a)} aria-label="Delete">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {filteredApprovals.length === 0 && (
-              <p className="py-10 text-center text-sm text-[var(--text-muted)]">No records found.</p>
-            )}
-          </div>
-          <div className="space-y-3 lg:hidden">
-            {filteredApprovals.map((a) => (
-              <div key={a.id} className="record-card">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-display font-bold">{a.productName}</p>
-                    <p className="text-sm text-[var(--text-muted)]">{a.kaarigerName}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-icon !h-8 !w-8 !text-danger"
-                    onClick={() => deleteApprovalRecord(a)}
-                    aria-label="Delete"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <Field label="Batch" value={`${a.batchQuantity} pcs`} />
-                  <Field label="Progress" value={`${a.approvedTotalAfter}/${a.targetQuantity}`} />
-                  <Field label="Approved By" value={a.verifiedByName} />
-                  <Field
-                    label="Date"
-                    value={new Date(a.verifiedAt).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  />
-                </div>
-              </div>
-            ))}
-            {filteredApprovals.length === 0 && (
               <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
             )}
           </div>
@@ -819,6 +700,172 @@ export default function RecordsPage() {
             {filteredReturns.length === 0 && (
               <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
             )}
+          </div>
+        </>
+      )}
+
+      {viewOrder && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setViewOrder(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="surface max-h-[90vh] w-full max-w-2xl space-y-5 overflow-y-auto p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-display text-lg font-bold">{viewOrder.productName}</h3>
+                    <span className={recordStatusBadge(viewOrder.status)}>{statusLabel(viewOrder.status)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-[var(--text-muted)]">
+                    {viewOrder.kaarigerName} · {viewOrder.approvedQuantity}/{viewOrder.targetQuantity} pcs
+                  </p>
+                  {viewOrder.verifiedBy && (
+                    <p className="mt-1 text-xs text-[var(--jade-deep)]">Last verified by {viewOrder.verifiedBy}</p>
+                  )}
+                </div>
+                <button type="button" className="btn-icon shrink-0" onClick={() => setViewOrder(null)} aria-label="Close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="stat-card !p-3">
+                  <p className="stat-card-label">Deal Amount</p>
+                  <p className="stat-card-value !text-xl">
+                    ₹{(viewOrder.originalDealAmount ?? viewOrder.totalDealAmount).toLocaleString("en-IN")}
+                  </p>
+                  {(viewOrder.repairDeductionTotal || 0) > 0 && (
+                    <p className="mt-0.5 text-xs text-danger">
+                      Repair −₹{(viewOrder.repairDeductionTotal || 0).toLocaleString("en-IN")}
+                    </p>
+                  )}
+                </div>
+                <div className="stat-card !p-3">
+                  <p className="stat-card-label">Created</p>
+                  <p className="stat-card-value !text-xl">
+                    {new Date(viewOrder.createdAt).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">by {viewOrder.createdBy}</p>
+                </div>
+              </div>
+
+              {viewOrder.products && viewOrder.products.length > 0 && (
+                <div>
+                  <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                    <ShoppingBag className="h-4 w-4 text-[var(--text-muted)]" />
+                    Products
+                  </h4>
+                  <div className="data-table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Product</th>
+                          <th>Qty</th>
+                          <th>₹/pc</th>
+                          <th className="text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {viewOrder.products.map((p, i) => (
+                          <tr key={i}>
+                            <td className="font-medium">{p.productName}</td>
+                            <td>{p.quantity}</td>
+                            <td>₹{p.pricePerPiece}</td>
+                            <td className="text-right font-semibold">{money(p.lineTotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-jade-soft/50 px-3 py-2 text-sm">
+                    <span className="font-semibold text-jade-deep">Products Total</span>
+                    <span className="font-bold text-jade-deep">{money(viewOrder.productsTotal ?? 0)}</span>
+                  </div>
+                </div>
+              )}
+
+              {viewOrder.materialDeductions && viewOrder.materialDeductions.length > 0 && (
+                <div>
+                  <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                    <Wrench className="h-4 w-4 text-[var(--text-muted)]" />
+                    Runner / Fitting / Astar / Material
+                  </h4>
+                  <div className="data-table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Qty</th>
+                          <th>₹/pc</th>
+                          <th className="text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {viewOrder.materialDeductions.map((it, i) => (
+                          <tr key={i}>
+                            <td className="font-medium">{it.label}</td>
+                            <td>{it.quantity}</td>
+                            <td>₹{it.pricePerPiece}</td>
+                            <td className="text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-[var(--surface-mist)] px-3 py-2 text-sm">
+                    <span className="font-medium text-[var(--text-muted)]">Deductions Total</span>
+                    <span className="font-bold text-danger">−{money(viewOrder.materialDeductionsTotal ?? 0)}</span>
+                  </div>
+                </div>
+              )}
+
+              {(viewOrder.kharchaGiven || 0) > 0 && (
+                <div className="flex items-center justify-between rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm">
+                  <span className="flex items-center gap-1.5 font-medium text-[var(--text-muted)]">
+                    <Package className="h-3.5 w-3.5" />
+                    Kharcha given at creation
+                  </span>
+                  <span className="font-bold">{money(viewOrder.kharchaGiven || 0)}</span>
+                </div>
+              )}
+
+              {viewOrder.notes && (
+                <div>
+                  <h4 className="mb-1 text-sm font-semibold">Notes</h4>
+                  <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-2.5 text-sm text-[var(--text-muted)]">
+                    {viewOrder.notes}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  className="btn btn-secondary flex-1"
+                  onClick={() => {
+                    openOrderEdit(viewOrder);
+                    setViewOrder(null);
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn flex-1 !bg-danger/10 !text-danger hover:!bg-danger/20"
+                  onClick={() => deleteOrderRecord(viewOrder)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </button>
+              </div>
+            </div>
           </div>
         </>
       )}
