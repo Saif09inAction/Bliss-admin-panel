@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import {
+  Download,
   History,
   IndianRupee,
   Package,
@@ -15,7 +16,7 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { downloadCsvRows, nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import type {
   Employee,
   KaarigerOrder,
@@ -235,6 +236,7 @@ export default function HisaabPage() {
     setPayMsg("");
     try {
       const id = uuid();
+      const remarks = payForm.remarks.trim();
       const payment: KaarigerPayment = {
         id,
         orderId: order.id,
@@ -242,10 +244,12 @@ export default function HisaabPage() {
         amount,
         date: todayStr(),
         time: nowTimeStr(),
-        remarks: payForm.remarks || undefined,
         createdBy: session.name,
       };
-      await setDoc(doc(getDb(), "kaariger_payments", id), payment);
+      // Firestore rejects `undefined` field values outright, so only attach
+      // remarks when there's actually something to save — leaving the note
+      // blank must never block recording the kharcha.
+      await setDoc(doc(getDb(), "kaariger_payments", id), remarks ? { ...payment, remarks } : payment);
 
       // Auto-complete the order once fully paid, carrying any overpayment
       // forward as credit that's auto-applied to this kaariger's next bill.
@@ -316,9 +320,114 @@ export default function HisaabPage() {
 
   const historyOrder = completedOrders.find((o) => o.id === historyOrderId) || null;
 
+  function exportStatement() {
+    if (!selectedKaariger) return;
+    const rows: string[][] = [];
+    rows.push([`Hisaab Statement — ${selectedKaariger.name}`]);
+    rows.push([`Phone: ${selectedKaariger.phone}`]);
+    rows.push([`Generated: ${new Date().toLocaleString("en-IN")}`]);
+    if ((selectedKaariger.creditBalance || 0) > 0) {
+      rows.push([`Credit available (auto-applied to next bill): ${money(selectedKaariger.creditBalance || 0)}`]);
+    }
+    rows.push([]);
+
+    rows.push(["ORDERS"]);
+    rows.push(["Product", "Status", "Date", "Progress", "Deal", "Paid", "Balance"]);
+    let allDeal = 0;
+    let allPaid = 0;
+    orders.forEach((o) => {
+      const net = orderNetDeal(o);
+      const paid = orderPaidMap.get(o.id) || 0;
+      const balance = Math.max(0, net - paid);
+      allDeal += net;
+      allPaid += paid;
+      rows.push([
+        o.productName,
+        o.status.replace(/_/g, " "),
+        formatDate(o.createdAt),
+        `${o.approvedQuantity}/${o.targetQuantity} pcs`,
+        String(Math.round(net)),
+        String(Math.round(paid)),
+        String(Math.round(balance)),
+      ]);
+    });
+    rows.push(["", "", "", "TOTAL", String(Math.round(allDeal)), String(Math.round(allPaid)), String(Math.round(Math.max(0, allDeal - allPaid)))]);
+    rows.push([]);
+
+    if (payments.length > 0) {
+      rows.push(["KHARCHA / PAYMENT TIMELINE"]);
+      rows.push(["Date", "Time", "Order", "Amount", "Remarks", "Created By"]);
+      const orderNameById = new Map(orders.map((o) => [o.id, o.productName]));
+      [...payments]
+        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+        .forEach((p) => {
+          rows.push([p.date, p.time, orderNameById.get(p.orderId) || "—", String(Math.round(p.amount)), p.remarks || "", p.createdBy]);
+        });
+      rows.push(["", "", "TOTAL", String(Math.round(payments.reduce((s, p) => s + p.amount, 0))), "", ""]);
+      rows.push([]);
+    }
+
+    if (repairs.length > 0) {
+      rows.push(["REPAIRING DEDUCTIONS"]);
+      rows.push(["Date", "Time", "Order", "Faulty Qty", "Price/pc", "Amount", "Created By", "Notes"]);
+      const orderNameById = new Map(orders.map((o) => [o.id, o.productName]));
+      [...repairs]
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .forEach((r) => {
+          rows.push([
+            formatDate(r.createdAt),
+            formatTime(r.createdAt),
+            orderNameById.get(r.orderId) || "—",
+            String(r.faultyQuantity),
+            String(r.faultyPricePerPiece),
+            String(Math.round(r.totalRepairCost)),
+            r.createdBy,
+            r.notes || "",
+          ]);
+        });
+      rows.push(["", "", "", "", "TOTAL", String(Math.round(repairs.reduce((s, r) => s + r.totalRepairCost, 0))), "", ""]);
+      rows.push([]);
+    }
+
+    const materialMap = new Map<string, { label: string; qty: number; amount: number }>();
+    orders.forEach((o) => {
+      (o.materialDeductions || []).forEach((it) => {
+        const key = it.label.trim().toLowerCase();
+        const existing = materialMap.get(key) || { label: it.label, qty: 0, amount: 0 };
+        existing.qty += it.quantity;
+        existing.amount += it.lineTotal;
+        materialMap.set(key, existing);
+      });
+    });
+    if (materialMap.size > 0) {
+      rows.push(["MATERIAL / RUNNER / FITTING / ASTAR BREAKDOWN"]);
+      rows.push(["Item", "Total Qty", "Total Amount"]);
+      const items = Array.from(materialMap.values()).sort((a, b) => b.amount - a.amount);
+      items.forEach((it) => rows.push([it.label, String(it.qty), String(Math.round(it.amount))]));
+      rows.push(["TOTAL", "", String(Math.round(items.reduce((s, it) => s + it.amount, 0)))]);
+    }
+
+    const safeName = selectedKaariger.name.replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+    downloadCsvRows(`hisaab_${safeName || "kaariger"}.csv`, rows);
+  }
+
   return (
     <div className="space-y-5">
-      <PageToolbar title="Hisaab">
+      <PageToolbar
+        title="Hisaab"
+        actions={
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={exportStatement}
+            disabled={!kaarigerId}
+            title={!kaarigerId ? "Select a kaariger first" : "Export this kaariger's full statement"}
+          >
+            <Download className="h-4 w-4" />
+            Export Excel
+          </button>
+        }
+      >
         <p className="section-sub">Full payment & kharcha history per kaariger</p>
       </PageToolbar>
 
