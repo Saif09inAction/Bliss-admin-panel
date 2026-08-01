@@ -6,6 +6,7 @@ import {
   Download,
   History,
   IndianRupee,
+  MessageCircle,
   Package,
   Plus,
   Receipt,
@@ -17,6 +18,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { downloadCsvRows, nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { exportBillExcel, shareBillWhatsApp } from "@/lib/bill-export";
 import type {
   Employee,
   KaarigerOrder,
@@ -688,12 +690,32 @@ function OrderDetailCard({
             {formatDate(order.createdAt)} · {order.approvedQuantity}/{order.targetQuantity} pcs
           </p>
         </div>
-        {onPay && (
-          <button type="button" className="btn btn-secondary btn-sm whitespace-nowrap" onClick={onPay}>
-            <IndianRupee className="h-3.5 w-3.5" />
-            Pay
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm whitespace-nowrap"
+            onClick={() => exportBillExcel(order, { payments: orderPayments, repairs: orderRepairs })}
+            title="Export this bill to Excel"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Excel
           </button>
-        )}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm whitespace-nowrap"
+            onClick={() => shareBillWhatsApp(order, { payments: orderPayments, repairs: orderRepairs })}
+            title="Share this bill on WhatsApp"
+          >
+            <MessageCircle className="h-3.5 w-3.5" />
+            WhatsApp
+          </button>
+          {onPay && (
+            <button type="button" className="btn btn-secondary btn-sm whitespace-nowrap" onClick={onPay}>
+              <IndianRupee className="h-3.5 w-3.5" />
+              Pay
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2">

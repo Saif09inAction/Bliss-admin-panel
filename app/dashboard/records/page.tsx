@@ -6,8 +6,10 @@ import {
   ArrowDownLeft,
   ClipboardList,
   Download,
+  MessageCircle,
   Package,
   Pencil,
+  Plus,
   ShoppingBag,
   Trash2,
   Truck,
@@ -15,10 +17,38 @@ import {
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { KaarigerOrder, OrderProductLine, PickupRecord, RepairLineItem, ReturnRecord } from "@/lib/types";
+import type {
+  KaarigerOrder,
+  OrderProductLine,
+  PickupRecord,
+  RepairItemType,
+  RepairLineItem,
+  ReturnRecord,
+} from "@/lib/types";
 import { downloadCsv } from "@/lib/csv";
+import { exportBillExcel, shareBillWhatsApp } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+
+const CHARGE_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }[] = [
+  { type: "RUNNER", label: "Runner" },
+  { type: "FITTING", label: "Fitting" },
+  { type: "ASTAR", label: "Astar" },
+];
+
+type ProductLineForm = { productName: string; quantity: string; pricePerPiece: string };
+type ChargeDraft = Record<Exclude<RepairItemType, "MATERIAL">, { qty: string; price: string }>;
+type MaterialLineForm = { name: string; qty: string; price: string };
+
+function emptyProductLine(): ProductLineForm {
+  return { productName: "", quantity: "", pricePerPiece: "" };
+}
+function emptyCharges(): ChargeDraft {
+  return { RUNNER: { qty: "", price: "" }, FITTING: { qty: "", price: "" }, ASTAR: { qty: "", price: "" } };
+}
+function emptyMaterialLine(): MaterialLineForm {
+  return { name: "", qty: "", price: "" };
+}
 
 type Tab = "kaariger" | "pickups" | "returns";
 
@@ -80,15 +110,14 @@ export default function RecordsPage() {
     time: "",
     notes: "",
   });
-  const [orderForm, setOrderForm] = useState({
-    productName: "",
-    targetQuantity: "",
-    approvedQuantity: "",
-    status: "",
-    totalDealAmount: "",
-    kaarigerName: "",
-    notes: "",
-  });
+  const [billProducts, setBillProducts] = useState<ProductLineForm[]>([emptyProductLine()]);
+  const [billCharges, setBillCharges] = useState<ChargeDraft>(emptyCharges());
+  const [billMaterials, setBillMaterials] = useState<MaterialLineForm[]>([emptyMaterialLine()]);
+  const [billNotes, setBillNotes] = useState("");
+  const [billStatus, setBillStatus] = useState("ASSIGNED");
+  const [billKaarigerName, setBillKaarigerName] = useState("");
+  const [billSaving, setBillSaving] = useState(false);
+  const [billMsg, setBillMsg] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -363,51 +392,131 @@ export default function RecordsPage() {
 
   function openOrderEdit(o: KaarigerOrder) {
     setEditOrder(o);
-    setOrderForm({
-      productName: o.productName,
-      targetQuantity: String(o.targetQuantity),
-      approvedQuantity: String(o.approvedQuantity),
-      status: o.status,
-      totalDealAmount: String(o.totalDealAmount || ""),
-      kaarigerName: o.kaarigerName,
-      notes: o.notes || "",
+    setBillMsg("");
+    setBillKaarigerName(o.kaarigerName);
+    setBillNotes(o.notes || "");
+    setBillStatus(o.status || "ASSIGNED");
+
+    if (o.products && o.products.length > 0) {
+      setBillProducts(
+        o.products.map((p) => ({
+          productName: p.productName,
+          quantity: String(p.quantity || ""),
+          pricePerPiece: String(p.pricePerPiece || ""),
+        }))
+      );
+    } else {
+      setBillProducts([
+        {
+          productName: o.productName || "",
+          quantity: String(o.targetQuantity || ""),
+          pricePerPiece: o.pricePerPiece != null ? String(o.pricePerPiece) : "",
+        },
+      ]);
+    }
+
+    const charges = emptyCharges();
+    const materials: MaterialLineForm[] = [];
+    (o.materialDeductions || []).forEach((it) => {
+      if (it.type === "RUNNER" || it.type === "FITTING" || it.type === "ASTAR") {
+        charges[it.type] = {
+          qty: String(it.quantity || ""),
+          price: String(it.pricePerPiece || ""),
+        };
+      } else {
+        materials.push({
+          name: it.label || "",
+          qty: String(it.quantity || ""),
+          price: String(it.pricePerPiece || ""),
+        });
+      }
     });
+    setBillCharges(charges);
+    setBillMaterials(materials.length > 0 ? materials : [emptyMaterialLine()]);
   }
 
   async function saveOrderRecord(e: React.FormEvent) {
     e.preventDefault();
     if (!editOrder) return;
-    await setDoc(
-      doc(getDb(), "kaariger_orders", editOrder.id),
-      {
-        productName: orderForm.productName.trim(),
-        targetQuantity: Number(orderForm.targetQuantity) || 0,
-        approvedQuantity: Number(orderForm.approvedQuantity) || 0,
-        status: orderForm.status,
-        totalDealAmount: Number(orderForm.totalDealAmount) || 0,
-        kaarigerName: orderForm.kaarigerName.trim(),
-        notes: orderForm.notes.trim(),
-      },
-      { merge: true }
-    );
-    setEditOrder(null);
-    // refresh orders list in place
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === editOrder.id
-          ? {
-              ...o,
-              productName: orderForm.productName.trim(),
-              targetQuantity: Number(orderForm.targetQuantity) || 0,
-              approvedQuantity: Number(orderForm.approvedQuantity) || 0,
-              status: orderForm.status,
-              totalDealAmount: Number(orderForm.totalDealAmount) || 0,
-              kaarigerName: orderForm.kaarigerName.trim(),
-              notes: orderForm.notes.trim() || undefined,
-            }
-          : o
-      )
-    );
+    setBillMsg("");
+
+    const products: OrderProductLine[] = billProducts
+      .map((l) => {
+        const quantity = Number(l.quantity) || 0;
+        const pricePerPiece = Number(l.pricePerPiece) || 0;
+        return {
+          productName: l.productName.trim(),
+          quantity,
+          pricePerPiece,
+          lineTotal: quantity * pricePerPiece,
+        };
+      })
+      .filter((p) => p.productName && p.quantity > 0 && p.pricePerPiece > 0);
+
+    if (products.length === 0) {
+      setBillMsg("Add at least one product with name, qty and price.");
+      return;
+    }
+
+    const chargeLines: RepairLineItem[] = CHARGE_ITEMS.map(({ type, label }) => {
+      const qty = Number(billCharges[type].qty) || 0;
+      const price = Number(billCharges[type].price) || 0;
+      return { type, label, quantity: qty, pricePerPiece: price, lineTotal: qty * price };
+    }).filter((it) => it.quantity > 0 && it.pricePerPiece > 0);
+
+    const materialLines: RepairLineItem[] = billMaterials
+      .map((m) => {
+        const qty = Number(m.qty) || 0;
+        const price = Number(m.price) || 0;
+        return {
+          type: "MATERIAL" as RepairItemType,
+          label: m.name.trim() || "Material",
+          quantity: qty,
+          pricePerPiece: price,
+          lineTotal: qty * price,
+        };
+      })
+      .filter((it) => it.label.trim() && it.quantity > 0 && it.pricePerPiece > 0);
+
+    const materialDeductions = [...chargeLines, ...materialLines];
+    const productsTotal = products.reduce((s, p) => s + p.lineTotal, 0);
+    const materialDeductionsTotal = materialDeductions.reduce((s, it) => s + it.lineTotal, 0);
+    const totalDealAmount = Math.max(0, productsTotal - materialDeductionsTotal);
+    const targetQuantity = products.reduce((s, p) => s + p.quantity, 0);
+    const productName = products.map((p) => p.productName).join(", ");
+    const notes = billNotes.trim();
+
+    setBillSaving(true);
+    try {
+      const patch = {
+        productName,
+        targetQuantity,
+        kaarigerName: billKaarigerName.trim() || editOrder.kaarigerName,
+        status: billStatus,
+        notes,
+        products,
+        productsTotal,
+        materialDeductions,
+        materialDeductionsTotal,
+        totalDealAmount,
+        // Keep originalDealAmount in sync when no repairing has been applied yet.
+        ...(editOrder.repairDeductionTotal
+          ? {}
+          : { originalDealAmount: totalDealAmount }),
+        pricingType: "PER_PIECE" as const,
+        pricePerPiece: targetQuantity > 0 ? productsTotal / targetQuantity : 0,
+      };
+      await setDoc(doc(getDb(), "kaariger_orders", editOrder.id), patch, { merge: true });
+
+      const updated: KaarigerOrder = { ...editOrder, ...patch, notes: notes || undefined };
+      setOrders((prev) => prev.map((o) => (o.id === editOrder.id ? updated : o)));
+      setViewOrder((prev) => (prev?.id === editOrder.id ? updated : prev));
+      setEditOrder(null);
+    } catch (err) {
+      setBillMsg(err instanceof Error ? err.message : "Failed to save bill.");
+    } finally {
+      setBillSaving(false);
+    }
   }
 
 
@@ -844,21 +953,37 @@ export default function RecordsPage() {
                 </div>
               )}
 
-              <div className="flex gap-2 pt-1">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
-                  className="btn btn-secondary flex-1"
+                  className="btn btn-secondary"
+                  onClick={() => exportBillExcel(viewOrder)}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export Excel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => shareBillWhatsApp(viewOrder)}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  Share WhatsApp
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
                   onClick={() => {
                     openOrderEdit(viewOrder);
                     setViewOrder(null);
                   }}
                 >
                   <Pencil className="h-3.5 w-3.5" />
-                  Edit
+                  Edit Bill
                 </button>
                 <button
                   type="button"
-                  className="btn flex-1 !bg-danger/10 !text-danger hover:!bg-danger/20"
+                  className="btn !bg-danger/10 !text-danger hover:!bg-danger/20"
                   onClick={() => deleteOrderRecord(viewOrder)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -926,45 +1051,269 @@ export default function RecordsPage() {
         <>
           <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditOrder(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <form onSubmit={saveOrderRecord} className="surface w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
-              <h3 className="font-display text-lg font-bold">Edit order record</h3>
-              <div>
-                <label className="label">Product / SKU</label>
-                <input className="input" value={orderForm.productName} onChange={(e) => setOrderForm({ ...orderForm, productName: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Kaariger name</label>
-                <input className="input" value={orderForm.kaarigerName} onChange={(e) => setOrderForm({ ...orderForm, kaarigerName: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            <form
+              onSubmit={saveOrderRecord}
+              className="surface !overflow-y-auto max-h-[90vh] w-full max-w-2xl space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <label className="label">Target</label>
-                  <input className="input" type="number" value={orderForm.targetQuantity} onChange={(e) => setOrderForm({ ...orderForm, targetQuantity: e.target.value })} />
+                  <h3 className="font-display text-lg font-bold">Edit Bill</h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Same fields as the Kaarigar bill form — products, deductions & notes.
+                  </p>
+                </div>
+                <button type="button" className="btn-icon" onClick={() => setEditOrder(null)} aria-label="Close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="label">Kaariger name</label>
+                  <input
+                    className="input"
+                    value={billKaarigerName}
+                    onChange={(e) => setBillKaarigerName(e.target.value)}
+                  />
                 </div>
                 <div>
-                  <label className="label">Approved</label>
-                  <input className="input" type="number" value={orderForm.approvedQuantity} onChange={(e) => setOrderForm({ ...orderForm, approvedQuantity: e.target.value })} />
+                  <label className="label">Status</label>
+                  <select
+                    className="input"
+                    value={billStatus}
+                    onChange={(e) => setBillStatus(e.target.value)}
+                  >
+                    {["ASSIGNED", "COMPLETED", "CANCELLED"].map((s) => (
+                      <option key={s} value={s}>
+                        {s.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
+
               <div>
-                <label className="label">Status</label>
-                <select className="input" value={orderForm.status} onChange={(e) => setOrderForm({ ...orderForm, status: e.target.value })}>
-                  {["ASSIGNED", "PENDING_APPROVAL", "COMPLETED", "CANCELLED"].map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="label mb-0 flex items-center gap-1.5">
+                    <ShoppingBag className="h-3.5 w-3.5" />
+                    Products *
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setBillProducts((prev) => [...prev, emptyProductLine()])}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add product
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {billProducts.map((line, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[minmax(0,1fr)_5rem_6rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                    >
+                      <div>
+                        <label className="label !text-[10px]">Product</label>
+                        <input
+                          className="input !w-full !py-2"
+                          value={line.productName}
+                          onChange={(e) =>
+                            setBillProducts((prev) =>
+                              prev.map((p, idx) => (idx === i ? { ...p, productName: e.target.value } : p))
+                            )
+                          }
+                          placeholder="Product name"
+                        />
+                      </div>
+                      <div>
+                        <label className="label !text-[10px]">Qty</label>
+                        <input
+                          className="input !w-full !py-2"
+                          type="number"
+                          min={0}
+                          value={line.quantity}
+                          onChange={(e) =>
+                            setBillProducts((prev) =>
+                              prev.map((p, idx) => (idx === i ? { ...p, quantity: e.target.value } : p))
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="label !text-[10px]">₹ / pc</label>
+                        <input
+                          className="input !w-full !py-2"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.pricePerPiece}
+                          onChange={(e) =>
+                            setBillProducts((prev) =>
+                              prev.map((p, idx) => (idx === i ? { ...p, pricePerPiece: e.target.value } : p))
+                            )
+                          }
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm !p-2"
+                        onClick={() => setBillProducts((prev) => prev.filter((_, idx) => idx !== i))}
+                        aria-label="Remove product"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   ))}
-                </select>
+                </div>
               </div>
+
               <div>
-                <label className="label">Deal ₹</label>
-                <input className="input" type="number" value={orderForm.totalDealAmount} onChange={(e) => setOrderForm({ ...orderForm, totalDealAmount: e.target.value })} />
+                <p className="label mb-2 flex items-center gap-1.5">
+                  <Wrench className="h-3.5 w-3.5" />
+                  Runner / Fitting / Astar
+                </p>
+                <div className="space-y-2">
+                  {CHARGE_ITEMS.map(({ type, label }) => (
+                    <div
+                      key={type}
+                      className="grid grid-cols-[minmax(0,1fr)_5rem_6rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                    >
+                      <p className="pb-2 text-sm font-semibold">{label}</p>
+                      <div>
+                        <label className="label !text-[10px]">Qty</label>
+                        <input
+                          className="input !w-full !py-2"
+                          type="number"
+                          min={0}
+                          value={billCharges[type].qty}
+                          onChange={(e) =>
+                            setBillCharges({
+                              ...billCharges,
+                              [type]: { ...billCharges[type], qty: e.target.value },
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="label !text-[10px]">₹ / pc</label>
+                        <input
+                          className="input !w-full !py-2"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={billCharges[type].price}
+                          onChange={(e) =>
+                            setBillCharges({
+                              ...billCharges,
+                              [type]: { ...billCharges[type], price: e.target.value },
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
+
               <div>
-                <label className="label">Notes</label>
-                <input className="input" value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} />
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="label !mb-0 flex items-center gap-1.5">
+                    <Package className="h-3.5 w-3.5" />
+                    Material
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    onClick={() => setBillMaterials((prev) => [...prev, emptyMaterialLine()])}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add material
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {billMaterials.map((m, index) => (
+                    <div
+                      key={index}
+                      className="grid grid-cols-[minmax(0,1fr)_5rem_6rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                    >
+                      <div>
+                        <label className="label !text-[10px]">Name</label>
+                        <input
+                          className="input !w-full !py-2"
+                          value={m.name}
+                          onChange={(e) =>
+                            setBillMaterials((prev) =>
+                              prev.map((line, i) => (i === index ? { ...line, name: e.target.value } : line))
+                            )
+                          }
+                          placeholder="e.g. Vinit"
+                        />
+                      </div>
+                      <div>
+                        <label className="label !text-[10px]">Qty</label>
+                        <input
+                          className="input !w-full !py-2"
+                          type="number"
+                          min={0}
+                          value={m.qty}
+                          onChange={(e) =>
+                            setBillMaterials((prev) =>
+                              prev.map((line, i) => (i === index ? { ...line, qty: e.target.value } : line))
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="label !text-[10px]">₹ / pc</label>
+                        <input
+                          className="input !w-full !py-2"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={m.price}
+                          onChange={(e) =>
+                            setBillMaterials((prev) =>
+                              prev.map((line, i) => (i === index ? { ...line, price: e.target.value } : line))
+                            )
+                          }
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm !p-2"
+                        onClick={() => setBillMaterials((prev) => prev.filter((_, i) => i !== index))}
+                        aria-label="Remove material"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              <div>
+                <label className="label">Notes (optional)</label>
+                <input
+                  className="input"
+                  value={billNotes}
+                  onChange={(e) => setBillNotes(e.target.value)}
+                  placeholder="Optional instructions"
+                />
+              </div>
+
+              {billMsg && (
+                <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{billMsg}</p>
+              )}
+
               <div className="flex gap-2 pt-1">
-                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditOrder(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Save</button>
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditOrder(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={billSaving}>
+                  {billSaving ? "Saving…" : "Save Bill"}
+                </button>
               </div>
             </form>
           </div>
