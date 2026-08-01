@@ -529,7 +529,7 @@ export default function SalaryPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
             <form
               onSubmit={submitPayment}
-              className="surface max-h-[90vh] w-full max-w-md space-y-5 overflow-y-auto p-5 sm:p-6"
+              className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-5 p-5 sm:p-6"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-3">

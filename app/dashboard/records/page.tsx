@@ -709,7 +709,7 @@ export default function RecordsPage() {
           <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setViewOrder(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
-              className="surface max-h-[90vh] w-full max-w-2xl space-y-5 overflow-y-auto p-5"
+              className="surface !overflow-y-auto max-h-[90vh] w-full max-w-2xl space-y-5 p-5"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-3">
@@ -900,7 +900,7 @@ export default function RecordsPage() {
         <>
           <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditReturn(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <form onSubmit={saveReturn} className="surface max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <form onSubmit={saveReturn} className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="font-display text-lg font-bold">Edit return</h3>
               {(["quantity", "partner", "deliveryPartner", "returnType", "staffName", "date", "time", "notes"] as const).map((key) => (
                 <div key={key}>
