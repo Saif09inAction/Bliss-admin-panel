@@ -324,7 +324,7 @@ export default function OrdersPage() {
         <p className="section-sub">Create a new bill for a kaariger</p>
       </PageToolbar>
 
-      <form onSubmit={sendOrder} className="card mx-auto max-w-xl space-y-5">
+      <form onSubmit={sendOrder} className="card mx-auto max-w-4xl space-y-5">
         <div className="flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--jade-soft)]">
             <ClipboardList className="h-4 w-4 text-[var(--jade-deep)]" />
@@ -365,7 +365,7 @@ export default function OrdersPage() {
               const lineTotal = (Number(line.quantity) || 0) * (Number(line.pricePerPiece) || 0);
               return (
                 <div key={i} className="rounded-xl border border-[var(--border)] p-2.5">
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                  <div className="space-y-2 sm:grid sm:grid-cols-[minmax(0,1fr)_6rem_7rem_2.75rem] sm:items-start sm:gap-2 sm:space-y-0">
                     <SearchSelect
                       value={line.productId}
                       onSelect={(id) => {
@@ -376,34 +376,34 @@ export default function OrdersPage() {
                       placeholder="Search catalog product…"
                       emptyText="No products in catalog"
                     />
-                    <button
-                      type="button"
-                      className="btn-icon !h-10 !w-10 shrink-0 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
-                      onClick={() => removeProductLine(i)}
-                      aria-label="Remove product"
-                      title="Remove"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <input
-                      className="input !w-full"
-                      type="number"
-                      min={0}
-                      placeholder="Qty"
-                      value={line.quantity}
-                      onChange={(e) => updateProductLine(i, { quantity: e.target.value })}
-                    />
-                    <input
-                      className="input !w-full"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      placeholder="₹ / pc"
-                      value={line.pricePerPiece}
-                      onChange={(e) => updateProductLine(i, { pricePerPiece: e.target.value })}
-                    />
+                    <div className="grid grid-cols-[1fr_1fr_2.75rem] gap-2 sm:contents">
+                      <input
+                        className="input !w-full"
+                        type="number"
+                        min={0}
+                        placeholder="Qty"
+                        value={line.quantity}
+                        onChange={(e) => updateProductLine(i, { quantity: e.target.value })}
+                      />
+                      <input
+                        className="input !w-full"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        placeholder="₹ / pc"
+                        value={line.pricePerPiece}
+                        onChange={(e) => updateProductLine(i, { pricePerPiece: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="btn-icon !h-10 !w-10 shrink-0 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                        onClick={() => removeProductLine(i)}
+                        aria-label="Remove product"
+                        title="Remove"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                   {lineTotal > 0 && (
                     <p className="mt-1.5 text-right text-xs text-[var(--text-muted)]">
