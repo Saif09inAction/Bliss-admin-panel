@@ -33,6 +33,7 @@ const emptyForm = {
   password: "",
   monthlySalary: "",
   joiningDate: todayStr(),
+  openingBalance: "",
 };
 
 function WorkerAvatar({ name }: { name: string }) {
@@ -75,9 +76,15 @@ export default function WorkersPage() {
           monthlySalary: (data.monthlySalary as number) || 0,
           attendancePercentage: (data.attendancePercentage as number) || 0,
           role: ((data.role as Role) || "STAFF") as Role,
+          creditBalance: (data.creditBalance as number) || 0,
+          openingBalance: (data.openingBalance as number) || 0,
         };
       });
       setEmployees(list.sort((a, b) => a.name.localeCompare(b.name)));
+      setProfileEmployee((prev) => {
+        if (!prev) return prev;
+        return list.find((e) => e.phone === prev.phone) || prev;
+      });
     });
     return () => unsub();
   }, []);
@@ -105,6 +112,12 @@ export default function WorkersPage() {
       password: "",
       monthlySalary: String(employee.monthlySalary || ""),
       joiningDate: employee.joiningDate || todayStr(),
+      openingBalance:
+        employee.role === "KAARIGER" && (employee.openingBalance || 0) > 0
+          ? String(employee.openingBalance)
+          : employee.role === "KAARIGER"
+            ? String(employee.openingBalance || "")
+            : "",
     });
     setError("");
   }
@@ -151,16 +164,23 @@ export default function WorkersPage() {
       const role: Role = formMode === "kaariger" ? "KAARIGER" : existing?.role || "STAFF";
       const existingDoc = existing || employees.find((e) => e.phone === editingPhone);
 
+      const resolvedRole: Role =
+        formMode === "edit" ? existingDoc?.role || "STAFF" : role;
+
       const data: Record<string, unknown> = {
         id: phone,
         name,
         phone,
-        joiningDate: formMode === "kaariger" ? "" : form.joiningDate,
-        monthlySalary: formMode === "kaariger" ? 0 : Number(form.monthlySalary) || 0,
+        joiningDate: resolvedRole === "KAARIGER" ? "" : form.joiningDate,
+        monthlySalary: resolvedRole === "KAARIGER" ? 0 : Number(form.monthlySalary) || 0,
         profilePhotoUrl: "",
         attendancePercentage: existingDoc?.attendancePercentage ?? 0,
-        role: formMode === "edit" ? existingDoc?.role || "STAFF" : role,
+        role: resolvedRole,
       };
+
+      if (resolvedRole === "KAARIGER") {
+        data.openingBalance = Math.max(0, Number(form.openingBalance) || 0);
+      }
 
       if (isNew || password) {
         data.password = password;
@@ -516,6 +536,26 @@ export default function WorkersPage() {
                     />
                   </div>
                 )}
+                {(formMode === "kaariger" ||
+                  (formMode === "edit" &&
+                    editingPhone &&
+                    employees.find((e) => e.phone === editingPhone)?.role === "KAARIGER")) && (
+                  <div className="sm:col-span-2">
+                    <label className="label">Old remaining payment (₹)</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min={0}
+                      value={form.openingBalance}
+                      onChange={(e) => setForm({ ...form, openingBalance: e.target.value })}
+                      placeholder="Amount still owed from before this software"
+                    />
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      Money still pending to this kaariger from before migrating here. Pays down via Pay on
+                      profile / Hisaab.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {error && (
@@ -549,6 +589,7 @@ export default function WorkersPage() {
             setProfileEmployee(null);
             router.push("/dashboard/salary");
           }}
+          onUpdated={(next) => setProfileEmployee(next)}
         />
       )}
     </div>

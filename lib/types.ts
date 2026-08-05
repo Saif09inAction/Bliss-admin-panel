@@ -17,6 +17,11 @@ export interface Employee {
   password?: string;
   /** Overpaid kharcha carried forward from a previous (kaariger) order — auto-applied to their next bill. */
   creditBalance?: number;
+  /**
+   * Old remaining amount owed TO this kaariger when migrating onto the software.
+   * Admin pays this down via Pay; it does not auto-apply like creditBalance.
+   */
+  openingBalance?: number;
 }
 
 export interface RawMaterial {

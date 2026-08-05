@@ -8,6 +8,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import {
@@ -15,12 +16,17 @@ import {
   Calendar,
   ChevronRight,
   Clock,
+  IndianRupee,
   Loader2,
   Phone,
+  Plus,
   User,
+  Wallet,
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
+import { payKaarigerKharcha } from "@/lib/kaariger-pay";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
   computeMonthAttendanceStats,
@@ -51,6 +57,7 @@ interface Props {
   settings?: AttendanceSettings;
   onClose: () => void;
   onPaySalary?: (employee: Employee) => void;
+  onUpdated?: (employee: Employee) => void;
 }
 
 export default function WorkerProfilePanel({
@@ -58,7 +65,9 @@ export default function WorkerProfilePanel({
   settings: settingsProp,
   onClose,
   onPaySalary,
+  onUpdated,
 }: Props) {
+  const { session } = useAuth();
   const { year, month } = currentMonthParts();
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
@@ -68,9 +77,22 @@ export default function WorkerProfilePanel({
   );
   const [loading, setLoading] = useState(true);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [localEmployee, setLocalEmployee] = useState(employee);
+  const [openingDraft, setOpeningDraft] = useState(String(employee.openingBalance || ""));
+  const [openingSaving, setOpeningSaving] = useState(false);
+  const [openingMsg, setOpeningMsg] = useState("");
+  const [showPay, setShowPay] = useState(false);
+  const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
+  const [paySaving, setPaySaving] = useState(false);
+  const [payMsg, setPayMsg] = useState("");
 
   const monthPrefix = monthKey(year, month);
   const { start, end } = monthDateRange(year, month);
+
+  useEffect(() => {
+    setLocalEmployee(employee);
+    setOpeningDraft(String(employee.openingBalance || ""));
+  }, [employee]);
 
   useEffect(() => {
     if (settingsProp) setSettings(settingsProp);
@@ -193,6 +215,61 @@ export default function WorkerProfilePanel({
     [payments, monthPrefix]
   );
 
+  async function saveOpeningBalance(e: React.FormEvent) {
+    e.preventDefault();
+    const amount = Math.max(0, Number(openingDraft) || 0);
+    setOpeningSaving(true);
+    setOpeningMsg("");
+    try {
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), {
+        openingBalance: amount,
+      });
+      const next = { ...localEmployee, openingBalance: amount };
+      setLocalEmployee(next);
+      onUpdated?.(next);
+      setOpeningMsg("Old remaining payment saved.");
+    } catch (err) {
+      setOpeningMsg(err instanceof Error ? err.message : "Failed to save.");
+    } finally {
+      setOpeningSaving(false);
+    }
+  }
+
+  async function submitKaarigerPay(e: React.FormEvent) {
+    e.preventDefault();
+    if (!session) return;
+    const amount = Number(payForm.amount) || 0;
+    if (amount <= 0) return;
+    setPaySaving(true);
+    setPayMsg("");
+    try {
+      const result = await payKaarigerKharcha({
+        kaarigerId: localEmployee.phone,
+        amount,
+        remarks: payForm.remarks.trim() || undefined,
+        createdBy: session.name,
+        openingBalance: localEmployee.openingBalance || 0,
+        creditBalance: localEmployee.creditBalance || 0,
+      });
+      const snap = await getDoc(doc(getDb(), "employees", localEmployee.phone));
+      const data = snap.data() || {};
+      const next: Employee = {
+        ...localEmployee,
+        openingBalance: (data.openingBalance as number) || 0,
+        creditBalance: (data.creditBalance as number) || 0,
+      };
+      setLocalEmployee(next);
+      setOpeningDraft(String(next.openingBalance || ""));
+      onUpdated?.(next);
+      setPayMsg(result.message);
+      setPayForm({ amount: "", remarks: "" });
+    } catch (err) {
+      setPayMsg(err instanceof Error ? err.message : "Failed to record kharcha.");
+    } finally {
+      setPaySaving(false);
+    }
+  }
+
   return (
     <>
       <div
@@ -258,11 +335,67 @@ export default function WorkerProfilePanel({
                       />
                     </>
                   )}
-                  {employee.role === "KAARIGER" && (
+                  {localEmployee.role === "KAARIGER" && (
                     <InfoRow label="Role" value="Kaariger (piece-work)" />
                   )}
                 </div>
               </section>
+
+              {localEmployee.role === "KAARIGER" && (
+                <section>
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <Wallet size={16} className="text-jade-deep" />
+                    Remaining payment
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Old amount still owed from before this software. Pay applies here first, then active
+                    bills; leftover becomes credit/advance.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <StatTile
+                      label="Old remaining"
+                      value={`₹${Math.round(localEmployee.openingBalance || 0).toLocaleString("en-IN")}`}
+                      accent="warn"
+                    />
+                    <StatTile
+                      label="Credit / advance"
+                      value={`₹${Math.round(localEmployee.creditBalance || 0).toLocaleString("en-IN")}`}
+                      accent="jade"
+                    />
+                  </div>
+                  <form onSubmit={saveOpeningBalance} className="mt-3 space-y-2">
+                    <label className="label">Set old remaining (₹)</label>
+                    <div className="flex gap-2">
+                      <input
+                        className="input flex-1"
+                        type="number"
+                        min={0}
+                        value={openingDraft}
+                        onChange={(e) => setOpeningDraft(e.target.value)}
+                        placeholder="e.g. 15000"
+                      />
+                      <button type="submit" className="btn btn-secondary shrink-0" disabled={openingSaving}>
+                        {openingSaving ? "…" : "Save"}
+                      </button>
+                    </div>
+                    {openingMsg && (
+                      <p className="text-xs text-jade-deep">{openingMsg}</p>
+                    )}
+                  </form>
+                  <button
+                    type="button"
+                    className="btn btn-primary mt-3 w-full"
+                    onClick={() => {
+                      setShowPay(true);
+                      setPayForm({ amount: "", remarks: "" });
+                      setPayMsg("");
+                    }}
+                  >
+                    <IndianRupee size={15} />
+                    Pay
+                  </button>
+                </section>
+              )}
 
               {employee.role === "STAFF" && (
                 <section>
@@ -458,6 +591,65 @@ export default function WorkerProfilePanel({
           settings={settings}
           onClose={() => setShowCalendar(false)}
         />
+      )}
+
+      {showPay && localEmployee.role === "KAARIGER" && (
+        <>
+          <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setShowPay(false)} />
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <form
+              onSubmit={submitKaarigerPay}
+              className="surface w-full max-w-sm space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Pay kharcha</h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {localEmployee.name} · old remaining first, then bills
+                  </p>
+                </div>
+                <button type="button" className="btn-icon" onClick={() => setShowPay(false)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div>
+                <label className="label">Amount (₹) *</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  autoFocus
+                  value={payForm.amount}
+                  onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                  placeholder="e.g. 500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Remarks (optional)</label>
+                <input
+                  className="input"
+                  value={payForm.remarks}
+                  onChange={(e) => setPayForm({ ...payForm, remarks: e.target.value })}
+                  placeholder="Optional note"
+                />
+              </div>
+              {payMsg && (
+                <p className="rounded-xl bg-jade-soft px-3 py-2 text-sm text-jade-deep">{payMsg}</p>
+              )}
+              <div className="flex gap-2">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setShowPay(false)}>
+                  Close
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={paySaving}>
+                  <Plus className="h-4 w-4" />
+                  {paySaving ? "Saving…" : "Pay"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
       )}
     </>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import {
   Download,
   History,
@@ -17,8 +17,9 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { downloadCsvRows, nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { downloadCsvRows } from "@/lib/csv";
 import { exportBillExcel, shareBillWhatsApp } from "@/lib/bill-export";
+import { isOpeningPayment, orderNetDeal, payKaarigerKharcha } from "@/lib/kaariger-pay";
 import type {
   Employee,
   KaarigerOrder,
@@ -34,11 +35,6 @@ import SearchSelect from "@/components/admin/SearchSelect";
 
 function money(n: number) {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
-
-function orderNetDeal(order: KaarigerOrder) {
-  const deal = order.originalDealAmount ?? order.totalDealAmount;
-  return Math.max(0, deal - (order.repairDeductionTotal || 0));
 }
 
 function orderStatusBadge(status: string) {
@@ -79,6 +75,8 @@ export default function HisaabPage() {
   const [repairs, setRepairs] = useState<OrderRepair[]>([]);
   const [loading, setLoading] = useState(false);
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
+  /** Unified Pay (opening → bills → credit). When true, ignore payOrderId for allocation. */
+  const [showUnifiedPay, setShowUnifiedPay] = useState(false);
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
@@ -98,6 +96,7 @@ export default function HisaabPage() {
           attendancePercentage: 0,
           role: "KAARIGER" as const,
           creditBalance: (d.data().creditBalance as number) || 0,
+          openingBalance: (d.data().openingBalance as number) || 0,
         }))
         .sort((a, b) => a.name.localeCompare(b.name))
     );
@@ -171,20 +170,22 @@ export default function HisaabPage() {
         .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
       setPayments(loadedPayments);
 
-      // Self-heal the stored credit balance: it should always equal total
-      // fresh kharcha cash minus total net deal across every order for this
-      // kaariger. An older bug could under-credit extra kharcha added to
-      // an order that was already completed, so correct any drift here.
-      // "Credit carried…" entries are excluded — they're a re-recording of
-      // cash counted once already at the order where the credit originated,
-      // not new money, so including them would double-count it.
+      // Self-heal stored credit from order overpayments only.
+      // Opening / old-remaining payments and advance ledger rows are excluded —
+      // they must not inflate or wipe creditBalance.
       const totalDealAll = loadedOrders.reduce((s, o) => s + orderNetDeal(o), 0);
       const totalFreshCashPaid = loadedPayments
-        .filter((p) => p.remarks !== "Credit carried from previous overpaid bill")
+        .filter(
+          (p) =>
+            !isOpeningPayment(p) &&
+            p.remarks !== "Credit carried from previous overpaid bill" &&
+            p.remarks !== "Extra kharcha — carried as credit"
+        )
         .reduce((s, p) => s + p.amount, 0);
       const correctCredit = Math.max(0, totalFreshCashPaid - totalDealAll);
       const storedCredit = kaarigers.find((k) => k.phone === id)?.creditBalance || 0;
-      if (Math.abs(correctCredit - storedCredit) > 0.5) {
+      // Only heal upward (legacy under-credit bug). Never wipe opening/advance credit.
+      if (correctCredit > storedCredit + 0.5) {
         await updateDoc(doc(db, "employees", id), { creditBalance: correctCredit });
         setKaarigers((prev) =>
           prev.map((k) => (k.phone === id ? { ...k, creditBalance: correctCredit } : k))
@@ -238,61 +239,31 @@ export default function HisaabPage() {
 
   async function submitPayment(e: React.FormEvent) {
     e.preventDefault();
-    if (!payOrderId || !session) return;
-    const order = orders.find((o) => o.id === payOrderId);
-    if (!order) return;
-
+    if (!session || !kaarigerId) return;
     const amount = Number(payForm.amount) || 0;
     if (amount <= 0) return;
 
     setPaySaving(true);
     setPayMsg("");
     try {
-      const id = uuid();
-      const remarks = payForm.remarks.trim();
-      const payment: KaarigerPayment = {
-        id,
-        orderId: order.id,
-        kaarigerId: order.kaarigerId,
+      const k = kaarigers.find((x) => x.phone === kaarigerId);
+      if (!k) throw new Error("Kaariger not found.");
+
+      // Always allocate: old remaining → active bills → credit/advance.
+      // Works even when the kaariger has no orders.
+      const result = await payKaarigerKharcha({
+        kaarigerId,
         amount,
-        date: todayStr(),
-        time: nowTimeStr(),
+        remarks: payForm.remarks.trim() || undefined,
         createdBy: session.name,
-      };
-      // Firestore rejects `undefined` field values outright, so only attach
-      // remarks when there's actually something to save — leaving the note
-      // blank must never block recording the kharcha.
-      await setDoc(doc(getDb(), "kaariger_payments", id), remarks ? { ...payment, remarks } : payment);
-
-      // Auto-complete the order once fully paid, carrying any overpayment
-      // forward as credit that's auto-applied to this kaariger's next bill.
-      // If the order was ALREADY completed, every rupee of this new kharcha
-      // is pure overpayment — the whole amount becomes credit, not just the
-      // excess past a threshold (that bug was under-crediting kaarigers).
-      let excess = 0;
-      if (order.status !== "COMPLETED") {
-        const netDeal = orderNetDeal(order);
-        const totalPaidBefore = payments.filter((p) => p.orderId === order.id).reduce((s, p) => s + p.amount, 0);
-        const totalPaidAfter = totalPaidBefore + amount;
-        if (totalPaidAfter >= netDeal) {
-          excess = totalPaidAfter - netDeal;
-          await updateDoc(doc(getDb(), "kaariger_orders", order.id), { status: "COMPLETED" });
-        }
-      } else {
-        excess = amount;
-      }
-
-      if (excess > 0) {
-        const currentCredit = kaarigers.find((k) => k.phone === order.kaarigerId)?.creditBalance || 0;
-        await updateDoc(doc(getDb(), "employees", order.kaarigerId), {
-          creditBalance: currentCredit + excess,
-        });
-        setPayMsg(`${money(excess)} extra kharcha carried forward as credit.`);
-      } else {
-        setPayMsg("Kharcha recorded.");
-      }
-
+        openingBalance: k.openingBalance || 0,
+        creditBalance: k.creditBalance || 0,
+        orders,
+        payments,
+      });
+      setPayMsg(result.message);
       setPayForm({ amount: "", remarks: "" });
+      setShowUnifiedPay(false);
       setPayOrderId(null);
       await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
     } catch (err) {
@@ -325,6 +296,9 @@ export default function HisaabPage() {
     return { deal, paid, balance };
   }, [activeOrders, orderPaidMap]);
 
+  const totalRemaining =
+    activeTotals.balance + Math.max(0, selectedKaariger?.openingBalance || 0);
+
   const previousHisaabOptions = completedOrders.map((o) => ({
     id: o.id,
     label: o.productName,
@@ -341,6 +315,9 @@ export default function HisaabPage() {
     rows.push([`Generated: ${new Date().toLocaleString("en-IN")}`]);
     if ((selectedKaariger.creditBalance || 0) > 0) {
       rows.push([`Credit available (auto-applied to next bill): ${money(selectedKaariger.creditBalance || 0)}`]);
+    }
+    if ((selectedKaariger.openingBalance || 0) > 0) {
+      rows.push([`Old remaining payment: ${money(selectedKaariger.openingBalance || 0)}`]);
     }
     rows.push([]);
 
@@ -501,6 +478,16 @@ export default function HisaabPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {(selectedKaariger?.openingBalance || 0) > 0 && (
+                <div className="rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 text-right">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                    Old remaining
+                  </p>
+                  <p className="font-display text-base font-bold text-amber-900">
+                    {money(selectedKaariger?.openingBalance || 0)}
+                  </p>
+                </div>
+              )}
               {(selectedKaariger?.creditBalance || 0) > 0 && (
                 <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">Credit available</p>
@@ -509,30 +496,34 @@ export default function HisaabPage() {
                   </p>
                 </div>
               )}
-              {orders.length > 0 && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm whitespace-nowrap"
-                  onClick={() => {
-                    // Prefer an active bill that still has balance; otherwise the
-                    // newest order (extra kharcha on a settled bill becomes credit).
-                    const withBalance = activeOrders.find((o) => {
-                      const paid = orderPaidMap.get(o.id) || 0;
-                      return orderNetDeal(o) - paid > 0.5;
-                    });
-                    const target = withBalance || activeOrders[0] || completedOrders[0];
-                    if (!target) return;
-                    setPayOrderId(target.id);
-                    setPayForm({ amount: "", remarks: "" });
-                    setPayMsg("");
-                  }}
-                >
-                  <IndianRupee className="h-3.5 w-3.5" />
-                  Pay
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn btn-primary btn-sm whitespace-nowrap"
+                onClick={() => {
+                  setShowUnifiedPay(true);
+                  setPayOrderId(null);
+                  setPayForm({ amount: "", remarks: "" });
+                  setPayMsg("");
+                }}
+              >
+                <IndianRupee className="h-3.5 w-3.5" />
+                Pay
+              </button>
             </div>
           </div>
+
+          {(selectedKaariger?.openingBalance || 0) > 0 && (
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
+                <Wallet size={16} />
+              </div>
+              <p className="text-sm text-amber-950">
+                <strong>{selectedKaariger?.name}</strong> has{" "}
+                <strong>{money(selectedKaariger?.openingBalance || 0)}</strong> old remaining from before
+                this software. Pay applies here first, then to active bills.
+              </p>
+            </div>
+          )}
 
           {(selectedKaariger?.creditBalance || 0) > 0 && (
             <div className="flex items-start gap-3 rounded-2xl border border-jade/30 bg-jade-soft/50 p-4">
@@ -552,7 +543,9 @@ export default function HisaabPage() {
             <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
               {completedOrders.length > 0
                 ? "No active orders — everything is fully settled. Use \u201cSee previous hisaab\u201d above to review past orders."
-                : "No orders for this kaariger yet."}
+                : (selectedKaariger?.openingBalance || 0) > 0
+                  ? "No orders yet — use Pay to clear old remaining payment."
+                  : "No orders for this kaariger yet. You can still Pay — amount goes as credit/advance."}
             </div>
           ) : (
             <>
@@ -566,8 +559,8 @@ export default function HisaabPage() {
                   <p className="stat-card-value text-jade-deep">{money(activeTotals.paid)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Active Balance</p>
-                  <p className="stat-card-value">{money(activeTotals.balance)}</p>
+                  <p className="stat-card-label">Remaining payment</p>
+                  <p className="stat-card-value">{money(totalRemaining)}</p>
                 </div>
               </div>
 
@@ -579,6 +572,7 @@ export default function HisaabPage() {
                     payments={payments}
                     repairs={repairs}
                     onPay={() => {
+                      setShowUnifiedPay(true);
                       setPayOrderId(o.id);
                       setPayForm({ amount: "", remarks: "" });
                       setPayMsg("");
@@ -619,9 +613,15 @@ export default function HisaabPage() {
         </>
       )}
 
-      {payOrderId && (
+      {(showUnifiedPay || payOrderId) && (
         <>
-          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setPayOrderId(null)} />
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            onClick={() => {
+              setShowUnifiedPay(false);
+              setPayOrderId(null);
+            }}
+          />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form
               onSubmit={submitPayment}
@@ -632,10 +632,17 @@ export default function HisaabPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold">Add Kharcha</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    {orders.find((o) => o.id === payOrderId)?.productName}
+                    Applied to old remaining first, then active bills; leftover becomes credit.
                   </p>
                 </div>
-                <button type="button" className="btn-icon" onClick={() => setPayOrderId(null)}>
+                <button
+                  type="button"
+                  className="btn-icon"
+                  onClick={() => {
+                    setShowUnifiedPay(false);
+                    setPayOrderId(null);
+                  }}
+                >
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -668,7 +675,10 @@ export default function HisaabPage() {
                 <button
                   type="button"
                   className="btn btn-secondary flex-1"
-                  onClick={() => setPayOrderId(null)}
+                  onClick={() => {
+                    setShowUnifiedPay(false);
+                    setPayOrderId(null);
+                  }}
                 >
                   Cancel
                 </button>
