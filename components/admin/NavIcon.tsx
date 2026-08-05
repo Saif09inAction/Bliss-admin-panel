@@ -14,6 +14,7 @@ import {
   Shield,
   BookOpen,
   Receipt,
+  FileSpreadsheet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ const ICONS: Record<string, LucideIcon> = {
   admins: Shield,
   catalog: BookOpen,
   hisaab: Receipt,
+  billreport: FileSpreadsheet,
 };
 
 export default function NavIcon({

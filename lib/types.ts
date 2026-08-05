@@ -232,3 +232,43 @@ export interface ReturnRecord {
   time: string;
   notes?: string;
 }
+
+/** Client's business entity that buys from suppliers (Bill Report). */
+export type BillOwner = "CLARIS" | "BLISS";
+
+/** Supplier / company profile under Claris or Bliss. */
+export interface BillCompany {
+  id: string;
+  name: string;
+  owner: BillOwner;
+  /** Starting amount still owed to this supplier (optional). */
+  openingBalance: number;
+  notes?: string;
+  createdAt: number;
+  createdBy: string;
+  updatedAt?: number;
+}
+
+/**
+ * Ledger line for a supplier.
+ * EXTRA_BILL increases remaining (money owed).
+ * TRANSFER decreases remaining (payment sent).
+ */
+export type BillEntryType = "EXTRA_BILL" | "TRANSFER";
+
+export interface BillEntry {
+  id: string;
+  companyId: string;
+  owner: BillOwner;
+  type: BillEntryType;
+  amount: number;
+  date: string;
+  time: string;
+  /** Google Drive (or any) link to the bill PDF. */
+  driveLink?: string;
+  remarks?: string;
+  /** For transfers — marked done when money left the bank. */
+  transferDone?: boolean;
+  createdAt: number;
+  createdBy: string;
+}

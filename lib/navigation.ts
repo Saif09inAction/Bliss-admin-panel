@@ -65,6 +65,14 @@ export const SIDEBAR_NAV: NavRoute[] = [
     group: "finance",
   },
   {
+    href: "/dashboard/bill-report",
+    label: "Bill Report",
+    title: "Bill Report",
+    subtitle: "Claris & Bliss supplier bills",
+    icon: "billreport",
+    group: "finance",
+  },
+  {
     href: "/dashboard/repairing",
     label: "Repairing",
     title: "Repairing",
@@ -212,6 +220,12 @@ export const ADMIN_MODULES = [
     description: "Per-kaariger payment history",
     href: "/dashboard/hisaab",
     icon: "hisaab",
+  },
+  {
+    title: "Bill Report",
+    description: "Claris & Bliss supplier bills",
+    href: "/dashboard/bill-report",
+    icon: "billreport",
   },
   {
     title: "Repairing",
