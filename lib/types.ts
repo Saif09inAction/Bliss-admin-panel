@@ -133,6 +133,9 @@ export interface RepairLineItem {
   lineTotal: number;
 }
 
+/** Staff-submitted repairs start as PENDING; only APPROVED ones deduct from Hisaab. */
+export type RepairStatus = "PENDING" | "APPROVED" | "REJECTED";
+
 export interface OrderRepair {
   id: string;
   orderId: string;
@@ -149,6 +152,10 @@ export interface OrderRepair {
   notes?: string;
   createdBy: string;
   createdAt: number;
+  /** Missing status on older docs is treated as APPROVED (already deducted). */
+  status?: RepairStatus;
+  reviewedBy?: string;
+  reviewedAt?: number;
 }
 
 export interface AttendanceSettings {

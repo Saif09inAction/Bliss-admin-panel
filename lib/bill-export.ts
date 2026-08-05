@@ -26,7 +26,9 @@ export function buildBillText(order: KaarigerOrder, extras: BillExportExtras = {
   const lines: string[] = [];
   const net = orderNetDeal(order);
   const payments = (extras.payments || []).filter((p) => p.orderId === order.id);
-  const repairs = (extras.repairs || []).filter((r) => r.orderId === order.id);
+  const repairs = (extras.repairs || []).filter(
+    (r) => r.orderId === order.id && (!r.status || r.status === "APPROVED")
+  );
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   const balance = Math.max(0, net - paid);
 
@@ -99,7 +101,9 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
   const rows: string[][] = [];
   const net = orderNetDeal(order);
   const payments = (extras.payments || []).filter((p) => p.orderId === order.id);
-  const repairs = (extras.repairs || []).filter((r) => r.orderId === order.id);
+  const repairs = (extras.repairs || []).filter(
+    (r) => r.orderId === order.id && (!r.status || r.status === "APPROVED")
+  );
   const paid = payments.reduce((s, p) => s + p.amount, 0);
 
   rows.push(["Bliss Bombay — Kaarigar Bill"]);

@@ -27,6 +27,7 @@ import type {
   OrderProductLine,
   OrderRepair,
   RepairLineItem,
+  RepairStatus,
 } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
@@ -62,6 +63,11 @@ function formatDate(ts: number) {
 
 function formatTime(ts: number) {
   return ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+}
+
+/** Older repair docs without status were already deducted. */
+function isApprovedRepair(r: OrderRepair) {
+  return !r.status || r.status === "APPROVED";
 }
 
 export default function HisaabPage() {
@@ -211,6 +217,11 @@ export default function HisaabPage() {
               notes: data.notes as string | undefined,
               createdBy: (data.createdBy as string) || "",
               createdAt: (data.createdAt as number) || 0,
+              status: (["PENDING", "APPROVED", "REJECTED"].includes(data.status as string)
+                ? (data.status as RepairStatus)
+                : undefined),
+              reviewedBy: data.reviewedBy as string | undefined,
+              reviewedAt: data.reviewedAt as number | undefined,
             } satisfies OrderRepair;
           })
           .sort((a, b) => b.createdAt - a.createdAt)
@@ -373,7 +384,8 @@ export default function HisaabPage() {
       rows.push(["REPAIRING DEDUCTIONS"]);
       rows.push(["Date", "Time", "Order", "Faulty Qty", "Price/pc", "Amount", "Created By", "Notes"]);
       const orderNameById = new Map(orders.map((o) => [o.id, o.productName]));
-      [...repairs]
+      const approvedRepairs = repairs.filter(isApprovedRepair);
+      [...approvedRepairs]
         .sort((a, b) => a.createdAt - b.createdAt)
         .forEach((r) => {
           rows.push([
@@ -387,7 +399,7 @@ export default function HisaabPage() {
             r.notes || "",
           ]);
         });
-      rows.push(["", "", "", "", "TOTAL", String(Math.round(repairs.reduce((s, r) => s + r.totalRepairCost, 0))), "", ""]);
+      rows.push(["", "", "", "", "TOTAL", String(Math.round(approvedRepairs.reduce((s, r) => s + r.totalRepairCost, 0))), "", ""]);
       rows.push([]);
     }
 
@@ -690,7 +702,7 @@ function OrderDetailCard({
   const orderPayments = payments
     .filter((p) => p.orderId === order.id)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  const orderRepairs = repairs.filter((r) => r.orderId === order.id);
+  const orderRepairs = repairs.filter((r) => r.orderId === order.id && isApprovedRepair(r));
 
   const net = orderNetDeal(order);
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
