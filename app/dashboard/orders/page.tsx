@@ -23,7 +23,7 @@ import type {
   RepairItemType,
   RepairLineItem,
 } from "@/lib/types";
-import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
@@ -67,9 +67,7 @@ function emptyMaterialLine(): MaterialLineForm {
   return { materialId: "", name: "", qty: "", price: "" };
 }
 
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
+const money = formatRupee;
 
 export default function OrdersPage() {
   const { session } = useAuth();
@@ -441,7 +439,8 @@ export default function OrdersPage() {
                         className="input !w-full"
                         type="number"
                         min={0}
-                        step="0.01"
+                        step="any"
+                        inputMode="decimal"
                         placeholder="₹ / pc"
                         value={line.pricePerPiece}
                         onChange={(e) => updateProductLine(i, { pricePerPiece: e.target.value })}
@@ -512,7 +511,8 @@ export default function OrdersPage() {
                     className="input !w-full !py-2"
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="any"
+                    inputMode="decimal"
                     value={deductions[type].price}
                     onChange={(e) =>
                       setDeductions({ ...deductions, [type]: { ...deductions[type], price: e.target.value } })
@@ -605,7 +605,8 @@ export default function OrdersPage() {
                     className="input !w-full !py-2"
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="any"
+                    inputMode="decimal"
                     value={m.price}
                     onChange={(e) => updateMaterialLine(index, { price: e.target.value })}
                     placeholder="0"
@@ -641,6 +642,8 @@ export default function OrdersPage() {
             className="input"
             type="number"
             min={0}
+            step="any"
+            inputMode="decimal"
             value={kharcha}
             onChange={(e) => setKharcha(e.target.value)}
             placeholder="0"

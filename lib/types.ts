@@ -18,8 +18,8 @@ export interface Employee {
   /** Overpaid kharcha carried forward from a previous (kaariger) order — auto-applied to their next bill. */
   creditBalance?: number;
   /**
-   * Old remaining amount owed TO this kaariger when migrating onto the software.
-   * Admin pays this down via Pay; it does not auto-apply like creditBalance.
+   * Opening balance owed TO this kaariger (editable on profile).
+   * Hisaab remaining = openingBalance + unpaid bill balances − creditBalance.
    */
   openingBalance?: number;
 }

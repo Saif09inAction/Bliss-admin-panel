@@ -12,6 +12,11 @@ function orderNetDeal(order: KaarigerOrder) {
   return Math.max(0, deal - (order.repairDeductionTotal || 0));
 }
 
+/** Keep paisa in Excel exports (up to 2 dp). */
+function amt(n: number) {
+  return String(Math.round((Number(n) || 0) * 100) / 100);
+}
+
 export type BillExportExtras = {
   payments?: KaarigerPayment[];
   repairs?: OrderRepair[];
@@ -39,9 +44,9 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
     rows.push(["PRODUCTS"]);
     rows.push(["Product", "Qty", "₹/pc", "Total"]);
     order.products.forEach((p) => {
-      rows.push([p.productName, String(p.quantity), String(p.pricePerPiece), String(Math.round(p.lineTotal))]);
+      rows.push([p.productName, String(p.quantity), String(p.pricePerPiece), amt(p.lineTotal)]);
     });
-    rows.push(["Products Total", "", "", String(Math.round(order.productsTotal ?? 0))]);
+    rows.push(["Products Total", "", "", amt(order.productsTotal ?? 0)]);
     rows.push([]);
   }
 
@@ -49,9 +54,9 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
     rows.push(["DEDUCTIONS (Runner / Fitting / Astar / Material)"]);
     rows.push(["Item", "Qty", "₹/pc", "Total"]);
     order.materialDeductions.forEach((it) => {
-      rows.push([it.label, String(it.quantity), String(it.pricePerPiece), String(-Math.round(it.lineTotal))]);
+      rows.push([it.label, String(it.quantity), String(it.pricePerPiece), amt(-it.lineTotal)]);
     });
-    rows.push(["Deductions Total", "", "", String(-Math.round(order.materialDeductionsTotal ?? 0))]);
+    rows.push(["Deductions Total", "", "", amt(-(order.materialDeductionsTotal ?? 0))]);
     rows.push([]);
   }
 
@@ -63,17 +68,17 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
         formatDate(r.createdAt),
         String(r.faultyQuantity),
         String(r.faultyPricePerPiece),
-        String(-Math.round(r.totalRepairCost)),
+        amt(-r.totalRepairCost),
         r.createdBy,
         r.notes || "",
       ]);
     });
-    rows.push(["Repair Total", "", "", String(-Math.round(order.repairDeductionTotal || 0)), "", ""]);
+    rows.push(["Repair Total", "", "", amt(-(order.repairDeductionTotal || 0)), "", ""]);
     rows.push([]);
   }
 
   if ((order.kharchaGiven || 0) > 0) {
-    rows.push(["Kharcha given at creation", String(Math.round(order.kharchaGiven || 0))]);
+    rows.push(["Kharcha given at creation", amt(order.kharchaGiven || 0)]);
     rows.push([]);
   }
 
@@ -81,16 +86,16 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
     rows.push(["KHARCHA TIMELINE"]);
     rows.push(["Date", "Time", "Amount", "Remarks", "Created By"]);
     payments.forEach((p) => {
-      rows.push([p.date, p.time, String(Math.round(p.amount)), p.remarks || "", p.createdBy]);
+      rows.push([p.date, p.time, amt(p.amount), p.remarks || "", p.createdBy]);
     });
-    rows.push(["Total", "", String(Math.round(paid)), "", ""]);
+    rows.push(["Total", "", amt(paid), "", ""]);
     rows.push([]);
   }
 
   rows.push(["SUMMARY"]);
-  rows.push(["Deal", String(Math.round(net))]);
-  rows.push(["Paid", String(Math.round(paid))]);
-  rows.push(["Balance", String(Math.round(Math.max(0, net - paid)))]);
+  rows.push(["Deal", amt(net)]);
+  rows.push(["Paid", amt(paid)]);
+  rows.push(["Balance", amt(Math.max(0, net - paid))]);
   if (order.notes?.trim()) {
     rows.push([]);
     rows.push(["Notes", order.notes.trim()]);
@@ -100,7 +105,13 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
   downloadCsvRows(`bill_${safe || order.id}.csv`, rows);
 }
 
-/** Share bill as a professional PNG image (Web Share → WhatsApp, or download). */
+/**
+ * Share bill as PNG via Web Share API when possible; otherwise download the image
+ * for the admin to attach in WhatsApp.
+ *
+ * Prefer opening BillWhatsAppModal from the UI — it generates the image once,
+ * previews it, and never uploads to Firestore/Storage.
+ */
 export async function shareBillWhatsApp(
   order: KaarigerOrder,
   extras: BillExportExtras = {}

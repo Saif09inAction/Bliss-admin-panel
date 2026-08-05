@@ -541,18 +541,20 @@ export default function WorkersPage() {
                     editingPhone &&
                     employees.find((e) => e.phone === editingPhone)?.role === "KAARIGER")) && (
                   <div className="sm:col-span-2">
-                    <label className="label">Old remaining payment (₹)</label>
+                    <label className="label">Opening balance (₹)</label>
                     <input
                       className="input"
                       type="number"
                       min={0}
+                      step="any"
+                      inputMode="decimal"
                       value={form.openingBalance}
                       onChange={(e) => setForm({ ...form, openingBalance: e.target.value })}
-                      placeholder="Amount still owed from before this software"
+                      placeholder="e.g. 1000 — carried into Hisaab remaining"
                     />
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      Money still pending to this kaariger from before migrating here. Pays down via Pay on
-                      profile / Hisaab.
+                      Hisaab remaining = opening + unpaid bills − credit. Extra pay becomes credit for the next
+                      bill.
                     </p>
                   </div>
                 )}

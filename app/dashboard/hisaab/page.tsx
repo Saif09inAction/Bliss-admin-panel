@@ -17,8 +17,8 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { downloadCsvRows } from "@/lib/csv";
-import { exportBillExcel, shareBillWhatsApp } from "@/lib/bill-export";
+import { downloadCsvRows, formatRupee } from "@/lib/csv";
+import { exportBillExcel } from "@/lib/bill-export";
 import { isOpeningPayment, orderNetDeal, payKaarigerKharcha } from "@/lib/kaariger-pay";
 import type {
   Employee,
@@ -32,10 +32,9 @@ import type {
 } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
+import BillWhatsAppModal from "@/components/BillWhatsAppModal";
 
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
+const money = formatRupee;
 
 function orderStatusBadge(status: string) {
   switch (status) {
@@ -296,8 +295,12 @@ export default function HisaabPage() {
     return { deal, paid, balance };
   }, [activeOrders, orderPaidMap]);
 
-  const totalRemaining =
-    activeTotals.balance + Math.max(0, selectedKaariger?.openingBalance || 0);
+  // Remaining = opening balance + unpaid bills − credit (credit reduces what is still owed).
+  const openingBal = Math.max(0, selectedKaariger?.openingBalance || 0);
+  const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
+  const grossOwed = openingBal + activeTotals.balance;
+  const totalRemaining = Math.max(0, grossOwed - creditBal);
+  const surplusCredit = Math.max(0, creditBal - grossOwed);
 
   const previousHisaabOptions = completedOrders.map((o) => ({
     id: o.id,
@@ -313,11 +316,16 @@ export default function HisaabPage() {
     rows.push([`Hisaab Statement — ${selectedKaariger.name}`]);
     rows.push([`Phone: ${selectedKaariger.phone}`]);
     rows.push([`Generated: ${new Date().toLocaleString("en-IN")}`]);
-    if ((selectedKaariger.creditBalance || 0) > 0) {
-      rows.push([`Credit available (auto-applied to next bill): ${money(selectedKaariger.creditBalance || 0)}`]);
-    }
-    if ((selectedKaariger.openingBalance || 0) > 0) {
-      rows.push([`Old remaining payment: ${money(selectedKaariger.openingBalance || 0)}`]);
+    if (grossOwed > 0 || creditBal > 0) {
+      rows.push([
+        `Remaining balance (opening + bills − credit): ${money(totalRemaining)}`,
+      ]);
+      if (openingBal > 0) rows.push([`  Opening balance: ${money(openingBal)}`]);
+      if (activeTotals.balance > 0) rows.push([`  Unpaid bills: ${money(activeTotals.balance)}`]);
+      if (creditBal > 0) rows.push([`  Credit applied to remaining: ${money(Math.min(creditBal, grossOwed))}`]);
+      if (surplusCredit > 0) {
+        rows.push([`Credit left for next bill: ${money(surplusCredit)}`]);
+      }
     }
     rows.push([]);
 
@@ -478,21 +486,23 @@ export default function HisaabPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {(selectedKaariger?.openingBalance || 0) > 0 && (
+              {totalRemaining > 0 && (
                 <div className="rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 text-right">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                    Old remaining
+                    Remaining balance
                   </p>
                   <p className="font-display text-base font-bold text-amber-900">
-                    {money(selectedKaariger?.openingBalance || 0)}
+                    {money(totalRemaining)}
                   </p>
                 </div>
               )}
-              {(selectedKaariger?.creditBalance || 0) > 0 && (
+              {totalRemaining <= 0 && surplusCredit > 0 && (
                 <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">Credit available</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
+                    Credit (next bill)
+                  </p>
                   <p className="font-display text-base font-bold text-jade-deep">
-                    {money(selectedKaariger?.creditBalance || 0)}
+                    {money(surplusCredit)}
                   </p>
                 </div>
               )}
@@ -512,40 +522,45 @@ export default function HisaabPage() {
             </div>
           </div>
 
-          {(selectedKaariger?.openingBalance || 0) > 0 && (
-            <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
-                <Wallet size={16} />
-              </div>
-              <p className="text-sm text-amber-950">
-                <strong>{selectedKaariger?.name}</strong> has{" "}
-                <strong>{money(selectedKaariger?.openingBalance || 0)}</strong> old remaining from before
-                this software. Pay applies here first, then to active bills.
-              </p>
-            </div>
-          )}
-
-          {(selectedKaariger?.creditBalance || 0) > 0 && (
+          {totalRemaining <= 0 && surplusCredit > 0 && (
             <div className="flex items-start gap-3 rounded-2xl border border-jade/30 bg-jade-soft/50 p-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
                 <Wallet size={16} />
               </div>
               <p className="text-sm text-jade-deep">
-                <strong>{selectedKaariger?.name}</strong> has been paid{" "}
-                <strong>{money(selectedKaariger?.creditBalance || 0)}</strong> extra on a previous bill. This
-                will be automatically deducted (adjusted) from their next hisaab when a new bill is created — no
-                action needed.
+                Nothing pending to pay. <strong>{money(surplusCredit)}</strong> credit will adjust on the next
+                bill automatically.
               </p>
             </div>
           )}
 
           {activeOrders.length === 0 ? (
-            <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-              {completedOrders.length > 0
-                ? "No active orders — everything is fully settled. Use \u201cSee previous hisaab\u201d above to review past orders."
-                : (selectedKaariger?.openingBalance || 0) > 0
-                  ? "No orders yet — use Pay to clear old remaining payment."
-                  : "No orders for this kaariger yet. You can still Pay — amount goes as credit/advance."}
+            <div className="space-y-4">
+              {totalRemaining > 0 && (
+                <div className="grid gap-3 sm:grid-cols-1">
+                  <div className="stat-card">
+                    <p className="stat-card-label">Remaining balance</p>
+                    <p className="stat-card-value">{money(totalRemaining)}</p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      Opening balance
+                      {creditBal > 0 ? " after credit" : ""}
+                      {openingBal > 0 && creditBal > 0
+                        ? ` (${money(openingBal)} − ${money(Math.min(creditBal, openingBal))})`
+                        : ""}
+                      . Use Pay to clear; extra becomes credit.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+                {completedOrders.length > 0
+                  ? "No active orders — bill hisaab is settled. Use \u201cSee previous hisaab\u201d above for past orders."
+                  : totalRemaining > 0
+                    ? "No active bills — remaining is from opening balance on the profile."
+                    : surplusCredit > 0
+                      ? "Nothing pending. Credit will apply on the next bill."
+                      : "No orders yet. Set opening balance on the profile if needed, or Pay to add credit."}
+              </div>
             </div>
           ) : (
             <>
@@ -555,12 +570,18 @@ export default function HisaabPage() {
                   <p className="stat-card-value">{money(activeTotals.deal)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Active Kharcha Paid</p>
+                  <p className="stat-card-label">Kharcha Paid</p>
                   <p className="stat-card-value text-jade-deep">{money(activeTotals.paid)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Remaining payment</p>
+                  <p className="stat-card-label">Remaining balance</p>
                   <p className="stat-card-value">{money(totalRemaining)}</p>
+                  <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+                    Opening
+                    {openingBal > 0 ? ` ${money(openingBal)}` : " ₹0"} + bills{" "}
+                    {money(activeTotals.balance)}
+                    {creditBal > 0 ? ` − credit ${money(Math.min(creditBal, grossOwed))}` : ""}
+                  </p>
                 </div>
               </div>
 
@@ -632,7 +653,7 @@ export default function HisaabPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold">Add Kharcha</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Applied to old remaining first, then active bills; leftover becomes credit.
+                    Pays remaining balance first; leftover becomes credit for the next bill.
                   </p>
                 </div>
                 <button
@@ -652,10 +673,12 @@ export default function HisaabPage() {
                   className="input"
                   type="number"
                   min={0}
+                  step="any"
+                  inputMode="decimal"
                   autoFocus
                   value={payForm.amount}
                   onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
-                  placeholder="e.g. 500"
+                  placeholder="e.g. 500 or 125.5"
                   required
                 />
               </div>
@@ -709,8 +732,7 @@ function OrderDetailCard({
   repairs: OrderRepair[];
   onPay?: () => void;
 }) {
-  const [sharing, setSharing] = useState(false);
-  const [shareMsg, setShareMsg] = useState("");
+  const [showWhatsApp, setShowWhatsApp] = useState(false);
   const orderPayments = payments
     .filter((p) => p.orderId === order.id)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
@@ -720,22 +742,6 @@ function OrderDetailCard({
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
   const balance = Math.max(0, net - paid);
   const isCompleted = order.status === "COMPLETED" || balance <= 0;
-
-  async function handleWhatsAppShare() {
-    setSharing(true);
-    setShareMsg("");
-    try {
-      const result = await shareBillWhatsApp(order, {
-        payments: orderPayments,
-        repairs: orderRepairs,
-      });
-      setShareMsg(result.message);
-    } catch (err) {
-      setShareMsg(err instanceof Error ? err.message : "Failed to prepare bill image.");
-    } finally {
-      setSharing(false);
-    }
-  }
 
   return (
     <div className="surface space-y-4 p-4">
@@ -762,12 +768,11 @@ function OrderDetailCard({
           <button
             type="button"
             className="btn btn-secondary btn-sm whitespace-nowrap"
-            onClick={handleWhatsAppShare}
-            disabled={sharing}
+            onClick={() => setShowWhatsApp(true)}
             title="Share bill image on WhatsApp"
           >
             <MessageCircle className="h-3.5 w-3.5" />
-            {sharing ? "Preparing…" : "WhatsApp"}
+            WhatsApp
           </button>
           {onPay && (
             <button type="button" className="btn btn-secondary btn-sm whitespace-nowrap" onClick={onPay}>
@@ -777,8 +782,13 @@ function OrderDetailCard({
           )}
         </div>
       </div>
-      {shareMsg && (
-        <p className="rounded-xl bg-jade-soft/70 px-3 py-2 text-xs text-jade-deep">{shareMsg}</p>
+
+      {showWhatsApp && (
+        <BillWhatsAppModal
+          order={order}
+          extras={{ payments: orderPayments, repairs: orderRepairs }}
+          onClose={() => setShowWhatsApp(false)}
+        />
       )}
 
       <div className="grid grid-cols-3 gap-2">

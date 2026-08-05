@@ -1,11 +1,12 @@
 import { toPng } from "html-to-image";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
+import { formatRupee } from "@/lib/csv";
 import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
 import type { BillExportExtras } from "@/lib/bill-export";
 
 function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+  return formatRupee(n);
 }
 
 function formatDate(ts: number) {
@@ -188,7 +189,7 @@ function buildBillHtml(
   }
 
   return `
-<div id="bill-share-card" style="width:720px;box-sizing:border-box;background:#ffffff;color:#0e1612;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;border-radius:20px;overflow:hidden;border:1px solid #d8e4dc;">
+<div data-bill-card="1" style="width:720px;box-sizing:border-box;background:#ffffff;color:#0e1612;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;border-radius:20px;overflow:hidden;border:1px solid #d8e4dc;">
   <div style="background:linear-gradient(145deg,#0c1a14 0%,#06110d 100%);padding:28px 32px 24px;color:#fff;">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#1ecb8f;">Bliss Bombay</div>
     <div style="margin-top:6px;font-size:26px;font-weight:700;letter-spacing:-0.02em;">Kaarigar Bill</div>
@@ -260,12 +261,15 @@ export async function renderBillPngFile(
 
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
+  host.dataset.billShareHost = "1";
   host.style.cssText =
     "position:fixed;left:-10000px;top:0;width:720px;pointer-events:none;z-index:-1;";
+  // Clear any stale share hosts from a previous interrupted render.
+  document.querySelectorAll("[data-bill-share-host='1']").forEach((el) => el.remove());
   host.innerHTML = buildBillHtml(order, payments, repairs);
   document.body.appendChild(host);
 
-  const card = host.querySelector("#bill-share-card") as HTMLElement | null;
+  const card = host.querySelector("[data-bill-card='1']") as HTMLElement | null;
   if (!card) {
     host.remove();
     throw new Error("Failed to build bill card.");
@@ -278,6 +282,11 @@ export async function renderBillPngFile(
       pixelRatio: 2,
       cacheBust: true,
       backgroundColor: "#ffffff",
+      // Only the bill card — never capture leftover DOM / duplicate nodes.
+      filter: (node) => {
+        if (!(node instanceof HTMLElement)) return true;
+        return !node.dataset?.billShareIgnore;
+      },
     });
     const res = await fetch(dataUrl);
     const blob = await res.blob();
@@ -289,8 +298,10 @@ export async function renderBillPngFile(
 }
 
 /**
- * Share bill as PNG via Web Share API when possible; otherwise download the image
- * for the admin to attach in WhatsApp.
+ * Share bill as PNG.
+ * Prefer BillWhatsAppModal in the UI (preview + one local file).
+ * This helper is a headless fallback: native share when available, else one download + wa.me.
+ * Never uploads the image to Firestore or Storage.
  */
 export async function shareBillAsImage(
   order: KaarigerOrder,
@@ -302,8 +313,8 @@ export async function shareBillAsImage(
     canShare?: (data?: ShareData) => boolean;
   };
 
-  try {
-    if (typeof nav.canShare === "function" && nav.canShare({ files: [file] }) && nav.share) {
+  if (typeof nav.canShare === "function" && nav.share && nav.canShare({ files: [file] })) {
+    try {
       await nav.share({
         files: [file],
         title: `Bill — ${order.kaarigerName}`,
@@ -315,23 +326,28 @@ export async function shareBillAsImage(
         balance,
         caption,
       };
-    }
-  } catch (err) {
-    // User cancelled share — don't fall through to download.
-    if (err instanceof DOMException && err.name === "AbortError") {
-      return {
-        mode: "shared",
-        message: "Share cancelled.",
-        balance,
-        caption,
-      };
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return {
+          mode: "shared",
+          message: "Share cancelled.",
+          balance,
+          caption,
+        };
+      }
+      // Continue to desktop fallback below.
     }
   }
 
+  // Desktop / no file-share: save locally once, then open WhatsApp with caption.
   downloadFile(file);
+  const text = `${caption}\n\nPlease find the Bliss Bombay bill image attached (saved to your Downloads).`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+
   return {
     mode: "downloaded",
-    message: "Bill image downloaded — attach it in WhatsApp.",
+    message:
+      "Bill image saved on this device (not uploaded). WhatsApp opened — attach the PNG from Downloads.",
     balance,
     caption,
   };

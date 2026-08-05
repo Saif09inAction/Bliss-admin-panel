@@ -98,23 +98,42 @@ export async function payKaarigerKharcha(opts: {
   let openingApplied = 0;
   let orderApplied = 0;
   let creditAdded = 0;
-  const note = opts.remarks?.trim();
+  const note = opts.remarks?.trim() || "";
+
+  function paymentPayload(fields: {
+    id: string;
+    orderId: string;
+    amount: number;
+    remarks?: string;
+  }) {
+    // Firestore rejects `undefined` field values — only attach remarks when set.
+    const payload: Record<string, string | number> = {
+      id: fields.id,
+      orderId: fields.orderId,
+      kaarigerId: opts.kaarigerId,
+      amount: fields.amount,
+      date: todayStr(),
+      time: nowTimeStr(),
+      createdBy: opts.createdBy,
+    };
+    if (fields.remarks) payload.remarks = fields.remarks;
+    return payload;
+  }
 
   // 1) Opening / old remaining
   const opening = Math.max(0, opts.openingBalance || 0);
   if (opening > 0 && left > 0) {
     openingApplied = Math.min(left, opening);
     const paymentId = uuid();
-    await setDoc(doc(db, "kaariger_payments", paymentId), {
-      id: paymentId,
-      orderId: OPENING_ORDER_ID,
-      kaarigerId: opts.kaarigerId,
-      amount: openingApplied,
-      date: todayStr(),
-      time: nowTimeStr(),
-      remarks: note || "Old remaining payment",
-      createdBy: opts.createdBy,
-    });
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: OPENING_ORDER_ID,
+        amount: openingApplied,
+        remarks: note || "Old remaining payment",
+      })
+    );
     await updateDoc(doc(db, "employees", opts.kaarigerId), {
       openingBalance: Math.max(0, opening - openingApplied),
     });
@@ -135,16 +154,15 @@ export async function payKaarigerKharcha(opts: {
 
     const apply = Math.min(left, remaining);
     const paymentId = uuid();
-    await setDoc(doc(db, "kaariger_payments", paymentId), {
-      id: paymentId,
-      orderId: order.id,
-      kaarigerId: opts.kaarigerId,
-      amount: apply,
-      date: todayStr(),
-      time: nowTimeStr(),
-      remarks: note || undefined,
-      createdBy: opts.createdBy,
-    });
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: order.id,
+        amount: apply,
+        ...(note ? { remarks: note } : {}),
+      })
+    );
     orderApplied += apply;
     left -= apply;
 
@@ -162,16 +180,15 @@ export async function payKaarigerKharcha(opts: {
       creditBalance: Math.max(0, (opts.creditBalance || 0) + creditAdded),
     });
     const paymentId = uuid();
-    await setDoc(doc(db, "kaariger_payments", paymentId), {
-      id: paymentId,
-      orderId: OPENING_ORDER_ID,
-      kaarigerId: opts.kaarigerId,
-      amount: creditAdded,
-      date: todayStr(),
-      time: nowTimeStr(),
-      remarks: note || "Extra kharcha — carried as credit",
-      createdBy: opts.createdBy,
-    });
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: OPENING_ORDER_ID,
+        amount: creditAdded,
+        remarks: note || "Extra kharcha — carried as credit",
+      })
+    );
     left = 0;
   }
 

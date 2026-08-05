@@ -17,12 +17,11 @@ import { Check, Pencil, Trash2, Wrench, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { OrderRepair, RepairLineItem, RepairStatus } from "@/lib/types";
+import { formatRupee } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
+const money = formatRupee;
 
 function formatDate(ts: number) {
   return ts ? new Date(ts).toLocaleDateString("en-IN") : "—";
@@ -568,7 +567,8 @@ export default function RepairingPage() {
                     className="input"
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="any"
+                    inputMode="decimal"
                     value={editForm.faultyPricePerPiece}
                     onChange={(e) => setEditForm({ ...editForm, faultyPricePerPiece: e.target.value })}
                     required

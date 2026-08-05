@@ -28,3 +28,16 @@ export function nowTimeStr() {
 export function uuid() {
   return crypto.randomUUID();
 }
+
+/**
+ * Format rupees for display. Keeps up to 2 decimal places when present
+ * (e.g. 125.5 → ₹125.5) so bill paisa is not silently rounded away.
+ */
+export function formatRupee(n: number): string {
+  const value = Math.round((Number(n) || 0) * 100) / 100;
+  const hasPaisa = Math.abs(value % 1) > 1e-9;
+  return `₹${value.toLocaleString("en-IN", {
+    minimumFractionDigits: hasPaisa ? 1 : 0,
+    maximumFractionDigits: 2,
+  })}`;
+}

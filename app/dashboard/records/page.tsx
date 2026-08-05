@@ -25,11 +25,12 @@ import type {
   RepairLineItem,
   ReturnRecord,
 } from "@/lib/types";
-import { downloadCsv, uuid } from "@/lib/csv";
-import { exportBillExcel, shareBillWhatsApp } from "@/lib/bill-export";
+import { downloadCsv, formatRupee, uuid } from "@/lib/csv";
+import { exportBillExcel } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
+import BillWhatsAppModal from "@/components/BillWhatsAppModal";
 
 const CHARGE_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }[] = [
   { type: "RUNNER", label: "Runner" },
@@ -79,9 +80,7 @@ function recordStatusBadge(status: string) {
   }
 }
 
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
+const money = formatRupee;
 
 export default function RecordsPage() {
   const [tab, setTab] = useState<Tab>("kaariger");
@@ -93,8 +92,7 @@ export default function RecordsPage() {
   const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
   const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
   const [viewOrder, setViewOrder] = useState<KaarigerOrder | null>(null);
-  const [sharingWhatsApp, setSharingWhatsApp] = useState(false);
-  const [shareWhatsAppMsg, setShareWhatsAppMsg] = useState("");
+  const [showWhatsAppBill, setShowWhatsAppBill] = useState(false);
   const [pickupForm, setPickupForm] = useState({
     quantity: "",
     partner: "",
@@ -832,7 +830,13 @@ export default function RecordsPage() {
 
       {viewOrder && (
         <>
-          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setViewOrder(null)} />
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            onClick={() => {
+              setViewOrder(null);
+              setShowWhatsAppBill(false);
+            }}
+          />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
               className="surface !overflow-y-auto max-h-[90vh] w-full max-w-2xl space-y-5 p-5"
@@ -851,7 +855,15 @@ export default function RecordsPage() {
                     <p className="mt-1 text-xs text-[var(--jade-deep)]">Last verified by {viewOrder.verifiedBy}</p>
                   )}
                 </div>
-                <button type="button" className="btn-icon shrink-0" onClick={() => setViewOrder(null)} aria-label="Close">
+                <button
+                  type="button"
+                  className="btn-icon shrink-0"
+                  onClick={() => {
+                    setViewOrder(null);
+                    setShowWhatsAppBill(false);
+                  }}
+                  aria-label="Close"
+                >
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -982,25 +994,10 @@ export default function RecordsPage() {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={async () => {
-                    if (!viewOrder) return;
-                    setSharingWhatsApp(true);
-                    setShareWhatsAppMsg("");
-                    try {
-                      const result = await shareBillWhatsApp(viewOrder);
-                      setShareWhatsAppMsg(result.message);
-                    } catch (err) {
-                      setShareWhatsAppMsg(
-                        err instanceof Error ? err.message : "Failed to prepare bill image."
-                      );
-                    } finally {
-                      setSharingWhatsApp(false);
-                    }
-                  }}
-                  disabled={sharingWhatsApp}
+                  onClick={() => setShowWhatsAppBill(true)}
                 >
                   <MessageCircle className="h-3.5 w-3.5" />
-                  {sharingWhatsApp ? "Preparing…" : "Share WhatsApp"}
+                  Share WhatsApp
                 </button>
                 <button
                   type="button"
@@ -1008,7 +1005,7 @@ export default function RecordsPage() {
                   onClick={() => {
                     openOrderEdit(viewOrder);
                     setViewOrder(null);
-                    setShareWhatsAppMsg("");
+                    setShowWhatsAppBill(false);
                   }}
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -1023,13 +1020,15 @@ export default function RecordsPage() {
                   Delete
                 </button>
               </div>
-              {shareWhatsAppMsg && (
-                <p className="rounded-xl bg-jade-soft/70 px-3 py-2 text-sm text-jade-deep">
-                  {shareWhatsAppMsg}
-                </p>
-              )}
             </div>
           </div>
+
+          {showWhatsAppBill && (
+            <BillWhatsAppModal
+              order={viewOrder}
+              onClose={() => setShowWhatsAppBill(false)}
+            />
+          )}
         </>
       )}
 
@@ -1185,7 +1184,8 @@ export default function RecordsPage() {
                           className="input !w-full !py-2"
                           type="number"
                           min={0}
-                          step="0.01"
+                          step="any"
+                          inputMode="decimal"
                           value={line.pricePerPiece}
                           onChange={(e) =>
                             setBillProducts((prev) =>
@@ -1240,7 +1240,8 @@ export default function RecordsPage() {
                           className="input !w-full !py-2"
                           type="number"
                           min={0}
-                          step="0.01"
+                          step="any"
+                          inputMode="decimal"
                           value={billCharges[type].price}
                           onChange={(e) =>
                             setBillCharges({
@@ -1382,7 +1383,8 @@ export default function RecordsPage() {
                           className="input !w-full !py-2"
                           type="number"
                           min={0}
-                          step="0.01"
+                          step="any"
+                          inputMode="decimal"
                           value={m.price}
                           onChange={(e) =>
                             setBillMaterials((prev) =>

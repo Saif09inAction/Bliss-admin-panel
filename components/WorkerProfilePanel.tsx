@@ -227,7 +227,7 @@ export default function WorkerProfilePanel({
       const next = { ...localEmployee, openingBalance: amount };
       setLocalEmployee(next);
       onUpdated?.(next);
-      setOpeningMsg("Old remaining payment saved.");
+      setOpeningMsg("Opening balance saved.");
     } catch (err) {
       setOpeningMsg(err instanceof Error ? err.message : "Failed to save.");
     } finally {
@@ -345,34 +345,36 @@ export default function WorkerProfilePanel({
                 <section>
                   <h3 className="section-title flex items-center gap-2 text-base">
                     <Wallet size={16} className="text-jade-deep" />
-                    Remaining payment
+                    Opening balance
                   </h3>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    Old amount still owed from before this software. Pay applies here first, then active
-                    bills; leftover becomes credit/advance.
+                    Carries into Hisaab remaining: opening + unpaid bills − credit. Pay reduces opening/bills
+                    first; extra kharcha becomes credit for the next bill.
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <StatTile
-                      label="Old remaining"
+                      label="Opening balance"
                       value={`₹${Math.round(localEmployee.openingBalance || 0).toLocaleString("en-IN")}`}
                       accent="warn"
                     />
                     <StatTile
-                      label="Credit / advance"
+                      label="Credit"
                       value={`₹${Math.round(localEmployee.creditBalance || 0).toLocaleString("en-IN")}`}
                       accent="jade"
                     />
                   </div>
                   <form onSubmit={saveOpeningBalance} className="mt-3 space-y-2">
-                    <label className="label">Set old remaining (₹)</label>
+                    <label className="label">Edit opening balance (₹)</label>
                     <div className="flex gap-2">
                       <input
                         className="input flex-1"
                         type="number"
                         min={0}
+                        step="any"
+                        inputMode="decimal"
                         value={openingDraft}
                         onChange={(e) => setOpeningDraft(e.target.value)}
-                        placeholder="e.g. 15000"
+                        placeholder="e.g. 1000 or 125.5"
                       />
                       <button type="submit" className="btn btn-secondary shrink-0" disabled={openingSaving}>
                         {openingSaving ? "…" : "Save"}
@@ -606,7 +608,7 @@ export default function WorkerProfilePanel({
                 <div>
                   <h3 className="font-display text-lg font-bold">Pay kharcha</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    {localEmployee.name} · old remaining first, then bills
+                    {localEmployee.name} · pays remaining balance first; extra becomes credit
                   </p>
                 </div>
                 <button type="button" className="btn-icon" onClick={() => setShowPay(false)}>
@@ -619,10 +621,12 @@ export default function WorkerProfilePanel({
                   className="input"
                   type="number"
                   min={0}
+                  step="any"
+                  inputMode="decimal"
                   autoFocus
                   value={payForm.amount}
                   onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
-                  placeholder="e.g. 500"
+                  placeholder="e.g. 500 or 125.5"
                   required
                 />
               </div>
