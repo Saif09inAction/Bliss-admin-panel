@@ -419,7 +419,7 @@ export default function BillReportPage() {
             className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
               owner === o.id
                 ? "bg-[var(--ink)] text-white shadow-sm"
-                : "text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
+                : "text-[var(--text-muted)] hover:bg-[var(--surface-mist)] hover:text-[var(--ink)]"
             }`}
           >
             {o.label}
@@ -503,7 +503,7 @@ export default function BillReportPage() {
                     onClick={() => setSelectedId(company.id)}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-2)]">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-mist)]">
                         <Building2 size={18} className="text-[var(--text-muted)]" />
                       </div>
                       <div className="min-w-0 flex-1">
