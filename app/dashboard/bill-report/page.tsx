@@ -13,6 +13,7 @@ import {
 import {
   ArrowLeft,
   Building2,
+  Download,
   ExternalLink,
   IndianRupee,
   Link2,
@@ -23,7 +24,7 @@ import {
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import PageToolbar from "@/components/admin/PageToolbar";
 import { useAuth } from "@/lib/auth-context";
-import { companyTotals } from "@/lib/bill-report";
+import { companyTotals, exportBillReportCsv } from "@/lib/bill-report";
 import { formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import { getDb } from "@/lib/firebase";
 import type { BillCompany, BillEntry, BillEntryType, BillOwner } from "@/lib/types";
@@ -341,51 +342,85 @@ export default function BillReportPage() {
 
   const ledgerTotals = selected ? companyTotals(selected, entries) : null;
 
+  function exportCurrent() {
+    exportBillReportCsv({
+      owner,
+      companies,
+      entries,
+      companyId: selected?.id,
+    });
+    setMessage(
+      selected
+        ? `Exported ${selected.name} to Excel/CSV.`
+        : `Exported all ${owner === "CLARIS" ? "Claris" : "Bliss"} companies.`
+    );
+  }
+
+  const ownerName = owner === "CLARIS" ? "Claris" : "Bliss";
+
   return (
     <div className="space-y-5">
       <PageToolbar
         title="Bill Report"
         actions={
-          !selected ? (
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                setCompanyForm({ name: "", openingBalance: "", notes: "" });
-                setShowCompanyForm(true);
-                setMessage("");
-              }}
+              className="btn btn-secondary"
+              onClick={exportCurrent}
+              disabled={loading || (!selected && companies.length === 0)}
+              title="Download Excel/CSV like your Google Sheet"
             >
-              <Plus size={16} />
-              Add Company
+              <Download size={16} />
+              Export
             </button>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn btn-secondary" onClick={() => openEntryModal("EXTRA_BILL")}>
+            {!selected ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setCompanyForm({ name: "", openingBalance: "", notes: "" });
+                  setShowCompanyForm(true);
+                  setMessage("");
+                }}
+              >
                 <Plus size={16} />
-                Extra Bill
+                Add Company
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => openEntryModal("TRANSFER")}>
-                <IndianRupee size={16} />
-                Transfer
-              </button>
-            </div>
-          )
+            ) : (
+              <>
+                <button type="button" className="btn btn-secondary" onClick={() => openEntryModal("EXTRA_BILL")}>
+                  <Plus size={16} />
+                  Extra Bill
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => openEntryModal("TRANSFER")}>
+                  <IndianRupee size={16} />
+                  Transfer
+                </button>
+              </>
+            )}
+          </div>
         }
       >
         <p className="section-sub">
-          Companies you buy from — track extra bills (to pay) and transfers (already paid)
+          {selected
+            ? `${selected.name} · ${ownerName}`
+            : "Pick Claris or Bliss → open a company → add Extra Bill or Transfer"}
         </p>
       </PageToolbar>
 
-      {/* Claris / Bliss picker */}
-      <div className="flex flex-wrap gap-2">
+      {/* Claris / Bliss segmented control */}
+      <div className="surface flex gap-1 p-1.5 sm:max-w-md">
         {OWNERS.map((o) => (
           <button
             key={o.id}
             type="button"
-            className={`filter-pill ${owner === o.id ? "active" : ""}`}
             onClick={() => setOwner(o.id)}
+            className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+              owner === o.id
+                ? "bg-[var(--ink)] text-white shadow-sm"
+                : "text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
+            }`}
           >
             {o.label}
           </button>
@@ -395,12 +430,24 @@ export default function BillReportPage() {
       {/* Owner summary */}
       {!selected && !loading && companies.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-3">
-          <SummaryTile label="Total Extra Bill" value={formatRupee(ownerTotals.extraBill)} tone="amber" />
-          <SummaryTile label="Total Transfer" value={formatRupee(ownerTotals.transfer)} tone="jade" />
           <SummaryTile
-            label="Total Remaining"
+            label="Extra bills"
+            hint="Money still billed"
+            value={formatRupee(ownerTotals.extraBill)}
+            tone="amber"
+          />
+          <SummaryTile
+            label="Transfers"
+            hint="Already paid"
+            value={formatRupee(ownerTotals.transfer)}
+            tone="jade"
+          />
+          <SummaryTile
+            label="Still to pay"
+            hint="Opening + extra − transfer"
             value={formatRupee(ownerTotals.remaining)}
             tone={ownerTotals.remaining > 0 ? "amber" : "jade"}
+            emphasize
           />
         </div>
       )}
@@ -414,63 +461,76 @@ export default function BillReportPage() {
       ) : selected && ledgerTotals ? (
         <CompanyLedger
           company={selected}
-          ownerLabel={OWNERS.find((o) => o.id === owner)?.label || owner}
+          ownerLabel={ownerName}
           entries={selectedEntries}
           totals={ledgerTotals}
           onBack={() => setSelectedId(null)}
           onDeleteCompany={() => deleteCompany(selected)}
           onDeleteEntry={deleteEntry}
           onToggleTransferDone={toggleTransferDone}
+          onExport={exportCurrent}
         />
       ) : (
         <>
           <AdminSearchBar
             value={search}
             onChange={setSearch}
-            placeholder={`Search ${owner === "CLARIS" ? "Claris" : "Bliss"} companies…`}
+            placeholder={`Search ${ownerName} companies…`}
           />
           {filteredCompanies.length === 0 ? (
-            <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">
-              {companies.length === 0
-                ? `No companies under ${owner === "CLARIS" ? "Claris" : "Bliss"} yet. Add one to start.`
-                : "No company matches your search."}
+            <div className="surface py-14 text-center">
+              <Building2 className="mx-auto mb-3 text-[var(--text-muted)]" size={28} />
+              <p className="text-sm font-medium text-[var(--ink)]">
+                {companies.length === 0
+                  ? `No companies under ${ownerName} yet`
+                  : "No company matches your search"}
+              </p>
+              {companies.length === 0 && (
+                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                  Add the supplier you buy from (e.g. Kosmik India)
+                </p>
+              )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="grid gap-3">
               {filteredCompanies.map((company) => {
                 const t = companyTotals(company, entries);
                 return (
                   <button
                     key={company.id}
                     type="button"
-                    className="surface mobile-row w-full text-left transition hover:border-[var(--jade)]"
+                    className="surface w-full p-4 text-left transition hover:border-[var(--jade)] hover:shadow-sm"
                     onClick={() => setSelectedId(company.id)}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Building2 size={16} className="shrink-0 text-[var(--text-muted)]" />
-                          <p className="truncate font-display font-bold">{company.name}</p>
-                        </div>
-                        <p className="mt-1 text-xs text-[var(--text-muted)]">
-                          Extra {formatRupee(t.extraBill)} · Transfer {formatRupee(t.transfer)}
-                          {company.openingBalance > 0
-                            ? ` · Opening ${formatRupee(company.openingBalance)}`
-                            : ""}
-                        </p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-2)]">
+                        <Building2 size={18} className="text-[var(--text-muted)]" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-display text-base font-bold">{company.name}</p>
+                        {company.notes ? (
+                          <p className="truncate text-xs text-[var(--text-muted)]">{company.notes}</p>
+                        ) : (
+                          <p className="text-xs text-[var(--text-muted)]">Tap to open ledger</p>
+                        )}
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                          Remaining
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                          Still to pay
                         </p>
                         <p
-                          className={`font-display text-lg font-bold ${
+                          className={`font-display text-xl font-bold ${
                             t.remaining > 0 ? "text-[var(--bronze)]" : "text-jade-deep"
                           }`}
                         >
                           {formatRupee(t.remaining)}
                         </p>
                       </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-3">
+                      <MiniStat label="Opening" value={formatRupee(company.openingBalance || 0)} />
+                      <MiniStat label="Extra" value={formatRupee(t.extraBill)} />
+                      <MiniStat label="Paid" value={formatRupee(t.transfer)} muted />
                     </div>
                   </button>
                 );
@@ -482,7 +542,7 @@ export default function BillReportPage() {
 
       {/* Add company modal */}
       {showCompanyForm && (
-        <Modal title={`Add company — ${owner === "CLARIS" ? "Claris" : "Bliss"}`} onClose={() => setShowCompanyForm(false)}>
+        <Modal title={`Add company — ${ownerName}`} onClose={() => setShowCompanyForm(false)}>
           <form className="space-y-4" onSubmit={saveCompany}>
             <div>
               <label className="label">Company name</label>
@@ -535,10 +595,16 @@ export default function BillReportPage() {
           onClose={() => setEntryModal(null)}
         >
           <form className="space-y-4" onSubmit={saveEntry}>
-            <p className="rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            <p
+              className={`rounded-lg px-3 py-2 text-xs ${
+                entryModal === "EXTRA_BILL"
+                  ? "bg-[var(--bronze-soft)] text-[var(--bronze)]"
+                  : "bg-jade-soft text-jade-deep"
+              }`}
+            >
               {entryModal === "EXTRA_BILL"
-                ? "Extra bill = money this company billed you. Remaining to pay goes UP."
-                : "Transfer = money you sent them. Remaining to pay goes DOWN."}
+                ? "Extra bill = money this company billed you. Still to pay goes UP."
+                : "Transfer = money you sent them. Still to pay goes DOWN."}
             </p>
             <div>
               <label className="label">Amount (₹)</label>
@@ -616,23 +682,41 @@ export default function BillReportPage() {
   );
 }
 
+function MiniStat({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">{label}</p>
+      <p className={`text-sm font-semibold ${muted ? "text-jade-deep" : "text-[var(--ink)]"}`}>{value}</p>
+    </div>
+  );
+}
+
 function SummaryTile({
   label,
+  hint,
   value,
   tone,
+  emphasize,
 }: {
   label: string;
+  hint?: string;
   value: string;
   tone: "jade" | "amber";
+  emphasize?: boolean;
 }) {
   return (
     <div
       className={`surface px-4 py-4 ${
         tone === "jade" ? "border-jade/30 bg-jade-soft/40" : "border-[var(--bronze)]/25 bg-[var(--bronze-soft)]"
-      }`}
+      } ${emphasize ? "ring-1 ring-[var(--bronze)]/30" : ""}`}
     >
-      <p className="text-xs text-[var(--text-muted)]">{label}</p>
-      <p className={`mt-1 font-display text-xl font-bold ${tone === "jade" ? "text-jade-deep" : "text-[var(--bronze)]"}`}>
+      <p className="text-xs font-medium text-[var(--text-muted)]">{label}</p>
+      {hint && <p className="text-[10px] text-[var(--text-muted)]">{hint}</p>}
+      <p
+        className={`mt-1.5 font-display font-bold ${emphasize ? "text-2xl" : "text-xl"} ${
+          tone === "jade" ? "text-jade-deep" : "text-[var(--bronze)]"
+        }`}
+      >
         {value}
       </p>
     </div>
@@ -672,6 +756,7 @@ function CompanyLedger({
   onDeleteCompany,
   onDeleteEntry,
   onToggleTransferDone,
+  onExport,
 }: {
   company: BillCompany;
   ownerLabel: string;
@@ -681,6 +766,7 @@ function CompanyLedger({
   onDeleteCompany: () => void;
   onDeleteEntry: (e: BillEntry) => void;
   onToggleTransferDone: (e: BillEntry) => void;
+  onExport: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -690,9 +776,13 @@ function CompanyLedger({
           All companies
         </button>
         <span className="badge badge-neutral">{ownerLabel}</span>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onExport}>
+          <Download size={14} />
+          Export
+        </button>
         <button type="button" className="btn btn-secondary btn-sm ml-auto text-red-700" onClick={onDeleteCompany}>
           <Trash2 size={14} />
-          Delete company
+          Delete
         </button>
       </div>
 
@@ -700,28 +790,30 @@ function CompanyLedger({
         <h3 className="font-display text-xl font-bold">{company.name}</h3>
         {company.notes && <p className="mt-1 text-sm text-[var(--text-muted)]">{company.notes}</p>}
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <SummaryTile label="Extra Bill" value={formatRupee(totals.extraBill)} tone="amber" />
-          <SummaryTile label="Transfer" value={formatRupee(totals.transfer)} tone="jade" />
+          <SummaryTile label="Extra bills" hint="Billed to you" value={formatRupee(totals.extraBill)} tone="amber" />
+          <SummaryTile label="Transfers" hint="You paid" value={formatRupee(totals.transfer)} tone="jade" />
           <SummaryTile
-            label="Remaining to pay"
+            label="Still to pay"
+            hint={
+              company.openingBalance > 0
+                ? `Includes opening ${formatRupee(company.openingBalance)}`
+                : "Opening + extra − paid"
+            }
             value={formatRupee(totals.remaining)}
             tone={totals.remaining > 0 ? "amber" : "jade"}
+            emphasize
           />
         </div>
-        {company.openingBalance > 0 && (
-          <p className="mt-3 text-xs text-[var(--text-muted)]">
-            Opening balance: {formatRupee(company.openingBalance)}
-          </p>
-        )}
       </div>
 
       <div className="surface overflow-hidden">
-        <div className="border-b border-[var(--border)] px-4 py-3">
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <p className="font-display text-sm font-bold">Records</p>
+          <p className="text-xs text-[var(--text-muted)]">{entries.length} entries</p>
         </div>
         {entries.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">
-            No extra bills or transfers yet.
+            No extra bills or transfers yet. Use the buttons above.
           </p>
         ) : (
           <>
