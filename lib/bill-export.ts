@@ -1,10 +1,6 @@
 import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
 import { downloadCsvRows } from "@/lib/csv";
 
-function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
-}
-
 function formatDate(ts: number) {
   return ts
     ? new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
@@ -20,81 +16,6 @@ export type BillExportExtras = {
   payments?: KaarigerPayment[];
   repairs?: OrderRepair[];
 };
-
-/** Build a plain-text bill statement suitable for WhatsApp / clipboard. */
-export function buildBillText(order: KaarigerOrder, extras: BillExportExtras = {}): string {
-  const lines: string[] = [];
-  const net = orderNetDeal(order);
-  const payments = (extras.payments || []).filter((p) => p.orderId === order.id);
-  const repairs = (extras.repairs || []).filter(
-    (r) => r.orderId === order.id && (!r.status || r.status === "APPROVED")
-  );
-  const paid = payments.reduce((s, p) => s + p.amount, 0);
-  const balance = Math.max(0, net - paid);
-
-  lines.push(`*Bliss Bombay — Kaarigar Bill*`);
-  lines.push(`${order.productName}`);
-  lines.push(`Kaariger: ${order.kaarigerName}`);
-  lines.push(`Date: ${formatDate(order.createdAt)}`);
-  lines.push(`Status: ${order.status.replace(/_/g, " ")}`);
-  lines.push("");
-
-  if (order.products && order.products.length > 0) {
-    lines.push(`*Products*`);
-    order.products.forEach((p) => {
-      lines.push(`• ${p.productName}: ${p.quantity} × ₹${p.pricePerPiece} = ${money(p.lineTotal)}`);
-    });
-    lines.push(`Products Total: ${money(order.productsTotal ?? 0)}`);
-    lines.push("");
-  }
-
-  if (order.materialDeductions && order.materialDeductions.length > 0) {
-    lines.push(`*Deductions (Runner/Fitting/Astar/Material)*`);
-    order.materialDeductions.forEach((it) => {
-      lines.push(`• ${it.label}: ${it.quantity} × ₹${it.pricePerPiece} = −${money(it.lineTotal)}`);
-    });
-    lines.push(`Deductions Total: −${money(order.materialDeductionsTotal ?? 0)}`);
-    lines.push("");
-  }
-
-  if (repairs.length > 0) {
-    lines.push(`*Repairing Deductions*`);
-    repairs.forEach((r) => {
-      lines.push(
-        `• ${r.faultyQuantity} pcs × ₹${r.faultyPricePerPiece} = −${money(r.totalRepairCost)} (${formatDate(r.createdAt)})`
-      );
-    });
-    lines.push(`Repair Total: −${money(order.repairDeductionTotal || 0)}`);
-    lines.push("");
-  }
-
-  if ((order.kharchaGiven || 0) > 0) {
-    lines.push(`Kharcha given at creation: ${money(order.kharchaGiven || 0)}`);
-    lines.push("");
-  }
-
-  if (payments.length > 0) {
-    lines.push(`*Kharcha Timeline*`);
-    payments.forEach((p) => {
-      const note = p.remarks ? ` — ${p.remarks}` : "";
-      lines.push(`• ${p.date} ${p.time}: ${money(p.amount)}${note}`);
-    });
-    lines.push(`Kharcha Total: ${money(paid)}`);
-    lines.push("");
-  }
-
-  lines.push(`*Summary*`);
-  lines.push(`Deal: ${money(net)}`);
-  lines.push(`Paid: ${money(paid)}`);
-  lines.push(balance <= 0 ? `Balance: All Paid` : `Balance: ${money(balance)}`);
-
-  if (order.notes?.trim()) {
-    lines.push("");
-    lines.push(`Notes: ${order.notes.trim()}`);
-  }
-
-  return lines.join("\n");
-}
 
 /** Export a single bill as an Excel-friendly CSV. */
 export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras = {}) {
@@ -179,9 +100,12 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
   downloadCsvRows(`bill_${safe || order.id}.csv`, rows);
 }
 
-/** Open WhatsApp with the bill text pre-filled (user picks the contact). */
-export function shareBillWhatsApp(order: KaarigerOrder, extras: BillExportExtras = {}) {
-  const text = buildBillText(order, extras);
-  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+/** Share bill as a professional PNG image (Web Share → WhatsApp, or download). */
+export async function shareBillWhatsApp(
+  order: KaarigerOrder,
+  extras: BillExportExtras = {}
+): Promise<{ mode: "shared" | "downloaded"; message: string }> {
+  const { shareBillAsImage } = await import("@/lib/bill-share-image");
+  const result = await shareBillAsImage(order, extras);
+  return { mode: result.mode, message: result.message };
 }

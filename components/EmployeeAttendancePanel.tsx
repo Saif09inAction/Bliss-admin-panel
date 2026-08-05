@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { ChevronLeft, ChevronRight, MapPin, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth-context";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import {
   computeEarlyLeaveMinutes,
@@ -34,6 +35,7 @@ function calendarDayClass(status: string, isSelected: boolean): string {
     case "PRESENT":
     case "ON_TIME":
     case "LEFT_EARLY":
+    case "HALF_DAY":
       classes.push("present");
       break;
     case "LATE":
@@ -54,6 +56,7 @@ function badgeClass(status: string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
+    case "HALF_DAY":
       return "badge badge-success";
     case "LATE":
     case "LEFT_EARLY":
@@ -66,6 +69,7 @@ function badgeClass(status: string): string {
 }
 
 export default function EmployeeAttendancePanel({ employee, settings, onClose }: Props) {
+  const { session } = useAuth();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -74,6 +78,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
   const [selectedDate, setSelectedDate] = useState<string | null>(
     dateKey(now.getFullYear(), now.getMonth(), now.getDate())
   );
+  const [creditSaving, setCreditSaving] = useState(false);
+  const [creditMsg, setCreditMsg] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -126,7 +132,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
       const st = effectiveDayStatus(byDate.get(key), key, settings);
       if (st === "ABSENT") absent++;
       else if (st === "LATE") late++;
-      else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY") present++;
+      else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY" || st === "HALF_DAY")
+        present++;
     }
     const rate = workingDays ? Math.round(((present + late) / workingDays) * 100) : 0;
     return { present, late, absent, workingDays, rate };
@@ -138,12 +145,65 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
     : "NONE";
   const selectedLate = computeLateMinutes(selected?.signInTime, settings.dailySignInTime);
   const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, settings.dailySignOutTime);
+  const showCreditActions =
+    selectedDate &&
+    selectedStatus !== "FUTURE" &&
+    (selectedStatus === "LATE" ||
+      selectedStatus === "LEFT_EARLY" ||
+      selectedStatus === "ABSENT" ||
+      selected?.dayCredit === "FULL" ||
+      selected?.dayCredit === "HALF" ||
+      selectedLate > 0 ||
+      selectedEarly > 0);
+
+  async function setDayCredit(credit: "FULL" | "HALF" | null) {
+    if (!selectedDate) return;
+    setCreditSaving(true);
+    setCreditMsg("");
+    try {
+      const id = `${employee.phone}_${selectedDate}`;
+      const existing = byDate.get(selectedDate);
+      const payload: Record<string, unknown> = {
+        id,
+        employeeId: employee.phone,
+        date: selectedDate,
+        dayCredit: credit,
+        dayCreditBy: credit ? session?.name || "Admin" : null,
+        dayCreditAt: credit ? Date.now() : null,
+      };
+      // Preserve punches when creating a credit-only doc for an absent day.
+      if (existing) {
+        if (existing.signInTime) payload.signInTime = existing.signInTime;
+        if (existing.signOutTime) payload.signOutTime = existing.signOutTime;
+        if (existing.status) payload.status = existing.status;
+        if (existing.lateMinutes != null) payload.lateMinutes = existing.lateMinutes;
+        if (existing.workingHours != null) payload.workingHours = existing.workingHours;
+      } else if (credit) {
+        payload.status = credit === "HALF" ? "HALF_DAY" : "PRESENT";
+        payload.lateMinutes = 0;
+        payload.workingHours = 0;
+      }
+      await setDoc(doc(getDb(), "attendance", id), payload, { merge: true });
+      setCreditMsg(
+        credit === "FULL"
+          ? "Marked as full-day present — late/early cut removed."
+          : credit === "HALF"
+            ? "Marked as half day — late/early cut removed."
+            : "Override cleared — punch times apply again."
+      );
+    } catch (err) {
+      setCreditMsg(err instanceof Error ? err.message : "Failed to save.");
+    } finally {
+      setCreditSaving(false);
+    }
+  }
 
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
     setYear(d.getFullYear());
     setMonth(d.getMonth());
     setSelectedDate(null);
+    setCreditMsg("");
   }
 
   const firstDow = new Date(year, month, 1).getDay();
@@ -268,7 +328,10 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         <button
                           key={di}
                           type="button"
-                          onClick={() => setSelectedDate(key)}
+                          onClick={() => {
+                            setSelectedDate(key);
+                            setCreditMsg("");
+                          }}
                           className={calendarDayClass(String(st), isSelected)}
                         >
                           {day}
@@ -306,13 +369,25 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     gps={selected.signInGps}
                     image={selected.signInImageLocalPath}
                     extra={
-                      selectedLate > 0
-                        ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${settings.dailySignInTime})`
-                        : selected.signInTime
-                          ? `On time (expected ${settings.dailySignInTime})`
-                          : undefined
+                      selected.dayCredit
+                        ? selectedLate > 0
+                          ? `Was late (${formatLateDuration(selectedLate)}) — forgiven by admin`
+                          : selected.signInTime
+                            ? `On time (expected ${settings.dailySignInTime})`
+                            : undefined
+                        : selectedLate > 0
+                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${settings.dailySignInTime})`
+                          : selected.signInTime
+                            ? `On time (expected ${settings.dailySignInTime})`
+                            : undefined
                     }
-                    extraTone={selectedLate > 0 ? "warn" : "ok"}
+                    extraTone={
+                      selected.dayCredit
+                        ? "ok"
+                        : selectedLate > 0
+                          ? "warn"
+                          : "ok"
+                    }
                   />
                   <DetailBlock
                     title="Clock Out"
@@ -322,12 +397,20 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     image={selected.signOutImageLocalPath}
                     extra={
                       selected.signOutTime
-                        ? selectedEarly > 0
-                          ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${settings.dailySignOutTime})`
-                          : `On time (expected ${settings.dailySignOutTime})`
+                        ? selected.dayCredit && selectedEarly > 0
+                          ? `Left early (${formatEarlyLeaveDuration(selectedEarly)}) — forgiven by admin`
+                          : selectedEarly > 0
+                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${settings.dailySignOutTime})`
+                            : `On time (expected ${settings.dailySignOutTime})`
                         : undefined
                     }
-                    extraTone={selectedEarly > 0 ? "warn" : undefined}
+                    extraTone={
+                      selected.dayCredit
+                        ? "ok"
+                        : selectedEarly > 0
+                          ? "warn"
+                          : undefined
+                    }
                     footer={
                       selected.workingHours
                         ? `Worked: ${formatWorkingHours(selected.workingHours)}`
@@ -339,6 +422,63 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                 <p className="text-sm text-[var(--text-muted)]">
                   No attendance recorded for this day.
                 </p>
+              )}
+
+              {showCreditActions && (
+                <div className="mt-4 space-y-2 border-t border-[var(--border)] pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    Admin override
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Forgive late / early leave (or credit an absent day) so salary is not cut.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${
+                        selected?.dayCredit === "FULL" ? "btn-primary" : "btn-secondary"
+                      }`}
+                      disabled={creditSaving}
+                      onClick={() => setDayCredit("FULL")}
+                    >
+                      Full day present
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${
+                        selected?.dayCredit === "HALF" ? "btn-primary" : "btn-secondary"
+                      }`}
+                      disabled={creditSaving}
+                      onClick={() => setDayCredit("HALF")}
+                    >
+                      Half day
+                    </button>
+                    {(selected?.dayCredit === "FULL" || selected?.dayCredit === "HALF") && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={creditSaving}
+                        onClick={() => setDayCredit(null)}
+                      >
+                        Clear override
+                      </button>
+                    )}
+                  </div>
+                  {selected?.dayCredit && selected.dayCreditBy && (
+                    <p className="text-xs text-jade-deep">
+                      Marked {selected.dayCredit === "HALF" ? "half day" : "full day"} by{" "}
+                      {selected.dayCreditBy}
+                      {selected.dayCreditAt
+                        ? ` · ${new Date(selected.dayCreditAt).toLocaleString("en-IN")}`
+                        : ""}
+                    </p>
+                  )}
+                  {creditMsg && (
+                    <p className="rounded-xl bg-jade-soft/70 px-3 py-2 text-xs text-jade-deep">
+                      {creditMsg}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}

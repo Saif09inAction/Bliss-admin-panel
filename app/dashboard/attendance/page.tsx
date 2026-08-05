@@ -33,6 +33,7 @@ function badgeClass(status: string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
+    case "HALF_DAY":
       return "badge badge-success";
     case "LATE":
     case "LEFT_EARLY":
@@ -149,7 +150,7 @@ export default function AttendancePage() {
       if (st === "ABSENT") return 0;
       if (st === "LATE") return 1;
       if (st === "LEFT_EARLY") return 2;
-      if (st === "PRESENT" || st === "ON_TIME") return 3;
+      if (st === "PRESENT" || st === "ON_TIME" || st === "HALF_DAY") return 3;
       return 4;
     };
     return [...list].sort((a, b) => {
@@ -269,8 +270,19 @@ export default function AttendancePage() {
                         <p className="mt-0.5 text-xs text-[var(--text-faint)]">
                           In {r.signInTime}
                           {r.signOutTime ? ` · Out ${r.signOutTime}` : ""}
-                          {lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : ""}
-                          {earlyMins > 0 ? ` · Left ${formatEarlyLeaveDuration(earlyMins)}` : ""}
+                          {r.dayCredit === "FULL"
+                            ? " · Full day (forgiven)"
+                            : r.dayCredit === "HALF"
+                              ? " · Half day"
+                              : ""}
+                          {!r.dayCredit && lateMins > 0 ? ` · ${formatLateDuration(lateMins)}` : ""}
+                          {!r.dayCredit && earlyMins > 0
+                            ? ` · Left ${formatEarlyLeaveDuration(earlyMins)}`
+                            : ""}
+                        </p>
+                      ) : r?.dayCredit ? (
+                        <p className="mt-0.5 text-xs text-jade-deep">
+                          {r.dayCredit === "HALF" ? "Half day (admin)" : "Full day present (admin)"}
                         </p>
                       ) : (
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">{e.phone}</p>

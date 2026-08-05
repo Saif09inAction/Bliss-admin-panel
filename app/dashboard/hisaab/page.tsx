@@ -709,6 +709,8 @@ function OrderDetailCard({
   repairs: OrderRepair[];
   onPay?: () => void;
 }) {
+  const [sharing, setSharing] = useState(false);
+  const [shareMsg, setShareMsg] = useState("");
   const orderPayments = payments
     .filter((p) => p.orderId === order.id)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
@@ -718,6 +720,22 @@ function OrderDetailCard({
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
   const balance = Math.max(0, net - paid);
   const isCompleted = order.status === "COMPLETED" || balance <= 0;
+
+  async function handleWhatsAppShare() {
+    setSharing(true);
+    setShareMsg("");
+    try {
+      const result = await shareBillWhatsApp(order, {
+        payments: orderPayments,
+        repairs: orderRepairs,
+      });
+      setShareMsg(result.message);
+    } catch (err) {
+      setShareMsg(err instanceof Error ? err.message : "Failed to prepare bill image.");
+    } finally {
+      setSharing(false);
+    }
+  }
 
   return (
     <div className="surface space-y-4 p-4">
@@ -744,11 +762,12 @@ function OrderDetailCard({
           <button
             type="button"
             className="btn btn-secondary btn-sm whitespace-nowrap"
-            onClick={() => shareBillWhatsApp(order, { payments: orderPayments, repairs: orderRepairs })}
-            title="Share this bill on WhatsApp"
+            onClick={handleWhatsAppShare}
+            disabled={sharing}
+            title="Share bill image on WhatsApp"
           >
             <MessageCircle className="h-3.5 w-3.5" />
-            WhatsApp
+            {sharing ? "Preparing…" : "WhatsApp"}
           </button>
           {onPay && (
             <button type="button" className="btn btn-secondary btn-sm whitespace-nowrap" onClick={onPay}>
@@ -758,6 +777,9 @@ function OrderDetailCard({
           )}
         </div>
       </div>
+      {shareMsg && (
+        <p className="rounded-xl bg-jade-soft/70 px-3 py-2 text-xs text-jade-deep">{shareMsg}</p>
+      )}
 
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-xl bg-[var(--surface-mist)] px-3 py-2">

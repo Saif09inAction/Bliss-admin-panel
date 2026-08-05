@@ -183,6 +183,13 @@ export interface Attendance {
   status: string;
   lateMinutes: number;
   workingHours: number;
+  /**
+   * Admin override: forgive late/early (or credit an absent day).
+   * FULL = full-day present, no time cut. HALF = half-day pay, no time cut.
+   */
+  dayCredit?: "FULL" | "HALF" | null;
+  dayCreditBy?: string;
+  dayCreditAt?: number;
 }
 
 export type PaymentType = "SALARY_PAYMENT" | "ADVANCE" | "EXTRA_PAYMENT" | "DEDUCTION";

@@ -1,8 +1,19 @@
 import type { Attendance, AttendanceSettings } from "./types";
 
-export type DayStatus = "PRESENT" | "ON_TIME" | "LATE" | "LEFT_EARLY" | "ABSENT" | "FUTURE" | "NONE";
+export type DayStatus =
+  | "PRESENT"
+  | "ON_TIME"
+  | "LATE"
+  | "LEFT_EARLY"
+  | "ABSENT"
+  | "HALF_DAY"
+  | "FUTURE"
+  | "NONE";
 
 export function parseAttendance(id: string, data: Record<string, unknown>): Attendance {
+  const creditRaw = data.dayCredit as string | undefined;
+  const dayCredit =
+    creditRaw === "FULL" || creditRaw === "HALF" ? creditRaw : null;
   return {
     id: (data.id as string) || id,
     employeeId: (data.employeeId as string) || "",
@@ -18,6 +29,9 @@ export function parseAttendance(id: string, data: Record<string, unknown>): Atte
     status: (data.status as string) || "ABSENT",
     lateMinutes: (data.lateMinutes as number) || 0,
     workingHours: (data.workingHours as number) || 0,
+    dayCredit,
+    dayCreditBy: (data.dayCreditBy as string) || undefined,
+    dayCreditAt: (data.dayCreditAt as number) || undefined,
   };
 }
 
@@ -93,6 +107,7 @@ export function formatEarlyLeaveDuration(minutes: number): string {
 
 /**
  * Day status using current shift settings.
+ * Admin dayCredit (FULL / HALF) overrides late/early/absent for display & pay.
  * Left early takes priority over late when both apply (matches app punch logic).
  */
 export function effectiveDayStatus(
@@ -103,6 +118,10 @@ export function effectiveDayStatus(
   const today = new Date();
   const day = parseDate(dateStr);
   if (day > startOfDay(today)) return "FUTURE";
+
+  if (record?.dayCredit === "FULL") return "PRESENT";
+  if (record?.dayCredit === "HALF") return "HALF_DAY";
+
   if (!record || !record.signInTime) return "ABSENT";
 
   const early = computeEarlyLeaveMinutes(record.signOutTime, settings?.dailySignOutTime);
@@ -134,6 +153,8 @@ export function statusLabel(status: string): string {
       return "Late";
     case "LEFT_EARLY":
       return "Left Early";
+    case "HALF_DAY":
+      return "Half Day";
     case "ABSENT":
       return "Absent";
     default:
@@ -153,6 +174,7 @@ export function statusColorClass(status: DayStatus | string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
+    case "HALF_DAY":
       return "bg-emerald-500 text-white";
     case "LATE":
       return "bg-amber-400 text-slate-900";
@@ -171,6 +193,7 @@ export function statusBadgeClass(status: DayStatus | string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
+    case "HALF_DAY":
       return "badge-present";
     case "LATE":
       return "badge-late";
@@ -258,7 +281,7 @@ export function computeMonthAttendanceStats(
     const st = dayStatus(rec as import("./types").Attendance | undefined, key);
     if (st === "ABSENT") absent++;
     else if (st === "LATE") late++;
-    else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY") present++;
+    else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY" || st === "HALF_DAY") present++;
   }
 
   const rate = workingDays ? Math.round((present / workingDays) * 100) : 0;

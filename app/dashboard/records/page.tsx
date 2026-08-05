@@ -93,6 +93,8 @@ export default function RecordsPage() {
   const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
   const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
   const [viewOrder, setViewOrder] = useState<KaarigerOrder | null>(null);
+  const [sharingWhatsApp, setSharingWhatsApp] = useState(false);
+  const [shareWhatsAppMsg, setShareWhatsAppMsg] = useState("");
   const [pickupForm, setPickupForm] = useState({
     quantity: "",
     partner: "",
@@ -980,10 +982,25 @@ export default function RecordsPage() {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => shareBillWhatsApp(viewOrder)}
+                  onClick={async () => {
+                    if (!viewOrder) return;
+                    setSharingWhatsApp(true);
+                    setShareWhatsAppMsg("");
+                    try {
+                      const result = await shareBillWhatsApp(viewOrder);
+                      setShareWhatsAppMsg(result.message);
+                    } catch (err) {
+                      setShareWhatsAppMsg(
+                        err instanceof Error ? err.message : "Failed to prepare bill image."
+                      );
+                    } finally {
+                      setSharingWhatsApp(false);
+                    }
+                  }}
+                  disabled={sharingWhatsApp}
                 >
                   <MessageCircle className="h-3.5 w-3.5" />
-                  Share WhatsApp
+                  {sharingWhatsApp ? "Preparing…" : "Share WhatsApp"}
                 </button>
                 <button
                   type="button"
@@ -991,6 +1008,7 @@ export default function RecordsPage() {
                   onClick={() => {
                     openOrderEdit(viewOrder);
                     setViewOrder(null);
+                    setShareWhatsAppMsg("");
                   }}
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -1005,6 +1023,11 @@ export default function RecordsPage() {
                   Delete
                 </button>
               </div>
+              {shareWhatsAppMsg && (
+                <p className="rounded-xl bg-jade-soft/70 px-3 py-2 text-sm text-jade-deep">
+                  {shareWhatsAppMsg}
+                </p>
+              )}
             </div>
           </div>
         </>

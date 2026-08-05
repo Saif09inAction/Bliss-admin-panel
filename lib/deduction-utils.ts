@@ -212,6 +212,8 @@ export function computeMonthDeductions(
     if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
     const rec = byDate.get(key);
+    // Admin full/half-day credit forgives late/early — no time cut.
+    if (rec?.dayCredit === "FULL" || rec?.dayCredit === "HALF") continue;
     if (!rec?.signInTime) continue;
 
     const late = computeLateMinutes(rec.signInTime, settings.dailySignInTime);
@@ -347,13 +349,22 @@ export function computeEarnedSalary(opts: {
       if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
       const rec = byDate.get(key);
-      if (!rec?.signInTime) continue;
+      const credit = rec?.dayCredit;
+      const hasPunch = Boolean(rec?.signInTime);
+      if (!hasPunch && credit !== "FULL" && credit !== "HALF") continue;
 
-      const late = computeLateMinutes(rec.signInTime, settings.dailySignInTime);
-      const early = computeEarlyLeaveMinutes(rec.signOutTime, settings.dailySignOutTime);
+      const dayFactor = credit === "HALF" ? 0.5 : 1;
+      const late =
+        credit === "FULL" || credit === "HALF"
+          ? 0
+          : computeLateMinutes(rec!.signInTime, settings.dailySignInTime);
+      const early =
+        credit === "FULL" || credit === "HALF"
+          ? 0
+          : computeEarlyLeaveMinutes(rec!.signOutTime, settings.dailySignOutTime);
       const lost = late + early;
       const deduction = Math.round(lost * perMinuteRate * 100) / 100;
-      const dayGross = Math.round(perDayRate * 100) / 100;
+      const dayGross = Math.round(perDayRate * dayFactor * 100) / 100;
       const dayNet = Math.max(0, Math.round((dayGross - deduction) * 100) / 100);
 
       days.push({
