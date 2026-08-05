@@ -176,16 +176,26 @@ export default function BillReportPage() {
     setMessage("");
     try {
       const id = uuid();
+      const notes = companyForm.notes.trim();
       const company: BillCompany = {
         id,
         name,
         owner,
         openingBalance: opening,
-        notes: companyForm.notes.trim() || undefined,
         createdAt: Date.now(),
         createdBy: session?.name || "Admin",
+        ...(notes ? { notes } : {}),
       };
-      await setDoc(doc(getDb(), "bill_companies", id), company);
+      // Firestore rejects undefined — only write defined fields.
+      await setDoc(doc(getDb(), "bill_companies", id), {
+        id: company.id,
+        name: company.name,
+        owner: company.owner,
+        openingBalance: company.openingBalance,
+        createdAt: company.createdAt,
+        createdBy: company.createdBy,
+        ...(notes ? { notes } : {}),
+      });
       setCompanies((cur) => [...cur, company].sort((a, b) => a.name.localeCompare(b.name)));
       setShowCompanyForm(false);
       setCompanyForm({ name: "", openingBalance: "", notes: "" });
@@ -251,6 +261,8 @@ export default function BillReportPage() {
     setMessage("");
     try {
       const id = uuid();
+      const driveLink = entryForm.driveLink.trim();
+      const remarks = entryForm.remarks.trim();
       const entry: BillEntry = {
         id,
         companyId: selected.id,
@@ -259,13 +271,27 @@ export default function BillReportPage() {
         amount,
         date: entryForm.date,
         time: entryForm.time.trim() || nowTimeStr(),
-        driveLink: entryForm.driveLink.trim() || undefined,
-        remarks: entryForm.remarks.trim() || undefined,
-        transferDone: entryModal === "TRANSFER" ? entryForm.transferDone : undefined,
         createdAt: Date.now(),
         createdBy: session?.name || "Admin",
+        ...(driveLink ? { driveLink } : {}),
+        ...(remarks ? { remarks } : {}),
+        ...(entryModal === "TRANSFER" ? { transferDone: entryForm.transferDone } : {}),
       };
-      await setDoc(doc(getDb(), "bill_entries", id), entry);
+      // Firestore rejects undefined — build payload with only defined fields.
+      await setDoc(doc(getDb(), "bill_entries", id), {
+        id: entry.id,
+        companyId: entry.companyId,
+        owner: entry.owner,
+        type: entry.type,
+        amount: entry.amount,
+        date: entry.date,
+        time: entry.time,
+        createdAt: entry.createdAt,
+        createdBy: entry.createdBy,
+        ...(driveLink ? { driveLink } : {}),
+        ...(remarks ? { remarks } : {}),
+        ...(entryModal === "TRANSFER" ? { transferDone: entryForm.transferDone } : {}),
+      });
       setEntries((cur) =>
         [entry, ...cur].sort((a, b) => {
           const dk = `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
