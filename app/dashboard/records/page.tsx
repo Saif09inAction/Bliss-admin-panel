@@ -234,14 +234,11 @@ export default function RecordsPage() {
     if (tab === "kaariger") {
       downloadCsv(
         "kaariger_orders.csv",
-        ["Product", "Kaariger", "Approved", "Target", "Status", "Verified By", "Deal"],
+        ["Product", "Kaariger", "Status", "Deal"],
         orders.map((o) => [
           o.productName,
           o.kaarigerName,
-          String(o.approvedQuantity),
-          String(o.targetQuantity),
           o.status,
-          o.verifiedBy || "",
           String(o.totalDealAmount),
         ])
       );
@@ -612,7 +609,6 @@ export default function RecordsPage() {
                   <tr>
                     <th>Product</th>
                     <th>Kaariger</th>
-                    <th>Progress</th>
                     <th className="text-right">Deal</th>
                     <th className="text-right">Actions</th>
                   </tr>
@@ -625,7 +621,6 @@ export default function RecordsPage() {
                         {o.color && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{o.color}</p>}
                       </td>
                       <td className="text-[var(--text-muted)]">{o.kaarigerName}</td>
-                      <td>{o.approvedQuantity} / {o.targetQuantity} pcs</td>
                       <td className="text-right font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -669,7 +664,6 @@ export default function RecordsPage() {
                   </div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <Field label="Progress" value={`${o.approvedQuantity} / ${o.targetQuantity} pcs`} />
                   <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
                   {o.color && <Field label="Color" value={o.color} />}
                 </div>
@@ -849,11 +843,8 @@ export default function RecordsPage() {
                     <span className={recordStatusBadge(viewOrder.status)}>{statusLabel(viewOrder.status)}</span>
                   </div>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
-                    {viewOrder.kaarigerName} · {viewOrder.approvedQuantity}/{viewOrder.targetQuantity} pcs
+                    {viewOrder.kaarigerName}
                   </p>
-                  {viewOrder.verifiedBy && (
-                    <p className="mt-1 text-xs text-[var(--jade-deep)]">Last verified by {viewOrder.verifiedBy}</p>
-                  )}
                 </div>
                 <button
                   type="button"

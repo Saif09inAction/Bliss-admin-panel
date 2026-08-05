@@ -330,7 +330,7 @@ export default function HisaabPage() {
     rows.push([]);
 
     rows.push(["ORDERS"]);
-    rows.push(["Product", "Status", "Date", "Progress", "Deal", "Paid", "Balance"]);
+    rows.push(["Product", "Status", "Date", "Deal", "Paid", "Balance"]);
     let allDeal = 0;
     let allPaid = 0;
     orders.forEach((o) => {
@@ -343,13 +343,12 @@ export default function HisaabPage() {
         o.productName,
         o.status.replace(/_/g, " "),
         formatDate(o.createdAt),
-        `${o.approvedQuantity}/${o.targetQuantity} pcs`,
         String(Math.round(net)),
         String(Math.round(paid)),
         String(Math.round(balance)),
       ]);
     });
-    rows.push(["", "", "", "TOTAL", String(Math.round(allDeal)), String(Math.round(allPaid)), String(Math.round(Math.max(0, allDeal - allPaid)))]);
+    rows.push(["", "", "TOTAL", String(Math.round(allDeal)), String(Math.round(allPaid)), String(Math.round(Math.max(0, allDeal - allPaid)))]);
     rows.push([]);
 
     if (payments.length > 0) {
@@ -752,7 +751,7 @@ function OrderDetailCard({
             <span className={orderStatusBadge(order.status)}>{order.status.replace(/_/g, " ")}</span>
           </div>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-            {formatDate(order.createdAt)} · {order.approvedQuantity}/{order.targetQuantity} pcs
+            {formatDate(order.createdAt)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
