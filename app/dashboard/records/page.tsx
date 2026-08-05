@@ -25,10 +25,11 @@ import type {
   RepairLineItem,
   ReturnRecord,
 } from "@/lib/types";
-import { downloadCsv } from "@/lib/csv";
+import { downloadCsv, uuid } from "@/lib/csv";
 import { exportBillExcel, shareBillWhatsApp } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import SearchSelect from "@/components/admin/SearchSelect";
 
 const CHARGE_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }[] = [
   { type: "RUNNER", label: "Runner" },
@@ -38,7 +39,7 @@ const CHARGE_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }
 
 type ProductLineForm = { productName: string; quantity: string; pricePerPiece: string };
 type ChargeDraft = Record<Exclude<RepairItemType, "MATERIAL">, { qty: string; price: string }>;
-type MaterialLineForm = { name: string; qty: string; price: string };
+type MaterialLineForm = { materialId: string; name: string; qty: string; price: string };
 
 function emptyProductLine(): ProductLineForm {
   return { productName: "", quantity: "", pricePerPiece: "" };
@@ -47,7 +48,7 @@ function emptyCharges(): ChargeDraft {
   return { RUNNER: { qty: "", price: "" }, FITTING: { qty: "", price: "" }, ASTAR: { qty: "", price: "" } };
 }
 function emptyMaterialLine(): MaterialLineForm {
-  return { name: "", qty: "", price: "" };
+  return { materialId: "", name: "", qty: "", price: "" };
 }
 
 type Tab = "kaariger" | "pickups" | "returns";
@@ -118,15 +119,27 @@ export default function RecordsPage() {
   const [billKaarigerName, setBillKaarigerName] = useState("");
   const [billSaving, setBillSaving] = useState(false);
   const [billMsg, setBillMsg] = useState("");
+  const [rawMaterials, setRawMaterials] = useState<{ id: string; name: string }[]>([]);
+  const [showNewMaterial, setShowNewMaterial] = useState(false);
+  const [newMaterialName, setNewMaterialName] = useState("");
+  const [addingMaterial, setAddingMaterial] = useState(false);
 
   useEffect(() => {
     async function load() {
       const db = getDb();
-      const [oSnap, pSnap, rSnap] = await Promise.all([
+      const [oSnap, pSnap, rSnap, matSnap] = await Promise.all([
         getDocs(collection(db, "kaariger_orders")),
         getDocs(collection(db, "pickup_records")),
         getDocs(collection(db, "return_records")),
+        getDocs(collection(db, "raw_materials")),
       ]);
+
+      setRawMaterials(
+        matSnap.docs
+          .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
+          .filter((m) => m.name.trim())
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
 
       setOrders(
         oSnap.docs
@@ -424,7 +437,9 @@ export default function RecordsPage() {
           price: String(it.pricePerPiece || ""),
         };
       } else {
+        const match = rawMaterials.find((m) => m.name.toLowerCase() === (it.label || "").toLowerCase());
         materials.push({
+          materialId: match?.id || "",
           name: it.label || "",
           qty: String(it.quantity || ""),
           price: String(it.pricePerPiece || ""),
@@ -1218,20 +1233,89 @@ export default function RecordsPage() {
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="label !mb-0 flex items-center gap-1.5">
                     <Package className="h-3.5 w-3.5" />
                     Material
                   </p>
-                  <button
-                    type="button"
-                    className="btn-ghost btn-sm"
-                    onClick={() => setBillMaterials((prev) => [...prev, emptyMaterialLine()])}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add material
-                  </button>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm"
+                      onClick={() => {
+                        setShowNewMaterial((v) => !v);
+                        setNewMaterialName("");
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      New
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm"
+                      onClick={() => setBillMaterials((prev) => [...prev, emptyMaterialLine()])}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add line
+                    </button>
+                  </div>
                 </div>
+                {showNewMaterial && (
+                  <div className="mb-2 flex gap-2 rounded-xl border border-dashed border-[var(--border-strong)] p-2.5">
+                    <input
+                      className="input !w-full !py-2"
+                      value={newMaterialName}
+                      onChange={(e) => setNewMaterialName(e.target.value)}
+                      placeholder="New material name…"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm shrink-0"
+                      disabled={addingMaterial || !newMaterialName.trim()}
+                      onClick={async () => {
+                        const name = newMaterialName.trim();
+                        if (!name) return;
+                        if (rawMaterials.some((m) => m.name.toLowerCase() === name.toLowerCase())) {
+                          setBillMsg(`"${name}" is already in Materials.`);
+                          return;
+                        }
+                        setAddingMaterial(true);
+                        try {
+                          const id = uuid();
+                          await setDoc(doc(getDb(), "raw_materials", id), {
+                            id,
+                            name,
+                            quantity: 0,
+                            unit: "pcs",
+                            minimumStock: 0,
+                            supplier: "",
+                            lastUpdatedBy: "Admin",
+                            lastUpdatedTime: Date.now(),
+                            imagePath: "",
+                          });
+                          setRawMaterials((prev) =>
+                            [...prev, { id, name }].sort((a, b) => a.name.localeCompare(b.name))
+                          );
+                          setBillMaterials((prev) => {
+                            const emptyIdx = prev.findIndex((l) => !l.materialId && !l.name);
+                            if (emptyIdx >= 0) {
+                              return prev.map((l, i) =>
+                                i === emptyIdx ? { ...l, materialId: id, name } : l
+                              );
+                            }
+                            return [...prev, { materialId: id, name, qty: "", price: "" }];
+                          });
+                          setNewMaterialName("");
+                          setShowNewMaterial(false);
+                        } finally {
+                          setAddingMaterial(false);
+                        }
+                      }}
+                    >
+                      {addingMaterial ? "…" : "Add"}
+                    </button>
+                  </div>
+                )}
                 <div className="space-y-2">
                   {billMaterials.map((m, index) => (
                     <div
@@ -1239,16 +1323,20 @@ export default function RecordsPage() {
                       className="grid grid-cols-[minmax(0,1fr)_5rem_6rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
                     >
                       <div>
-                        <label className="label !text-[10px]">Name</label>
-                        <input
-                          className="input !w-full !py-2"
-                          value={m.name}
-                          onChange={(e) =>
+                        <label className="label !text-[10px]">Material</label>
+                        <SearchSelect
+                          value={m.materialId}
+                          onSelect={(id) => {
+                            const mat = rawMaterials.find((x) => x.id === id);
                             setBillMaterials((prev) =>
-                              prev.map((line, i) => (i === index ? { ...line, name: e.target.value } : line))
-                            )
-                          }
-                          placeholder="e.g. Vinit"
+                              prev.map((line, i) =>
+                                i === index ? { ...line, materialId: id, name: mat?.name || "" } : line
+                              )
+                            );
+                          }}
+                          options={rawMaterials.map((x) => ({ id: x.id, label: x.name }))}
+                          placeholder="Search material…"
+                          emptyText="No materials"
                         />
                       </div>
                       <div>

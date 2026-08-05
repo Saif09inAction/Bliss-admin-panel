@@ -45,6 +45,7 @@ type ProductLineForm = {
 type DeductionDraft = Record<Exclude<RepairItemType, "MATERIAL">, { qty: string; price: string }>;
 
 type MaterialLineForm = {
+  materialId: string;
   name: string;
   qty: string;
   price: string;
@@ -63,7 +64,7 @@ function emptyDeductions(): DeductionDraft {
 }
 
 function emptyMaterialLine(): MaterialLineForm {
-  return { name: "", qty: "", price: "" };
+  return { materialId: "", name: "", qty: "", price: "" };
 }
 
 function money(n: number) {
@@ -74,6 +75,10 @@ export default function OrdersPage() {
   const { session } = useAuth();
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<CatalogProduct[]>([]);
+  const [showNewMaterial, setShowNewMaterial] = useState(false);
+  const [newMaterialName, setNewMaterialName] = useState("");
+  const [addingMaterial, setAddingMaterial] = useState(false);
 
   const [kaarigerId, setKaarigerId] = useState("");
   const [productLines, setProductLines] = useState<ProductLineForm[]>([emptyProductLine()]);
@@ -96,9 +101,10 @@ export default function OrdersPage() {
   }
 
   async function loadMeta() {
-    const [empSnap, catSnap] = await Promise.all([
+    const [empSnap, catSnap, matSnap] = await Promise.all([
       getDocs(collection(getDb(), "employees")),
       getDocs(collection(getDb(), "product_catalog")),
+      getDocs(collection(getDb(), "raw_materials")),
     ]);
     setKaarigers(
       empSnap.docs
@@ -118,6 +124,12 @@ export default function OrdersPage() {
       catSnap.docs
         .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
         .filter((p) => p.name.trim())
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
+    setRawMaterials(
+      matSnap.docs
+        .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
+        .filter((m) => m.name.trim())
         .sort((a, b) => a.name.localeCompare(b.name))
     );
   }
@@ -194,6 +206,45 @@ export default function OrdersPage() {
 
   function updateMaterialLine(index: number, patch: Partial<MaterialLineForm>) {
     setMaterialLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  }
+
+  async function addNewMaterialToList() {
+    const name = newMaterialName.trim();
+    if (!name) return;
+    if (rawMaterials.some((m) => m.name.toLowerCase() === name.toLowerCase())) {
+      setFormMsg(`"${name}" is already in Materials.`);
+      return;
+    }
+    setAddingMaterial(true);
+    setFormMsg("");
+    try {
+      const id = uuid();
+      await setDoc(doc(getDb(), "raw_materials", id), {
+        id,
+        name,
+        quantity: 0,
+        unit: "pcs",
+        minimumStock: 0,
+        supplier: "",
+        lastUpdatedBy: session?.name || "Admin",
+        lastUpdatedTime: Date.now(),
+        imagePath: "",
+      });
+      setRawMaterials((prev) => [...prev, { id, name }].sort((a, b) => a.name.localeCompare(b.name)));
+      setMaterialLines((prev) => {
+        const emptyIdx = prev.findIndex((l) => !l.materialId && !l.name);
+        if (emptyIdx >= 0) {
+          return prev.map((l, i) => (i === emptyIdx ? { ...l, materialId: id, name } : l));
+        }
+        return [...prev, { materialId: id, name, qty: "", price: "" }];
+      });
+      setNewMaterialName("");
+      setShowNewMaterial(false);
+    } catch (err) {
+      setFormMsg(err instanceof Error ? err.message : "Could not add material.");
+    } finally {
+      setAddingMaterial(false);
+    }
   }
 
   function addProductLine() {
@@ -317,6 +368,7 @@ export default function OrdersPage() {
 
   const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
   const productOptions = catalogProducts.map((p) => ({ id: p.id, label: p.name }));
+  const materialOptions = rawMaterials.map((m) => ({ id: m.id, label: m.name }));
 
   return (
     <div className="stagger space-y-5">
@@ -477,14 +529,46 @@ export default function OrdersPage() {
               <Package className="h-3.5 w-3.5" />
               Material (optional)
             </p>
-            <button type="button" className="btn-ghost btn-sm" onClick={addMaterialLine}>
-              <Plus className="h-3.5 w-3.5" />
-              Add material
-            </button>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                onClick={() => {
+                  setShowNewMaterial((v) => !v);
+                  setNewMaterialName("");
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New material
+              </button>
+              <button type="button" className="btn-ghost btn-sm" onClick={addMaterialLine}>
+                <Plus className="h-3.5 w-3.5" />
+                Add line
+              </button>
+            </div>
           </div>
           <p className="mb-2 mt-1 text-[11px] text-[var(--text-muted)]">
-            Add each raw material by name — e.g. Vinit, Badal, Board — with its own qty and rate.
+            Pick from Materials list, then enter qty and ₹/pc. Missing one? Tap &ldquo;New material&rdquo;.
           </p>
+          {showNewMaterial && (
+            <div className="mb-2 flex gap-2 rounded-xl border border-dashed border-[var(--border-strong)] p-2.5">
+              <input
+                className="input !w-full !py-2"
+                value={newMaterialName}
+                onChange={(e) => setNewMaterialName(e.target.value)}
+                placeholder="New material name…"
+                autoFocus
+              />
+              <button
+                type="button"
+                className="btn btn-primary btn-sm shrink-0"
+                disabled={addingMaterial || !newMaterialName.trim()}
+                onClick={addNewMaterialToList}
+              >
+                {addingMaterial ? "…" : "Add"}
+              </button>
+            </div>
+          )}
           <div className="space-y-2">
             {materialLines.map((m, index) => (
               <div
@@ -492,12 +576,16 @@ export default function OrdersPage() {
                 className="grid grid-cols-[minmax(0,1fr)_4.5rem_5.5rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
               >
                 <div>
-                  <label className="label !text-[10px]">Material name</label>
-                  <input
-                    className="input !w-full !py-2"
-                    value={m.name}
-                    onChange={(e) => updateMaterialLine(index, { name: e.target.value })}
-                    placeholder="e.g. Vinit"
+                  <label className="label !text-[10px]">Material</label>
+                  <SearchSelect
+                    value={m.materialId}
+                    onSelect={(id) => {
+                      const mat = rawMaterials.find((x) => x.id === id);
+                      updateMaterialLine(index, { materialId: id, name: mat?.name || "" });
+                    }}
+                    options={materialOptions}
+                    placeholder="Search material…"
+                    emptyText="No materials — add one above"
                   />
                 </div>
                 <div>
