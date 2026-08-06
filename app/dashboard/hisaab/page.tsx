@@ -301,6 +301,15 @@ export default function HisaabPage() {
   const grossOwed = openingBal + activeTotals.balance;
   const totalRemaining = Math.max(0, grossOwed - creditBal);
   const surplusCredit = Math.max(0, creditBal - grossOwed);
+  const creditAppliedToRemaining = Math.min(creditBal, grossOwed);
+  const openingPayments = useMemo(
+    () =>
+      payments
+        .filter(isOpeningPayment)
+        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)),
+    [payments]
+  );
+  const openingPaidTotal = openingPayments.reduce((s, p) => s + p.amount, 0);
 
   const previousHisaabOptions = completedOrders.map((o) => ({
     id: o.id,
@@ -521,6 +530,87 @@ export default function HisaabPage() {
             </div>
           </div>
 
+          {(openingBal > 0 || activeTotals.balance > 0 || creditBal > 0 || openingPaidTotal > 0) && (
+            <div className="surface space-y-3 p-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  How remaining is calculated
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  Opening balance is old pending money from before this system. New bills add on top.
+                  Pay clears opening first, then bills; leftover becomes credit.
+                </p>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+                <CalcRow
+                  label="Opening balance (purana baaki)"
+                  hint={
+                    openingBal > 0
+                      ? "Still pending from before this app"
+                      : openingPaidTotal > 0
+                        ? "Fully cleared by payments"
+                        : "None set on profile"
+                  }
+                  value={money(openingBal)}
+                  emphasize={openingBal > 0}
+                />
+                <CalcRow
+                  label="Unpaid bills"
+                  hint={
+                    activeOrders.length > 0
+                      ? `${activeOrders.length} active bill${activeOrders.length === 1 ? "" : "s"}`
+                      : "No active bills"
+                  }
+                  value={money(activeTotals.balance)}
+                />
+                {creditAppliedToRemaining > 0 && (
+                  <CalcRow
+                    label="Credit applied"
+                    hint="Extra paid earlier — reduces what is owed now"
+                    value={`−${money(creditAppliedToRemaining)}`}
+                    muted
+                  />
+                )}
+                <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
+                  <div>
+                    <p className="font-bold text-amber-900">Remaining to pay</p>
+                    <p className="text-xs text-amber-800/80">
+                      Opening + unpaid bills
+                      {creditAppliedToRemaining > 0 ? " − credit" : ""}
+                    </p>
+                  </div>
+                  <p className="font-display text-lg font-bold text-amber-900">{money(totalRemaining)}</p>
+                </div>
+              </div>
+              {openingPaidTotal > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Payments against opening balance
+                  </p>
+                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                    {openingPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-medium">
+                            {p.date} · {p.time} · by {p.createdBy}
+                          </p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {p.remarks || "Old remaining payment"}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
+                      <span className="font-bold text-jade-deep">Opening paid so far</span>
+                      <span className="font-bold text-jade-deep">{money(openingPaidTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {totalRemaining <= 0 && surplusCredit > 0 && (
             <div className="flex items-start gap-3 rounded-2xl border border-jade/30 bg-jade-soft/50 p-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
@@ -534,32 +624,14 @@ export default function HisaabPage() {
           )}
 
           {activeOrders.length === 0 ? (
-            <div className="space-y-4">
-              {totalRemaining > 0 && (
-                <div className="grid gap-3 sm:grid-cols-1">
-                  <div className="stat-card">
-                    <p className="stat-card-label">Remaining balance</p>
-                    <p className="stat-card-value">{money(totalRemaining)}</p>
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      Opening balance
-                      {creditBal > 0 ? " after credit" : ""}
-                      {openingBal > 0 && creditBal > 0
-                        ? ` (${money(openingBal)} − ${money(Math.min(creditBal, openingBal))})`
-                        : ""}
-                      . Use Pay to clear; extra becomes credit.
-                    </p>
-                  </div>
-                </div>
-              )}
-              <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
-                {completedOrders.length > 0
-                  ? "No active orders — bill hisaab is settled. Use \u201cSee previous hisaab\u201d above for past orders."
-                  : totalRemaining > 0
-                    ? "No active bills — remaining is from opening balance on the profile."
-                    : surplusCredit > 0
-                      ? "Nothing pending. Credit will apply on the next bill."
-                      : "No orders yet. Set opening balance on the profile if needed, or Pay to add credit."}
-              </div>
+            <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
+              {completedOrders.length > 0
+                ? "No active orders — bill hisaab is settled. Use \u201cSee previous hisaab\u201d above for past orders."
+                : totalRemaining > 0
+                  ? "No active bills — remaining above is from opening balance on the profile."
+                  : surplusCredit > 0
+                    ? "Nothing pending. Credit will apply on the next bill."
+                    : "No orders yet. Set opening balance on the kaariger profile if they had old pending, or Pay to add credit."}
             </div>
           ) : (
             <>
@@ -569,17 +641,15 @@ export default function HisaabPage() {
                   <p className="stat-card-value">{money(activeTotals.deal)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Kharcha Paid</p>
+                  <p className="stat-card-label">Kharcha on bills</p>
                   <p className="stat-card-value text-jade-deep">{money(activeTotals.paid)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Remaining balance</p>
-                  <p className="stat-card-value">{money(totalRemaining)}</p>
+                  <p className="stat-card-label">Bill balance</p>
+                  <p className="stat-card-value">{money(activeTotals.balance)}</p>
                   <p className="mt-1 text-[10px] text-[var(--text-muted)]">
-                    Opening
-                    {openingBal > 0 ? ` ${money(openingBal)}` : " ₹0"} + bills{" "}
-                    {money(activeTotals.balance)}
-                    {creditBal > 0 ? ` − credit ${money(Math.min(creditBal, grossOwed))}` : ""}
+                    Total remaining {money(totalRemaining)} includes opening
+                    {openingBal > 0 ? ` ${money(openingBal)}` : ""}
                   </p>
                 </div>
               </div>
@@ -652,7 +722,9 @@ export default function HisaabPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold">Add Kharcha</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Pays remaining balance first; leftover becomes credit for the next bill.
+                    Clears opening balance first, then unpaid bills. Leftover becomes credit for the next
+                    bill.
+                    {totalRemaining > 0 ? ` Remaining now: ${money(totalRemaining)}.` : ""}
                   </p>
                 </div>
                 <button
@@ -713,6 +785,36 @@ export default function HisaabPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function CalcRow({
+  label,
+  hint,
+  value,
+  emphasize,
+  muted,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  emphasize?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm last:border-b-0">
+      <div className="min-w-0">
+        <p className={`font-medium ${emphasize ? "text-amber-900" : ""}`}>{label}</p>
+        {hint && <p className="text-xs text-[var(--text-muted)]">{hint}</p>}
+      </div>
+      <p
+        className={`shrink-0 font-semibold ${
+          muted ? "text-[var(--text-muted)]" : emphasize ? "text-amber-900" : ""
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }

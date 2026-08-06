@@ -25,12 +25,62 @@ import type {
   RepairLineItem,
   ReturnRecord,
 } from "@/lib/types";
+import { DELIVERY_PARTNERS, MARKETPLACE_COMPANIES } from "@/lib/types";
 import { downloadCsv, formatRupee, uuid } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
 import BillWhatsAppModal from "@/components/BillWhatsAppModal";
+
+function qtyBreakdown(claris?: number, bliss?: number, total = 0) {
+  const c = claris || 0;
+  const b = bliss || 0;
+  if (c > 0 || b > 0) {
+    return [c > 0 ? `Claris ${c}` : "", b > 0 ? `Bliss ${b}` : ""].filter(Boolean).join(" · ");
+  }
+  return total > 0 ? `${total} pcs` : "—";
+}
+
+function parsePickupDoc(id: string, data: Record<string, unknown>): PickupRecord {
+  const claris = Number(data.clarisQuantity) || 0;
+  const bliss = Number(data.blissQuantity) || 0;
+  const quantity = Number(data.quantity) || claris + bliss || 0;
+  return {
+    id,
+    productName: (data.productName as string) || "",
+    color: (data.color as string) || "",
+    quantity,
+    clarisQuantity: claris > 0 || bliss > 0 ? claris : quantity,
+    blissQuantity: bliss,
+    partner: (data.partner as string) || "",
+    deliveryPartner: (data.deliveryPartner as string) || "",
+    staffName: (data.staffName as string) || "",
+    date: (data.date as string) || "",
+    time: (data.time as string) || "",
+  };
+}
+
+function parseReturnDoc(id: string, data: Record<string, unknown>): ReturnRecord {
+  const claris = Number(data.clarisQuantity) || 0;
+  const bliss = Number(data.blissQuantity) || 0;
+  const quantity = Number(data.quantity) || claris + bliss || 0;
+  return {
+    id,
+    productName: (data.productName as string) || "",
+    color: (data.color as string) || "",
+    quantity,
+    clarisQuantity: claris > 0 || bliss > 0 ? claris : quantity,
+    blissQuantity: bliss,
+    partner: (data.partner as string) || "",
+    deliveryPartner: (data.deliveryPartner as string) || "",
+    returnType: (data.returnType as string) || "",
+    staffName: (data.staffName as string) || "",
+    date: (data.date as string) || "",
+    time: (data.time as string) || "",
+    notes: data.notes as string | undefined,
+  };
+}
 
 const CHARGE_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }[] = [
   { type: "RUNNER", label: "Runner" },
@@ -94,7 +144,8 @@ export default function RecordsPage() {
   const [viewOrder, setViewOrder] = useState<KaarigerOrder | null>(null);
   const [showWhatsAppBill, setShowWhatsAppBill] = useState(false);
   const [pickupForm, setPickupForm] = useState({
-    quantity: "",
+    clarisQuantity: "",
+    blissQuantity: "",
     partner: "",
     deliveryPartner: "",
     staffName: "",
@@ -102,7 +153,8 @@ export default function RecordsPage() {
     time: "",
   });
   const [returnForm, setReturnForm] = useState({
-    quantity: "",
+    clarisQuantity: "",
+    blissQuantity: "",
     partner: "",
     deliveryPartner: "",
     returnType: "",
@@ -189,41 +241,13 @@ export default function RecordsPage() {
 
       setPickups(
         pSnap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: d.id,
-              productName: (data.productName as string) || "",
-              color: (data.color as string) || "",
-              quantity: (data.quantity as number) || 0,
-              partner: (data.partner as string) || "",
-              deliveryPartner: (data.deliveryPartner as string) || "",
-              staffName: (data.staffName as string) || "",
-              date: (data.date as string) || "",
-              time: (data.time as string) || "",
-            };
-          })
+          .map((d) => parsePickupDoc(d.id, d.data() as Record<string, unknown>))
           .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
       );
 
       setReturns(
         rSnap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: d.id,
-              productName: (data.productName as string) || "",
-              color: (data.color as string) || "",
-              quantity: (data.quantity as number) || 0,
-              partner: (data.partner as string) || "",
-              deliveryPartner: (data.deliveryPartner as string) || "",
-              returnType: (data.returnType as string) || "",
-              staffName: (data.staffName as string) || "",
-              date: (data.date as string) || "",
-              time: (data.time as string) || "",
-              notes: data.notes as string | undefined,
-            };
-          })
+          .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
           .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
       );
     }
@@ -245,14 +269,34 @@ export default function RecordsPage() {
     } else if (tab === "pickups") {
       downloadCsv(
         "pickups.csv",
-        ["Partner", "Delivery Partner", "Qty", "Staff", "Date", "Time"],
-        pickups.map((p) => [p.partner, p.deliveryPartner, String(p.quantity), p.staffName, p.date, p.time])
+        ["Company", "Delivery Partner", "Claris Qty", "Bliss Qty", "Total", "Staff", "Date", "Time"],
+        pickups.map((p) => [
+          p.partner,
+          p.deliveryPartner,
+          String(p.clarisQuantity || 0),
+          String(p.blissQuantity || 0),
+          String(p.quantity),
+          p.staffName,
+          p.date,
+          p.time,
+        ])
       );
     } else {
       downloadCsv(
         "returns.csv",
-        ["Type", "Partner", "Delivery Partner", "Qty", "Staff", "Date", "Time", "Notes"],
-        returns.map((r) => [r.returnType, r.partner, r.deliveryPartner, String(r.quantity), r.staffName, r.date, r.time, r.notes || ""])
+        ["Type", "Company", "Delivery Partner", "Claris Qty", "Bliss Qty", "Total", "Staff", "Date", "Time", "Notes"],
+        returns.map((r) => [
+          r.returnType,
+          r.partner,
+          r.deliveryPartner,
+          String(r.clarisQuantity || 0),
+          String(r.blissQuantity || 0),
+          String(r.quantity),
+          r.staffName,
+          r.date,
+          r.time,
+          r.notes || "",
+        ])
       );
     }
   }
@@ -299,7 +343,8 @@ export default function RecordsPage() {
   function openPickupEdit(p: PickupRecord) {
     setEditPickup(p);
     setPickupForm({
-      quantity: String(p.quantity),
+      clarisQuantity: String(p.clarisQuantity ?? p.quantity ?? ""),
+      blissQuantity: String(p.blissQuantity ?? ""),
       partner: p.partner,
       deliveryPartner: p.deliveryPartner,
       staffName: p.staffName,
@@ -311,10 +356,14 @@ export default function RecordsPage() {
   async function savePickup(e: React.FormEvent) {
     e.preventDefault();
     if (!editPickup) return;
+    const claris = Number(pickupForm.clarisQuantity) || 0;
+    const bliss = Number(pickupForm.blissQuantity) || 0;
     await setDoc(
       doc(getDb(), "pickup_records", editPickup.id),
       {
-        quantity: Number(pickupForm.quantity) || 0,
+        clarisQuantity: claris,
+        blissQuantity: bliss,
+        quantity: claris + bliss,
         partner: pickupForm.partner.trim(),
         deliveryPartner: pickupForm.deliveryPartner.trim(),
         staffName: pickupForm.staffName.trim(),
@@ -327,20 +376,7 @@ export default function RecordsPage() {
     const snap = await getDocs(collection(getDb(), "pickup_records"));
     setPickups(
       snap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            productName: (data.productName as string) || "",
-            color: (data.color as string) || "",
-            quantity: (data.quantity as number) || 0,
-            partner: (data.partner as string) || "",
-            deliveryPartner: (data.deliveryPartner as string) || "",
-            staffName: (data.staffName as string) || "",
-            date: (data.date as string) || "",
-            time: (data.time as string) || "",
-          };
-        })
+        .map((d) => parsePickupDoc(d.id, d.data() as Record<string, unknown>))
         .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
     );
   }
@@ -348,7 +384,8 @@ export default function RecordsPage() {
   function openReturnEdit(r: ReturnRecord) {
     setEditReturn(r);
     setReturnForm({
-      quantity: String(r.quantity),
+      clarisQuantity: String(r.clarisQuantity ?? r.quantity ?? ""),
+      blissQuantity: String(r.blissQuantity ?? ""),
       partner: r.partner,
       deliveryPartner: r.deliveryPartner,
       returnType: r.returnType,
@@ -362,10 +399,14 @@ export default function RecordsPage() {
   async function saveReturn(e: React.FormEvent) {
     e.preventDefault();
     if (!editReturn) return;
+    const claris = Number(returnForm.clarisQuantity) || 0;
+    const bliss = Number(returnForm.blissQuantity) || 0;
     await setDoc(
       doc(getDb(), "return_records", editReturn.id),
       {
-        quantity: Number(returnForm.quantity) || 0,
+        clarisQuantity: claris,
+        blissQuantity: bliss,
+        quantity: claris + bliss,
         partner: returnForm.partner.trim(),
         deliveryPartner: returnForm.deliveryPartner.trim(),
         returnType: returnForm.returnType.trim(),
@@ -380,22 +421,7 @@ export default function RecordsPage() {
     const snap = await getDocs(collection(getDb(), "return_records"));
     setReturns(
       snap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            productName: (data.productName as string) || "",
-            color: (data.color as string) || "",
-            quantity: (data.quantity as number) || 0,
-            partner: (data.partner as string) || "",
-            deliveryPartner: (data.deliveryPartner as string) || "",
-            returnType: (data.returnType as string) || "",
-            staffName: (data.staffName as string) || "",
-            date: (data.date as string) || "",
-            time: (data.time as string) || "",
-            notes: data.notes as string | undefined,
-          };
-        })
+        .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
         .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
     );
   }
@@ -556,14 +582,16 @@ export default function RecordsPage() {
   }
 
   async function deletePickupRecord(rec: PickupRecord) {
-    if (!confirm(`Delete pickup of ${rec.quantity} pcs via ${rec.partner}?`)) return;
+    const qty = qtyBreakdown(rec.clarisQuantity, rec.blissQuantity, rec.quantity);
+    if (!confirm(`Delete pickup (${qty}) via ${rec.partner || "—"}?`)) return;
     await deleteDoc(doc(getDb(), "pickup_records", rec.id));
     setPickups((prev) => prev.filter((x) => x.id !== rec.id));
     if (editPickup?.id === rec.id) setEditPickup(null);
   }
 
   async function deleteReturnRecord(rec: ReturnRecord) {
-    if (!confirm(`Delete return of ${rec.quantity} pcs via ${rec.partner}?`)) return;
+    const qty = qtyBreakdown(rec.clarisQuantity, rec.blissQuantity, rec.quantity);
+    if (!confirm(`Delete return (${qty}) via ${rec.partner || "—"}?`)) return;
     await deleteDoc(doc(getDb(), "return_records", rec.id));
     setReturns((prev) => prev.filter((x) => x.id !== rec.id));
     if (editReturn?.id === rec.id) setEditReturn(null);
@@ -684,7 +712,7 @@ export default function RecordsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Partner</th>
+                    <th>Company</th>
                     <th>Delivery Partner</th>
                     <th>Qty</th>
                     <th>Staff</th>
@@ -697,7 +725,12 @@ export default function RecordsPage() {
                     <tr key={p.id}>
                       <td className="font-semibold">{p.partner || "—"}</td>
                       <td className="text-[var(--text-muted)]">{p.deliveryPartner || "—"}</td>
-                      <td>{p.quantity}</td>
+                      <td>
+                        <p className="font-medium">{p.quantity}</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)}
+                        </p>
+                      </td>
                       <td>{p.staffName}</td>
                       <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
                       <td className="text-right">
@@ -733,7 +766,7 @@ export default function RecordsPage() {
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Delivery Partner" value={p.deliveryPartner || "—"} />
-                  <Field label="Quantity" value={String(p.quantity)} />
+                  <Field label="Quantity" value={qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)} />
                   <Field label="Staff" value={p.staffName} />
                   <Field label="Date" value={`${p.date} ${p.time}`} />
                 </div>
@@ -755,7 +788,7 @@ export default function RecordsPage() {
                 <thead>
                   <tr>
                     <th>Type</th>
-                    <th>Partner</th>
+                    <th>Company</th>
                     <th>Delivery Partner</th>
                     <th>Qty</th>
                     <th>Staff</th>
@@ -770,7 +803,12 @@ export default function RecordsPage() {
                       <td><span className="badge badge-neutral">{r.returnType}</span></td>
                       <td className="font-semibold">{r.partner || "—"}</td>
                       <td className="text-[var(--text-muted)]">{r.deliveryPartner || "—"}</td>
-                      <td>{r.quantity}</td>
+                      <td>
+                        <p className="font-medium">{r.quantity}</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)}
+                        </p>
+                      </td>
                       <td>{r.staffName}</td>
                       <td className="text-[var(--text-muted)]">{r.date} {r.time}</td>
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
@@ -808,7 +846,7 @@ export default function RecordsPage() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <Field label="Type" value={r.returnType} />
                   <Field label="Delivery Partner" value={r.deliveryPartner || "—"} />
-                  <Field label="Quantity" value={String(r.quantity)} />
+                  <Field label="Quantity" value={qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)} />
                   <Field label="Staff" value={r.staffName} />
                   <Field label="Date" value={`${r.date} ${r.time}`} />
                   {r.notes && <Field label="Notes" value={r.notes} />}
@@ -1029,12 +1067,68 @@ export default function RecordsPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form onSubmit={savePickup} className="surface w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="font-display text-lg font-bold">Edit pickup</h3>
-              {(["quantity", "partner", "deliveryPartner", "staffName", "date", "time"] as const).map((key) => (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Claris qty</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={pickupForm.clarisQuantity}
+                    onChange={(e) => setPickupForm({ ...pickupForm, clarisQuantity: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Bliss qty</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={pickupForm.blissQuantity}
+                    onChange={(e) => setPickupForm({ ...pickupForm, blissQuantity: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Company</label>
+                <select
+                  className="input"
+                  value={pickupForm.partner}
+                  onChange={(e) => setPickupForm({ ...pickupForm, partner: e.target.value })}
+                >
+                  <option value="">Select company</option>
+                  {MARKETPLACE_COMPANIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  {pickupForm.partner &&
+                    !(MARKETPLACE_COMPANIES as readonly string[]).includes(pickupForm.partner) && (
+                      <option value={pickupForm.partner}>{pickupForm.partner}</option>
+                    )}
+                </select>
+              </div>
+              <div>
+                <label className="label">Delivery partner</label>
+                <select
+                  className="input"
+                  value={pickupForm.deliveryPartner}
+                  onChange={(e) => setPickupForm({ ...pickupForm, deliveryPartner: e.target.value })}
+                >
+                  <option value="">Select delivery partner</option>
+                  {DELIVERY_PARTNERS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                  {pickupForm.deliveryPartner &&
+                    !(DELIVERY_PARTNERS as readonly string[]).includes(pickupForm.deliveryPartner) && (
+                      <option value={pickupForm.deliveryPartner}>{pickupForm.deliveryPartner}</option>
+                    )}
+                </select>
+              </div>
+              {(["staffName", "date", "time"] as const).map((key) => (
                 <div key={key}>
                   <label className="label capitalize">{key.replace(/([A-Z])/g, " $1")}</label>
                   <input
                     className="input"
-                    type={key === "quantity" ? "number" : "text"}
+                    type="text"
                     value={pickupForm[key]}
                     onChange={(e) => setPickupForm({ ...pickupForm, [key]: e.target.value })}
                   />
@@ -1055,12 +1149,68 @@ export default function RecordsPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form onSubmit={saveReturn} className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="font-display text-lg font-bold">Edit return</h3>
-              {(["quantity", "partner", "deliveryPartner", "returnType", "staffName", "date", "time", "notes"] as const).map((key) => (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Claris qty</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={returnForm.clarisQuantity}
+                    onChange={(e) => setReturnForm({ ...returnForm, clarisQuantity: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Bliss qty</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    value={returnForm.blissQuantity}
+                    onChange={(e) => setReturnForm({ ...returnForm, blissQuantity: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Company</label>
+                <select
+                  className="input"
+                  value={returnForm.partner}
+                  onChange={(e) => setReturnForm({ ...returnForm, partner: e.target.value })}
+                >
+                  <option value="">Select company</option>
+                  {MARKETPLACE_COMPANIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                  {returnForm.partner &&
+                    !(MARKETPLACE_COMPANIES as readonly string[]).includes(returnForm.partner) && (
+                      <option value={returnForm.partner}>{returnForm.partner}</option>
+                    )}
+                </select>
+              </div>
+              <div>
+                <label className="label">Delivery partner</label>
+                <select
+                  className="input"
+                  value={returnForm.deliveryPartner}
+                  onChange={(e) => setReturnForm({ ...returnForm, deliveryPartner: e.target.value })}
+                >
+                  <option value="">Select delivery partner</option>
+                  {DELIVERY_PARTNERS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                  {returnForm.deliveryPartner &&
+                    !(DELIVERY_PARTNERS as readonly string[]).includes(returnForm.deliveryPartner) && (
+                      <option value={returnForm.deliveryPartner}>{returnForm.deliveryPartner}</option>
+                    )}
+                </select>
+              </div>
+              {(["returnType", "staffName", "date", "time", "notes"] as const).map((key) => (
                 <div key={key}>
                   <label className="label capitalize">{key.replace(/([A-Z])/g, " $1")}</label>
                   <input
                     className="input"
-                    type={key === "quantity" ? "number" : "text"}
+                    type="text"
                     value={returnForm[key]}
                     onChange={(e) => setReturnForm({ ...returnForm, [key]: e.target.value })}
                   />

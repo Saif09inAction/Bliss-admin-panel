@@ -11,11 +11,20 @@ export function orderNetDeal(order: KaarigerOrder) {
   return Math.max(0, deal - (order.repairDeductionTotal || 0));
 }
 
+/** True when kharcha was applied to opening / old remaining (not credit ledger). */
 export function isOpeningPayment(p: { orderId: string; remarks?: string }) {
+  const remarks = p.remarks || "";
+  // Credit leftovers also use OPENING_ORDER_ID — exclude those from opening totals.
+  if (
+    remarks === "Extra kharcha — carried as credit" ||
+    remarks.toLowerCase().includes("carried as credit")
+  ) {
+    return false;
+  }
   return (
     p.orderId === OPENING_ORDER_ID ||
-    p.remarks === "Opening / old remaining payment" ||
-    p.remarks === "Old remaining payment"
+    remarks === "Opening / old remaining payment" ||
+    remarks === "Old remaining payment"
   );
 }
 

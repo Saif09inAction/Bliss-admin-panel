@@ -210,8 +210,13 @@ export interface PickupRecord {
   productName: string;
   color: string;
   quantity: number;
+  /** Qty under Claris entity. */
+  clarisQuantity?: number;
+  /** Qty under Bliss entity. */
+  blissQuantity?: number;
+  /** Marketplace / company — Amazon, Flipkart, etc. */
   partner: string;
-  /** Courier / delivery partner — BlueDart, Shiprocket, etc. */
+  /** Courier / delivery partner — Amazon Delivery, eKart, etc. */
   deliveryPartner: string;
   staffName: string;
   date: string;
@@ -223,8 +228,11 @@ export interface ReturnRecord {
   productName: string;
   color: string;
   quantity: number;
+  clarisQuantity?: number;
+  blissQuantity?: number;
+  /** Marketplace / company — Amazon, Flipkart, etc. */
   partner: string;
-  /** Courier / delivery partner — BlueDart, Shiprocket, etc. */
+  /** Courier / delivery partner — Amazon Delivery, eKart, etc. */
   deliveryPartner: string;
   returnType: string;
   staffName: string;
@@ -232,6 +240,31 @@ export interface ReturnRecord {
   time: string;
   notes?: string;
 }
+
+export const MARKETPLACE_COMPANIES = [
+  "Amazon",
+  "Flipkart",
+  "Myntra",
+  "Meesho",
+  "Snapdeal",
+  "Ajio",
+  "Nykaa",
+  "Other",
+] as const;
+
+export const DELIVERY_PARTNERS = [
+  "Amazon Delivery",
+  "eKart",
+  "BlueDart",
+  "Shiprocket",
+  "Delhivery",
+  "DTDC",
+  "Ecom Express",
+  "Xpressbees",
+  "Shadowfax",
+  "India Post",
+  "Valmo",
+] as const;
 
 /** Client's business entity that buys from suppliers (Bill Report). */
 export type BillOwner = "CLARIS" | "BLISS";
