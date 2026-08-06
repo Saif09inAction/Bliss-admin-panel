@@ -27,6 +27,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { payKaarigerKharcha } from "@/lib/kaariger-pay";
+import { isStandaloneRepair } from "@/lib/types";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
   computeMonthAttendanceStats,
@@ -243,6 +244,19 @@ export default function WorkerProfilePanel({
     setPaySaving(true);
     setPayMsg("");
     try {
+      const repairSnap = await getDocs(
+        query(collection(getDb(), "order_repairs"), where("kaarigerId", "==", localEmployee.phone))
+      );
+      const standaloneRepairTotal = repairSnap.docs
+        .filter((d) => {
+          const data = d.data();
+          const status = data.status as string | undefined;
+          return (
+            isStandaloneRepair(data.orderId as string) &&
+            (!status || status === "APPROVED")
+          );
+        })
+        .reduce((s, d) => s + ((d.data().totalRepairCost as number) || 0), 0);
       const result = await payKaarigerKharcha({
         kaarigerId: localEmployee.phone,
         amount,
@@ -250,6 +264,7 @@ export default function WorkerProfilePanel({
         createdBy: session.name,
         openingBalance: localEmployee.openingBalance || 0,
         creditBalance: localEmployee.creditBalance || 0,
+        standaloneRepairTotal,
       });
       const snap = await getDoc(doc(getDb(), "employees", localEmployee.phone));
       const data = snap.data() || {};

@@ -415,7 +415,7 @@ export default function OrdersPage() {
               const lineTotal = (Number(line.quantity) || 0) * (Number(line.pricePerPiece) || 0);
               return (
                 <div key={i} className="rounded-xl border border-[var(--border)] p-2.5">
-                  <div className="space-y-2 sm:grid sm:grid-cols-[minmax(0,1fr)_6rem_7rem_2.75rem] sm:items-start sm:gap-2 sm:space-y-0">
+                  <div className="space-y-2 sm:grid sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_2.75rem] sm:items-start sm:gap-2 sm:space-y-0">
                     <SearchSelect
                       value={line.productId}
                       onSelect={(id) => {
@@ -428,18 +428,16 @@ export default function OrdersPage() {
                     />
                     <div className="grid grid-cols-[1fr_1fr_2.75rem] gap-2 sm:contents">
                       <input
-                        className="input !w-full"
-                        type="number"
-                        min={0}
+                        className="input-qty"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="Qty"
                         value={line.quantity}
                         onChange={(e) => updateProductLine(i, { quantity: e.target.value })}
                       />
                       <input
-                        className="input !w-full"
-                        type="number"
-                        min={0}
-                        step="any"
+                        className="input-qty"
+                        type="text"
                         inputMode="decimal"
                         placeholder="₹ / pc"
                         value={line.pricePerPiece}
@@ -489,15 +487,15 @@ export default function OrdersPage() {
             {DEDUCTION_ITEMS.map(({ type, label }) => (
               <div
                 key={type}
-                className="grid grid-cols-[minmax(0,1fr)_4.5rem_5.5rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                className="grid grid-cols-[minmax(0,1fr)_8.5rem_8.5rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
               >
                 <p className="pb-2 text-sm font-semibold">{label}</p>
                 <div>
                   <label className="label !text-[10px]">Qty</label>
                   <input
-                    className="input !w-full !py-2"
-                    type="number"
-                    min={0}
+                    className="input-qty"
+                    type="text"
+                    inputMode="decimal"
                     value={deductions[type].qty}
                     onChange={(e) =>
                       setDeductions({ ...deductions, [type]: { ...deductions[type], qty: e.target.value } })
@@ -508,10 +506,8 @@ export default function OrdersPage() {
                 <div>
                   <label className="label !text-[10px]">₹ / pc</label>
                   <input
-                    className="input !w-full !py-2"
-                    type="number"
-                    min={0}
-                    step="any"
+                    className="input-qty"
+                    type="text"
                     inputMode="decimal"
                     value={deductions[type].price}
                     onChange={(e) =>
@@ -573,7 +569,7 @@ export default function OrdersPage() {
             {materialLines.map((m, index) => (
               <div
                 key={index}
-                className="grid grid-cols-[minmax(0,1fr)_4.5rem_5.5rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--border)] p-2.5 sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_auto] sm:items-end"
               >
                 <div>
                   <label className="label !text-[10px]">Material</label>
@@ -591,9 +587,9 @@ export default function OrdersPage() {
                 <div>
                   <label className="label !text-[10px]">Qty</label>
                   <input
-                    className="input !w-full !py-2"
-                    type="number"
-                    min={0}
+                    className="input-qty"
+                    type="text"
+                    inputMode="decimal"
                     value={m.qty}
                     onChange={(e) => updateMaterialLine(index, { qty: e.target.value })}
                     placeholder="0"
@@ -602,10 +598,8 @@ export default function OrdersPage() {
                 <div>
                   <label className="label !text-[10px]">₹ / pc</label>
                   <input
-                    className="input !w-full !py-2"
-                    type="number"
-                    min={0}
-                    step="any"
+                    className="input-qty"
+                    type="text"
                     inputMode="decimal"
                     value={m.price}
                     onChange={(e) => updateMaterialLine(index, { price: e.target.value })}
@@ -640,9 +634,7 @@ export default function OrdersPage() {
           </label>
           <input
             className="input"
-            type="number"
-            min={0}
-            step="any"
+            type="text"
             inputMode="decimal"
             value={kharcha}
             onChange={(e) => setKharcha(e.target.value)}

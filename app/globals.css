@@ -468,6 +468,31 @@ body {
   color: var(--text-faint);
 }
 
+/* Wider decimal qty / ₹ fields on bill forms — avoid clipping 125.5 etc. */
+.input-qty {
+  @apply w-full outline-none transition-all duration-200;
+  background: white;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 0.65rem 0.55rem;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(6, 17, 13, 0.03);
+  min-width: 0;
+}
+
+.input-qty:focus {
+  border-color: var(--jade);
+  box-shadow: 0 0 0 3px rgba(30, 203, 143, 0.18);
+}
+
+.input-qty::placeholder {
+  color: var(--text-faint);
+  text-align: right;
+}
+
 .label {
   @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider;
   color: var(--text-muted);

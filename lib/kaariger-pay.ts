@@ -47,6 +47,11 @@ export async function payKaarigerKharcha(opts: {
   orders?: KaarigerOrder[];
   /** Existing payments (to compute remaining per order). If omitted, loads. */
   payments?: KaarigerPayment[];
+  /**
+   * Approved repairing with no bill — already reduces what is owed on Hisaab.
+   * Used so Pay does not clear opening/bills that repairing already covered.
+   */
+  standaloneRepairTotal?: number;
 }): Promise<{ message: string; openingApplied: number; orderApplied: number; creditAdded: number }> {
   const amount = opts.amount;
   if (amount <= 0) throw new Error("Enter an amount greater than 0.");
@@ -129,10 +134,16 @@ export async function payKaarigerKharcha(opts: {
     return payload;
   }
 
+  // Repairing without a bill already reduces what is owed — skip that slice when paying.
+  let repairCover = Math.max(0, opts.standaloneRepairTotal || 0);
+
   // 1) Opening / old remaining
   const opening = Math.max(0, opts.openingBalance || 0);
-  if (opening > 0 && left > 0) {
-    openingApplied = Math.min(left, opening);
+  const openingCoveredByRepair = Math.min(opening, repairCover);
+  repairCover -= openingCoveredByRepair;
+  const openingDue = Math.max(0, opening - openingCoveredByRepair);
+  if (openingDue > 0 && left > 0) {
+    openingApplied = Math.min(left, openingDue);
     const paymentId = uuid();
     await setDoc(
       doc(db, "kaariger_payments", paymentId),
@@ -158,7 +169,10 @@ export async function payKaarigerKharcha(opts: {
     if (left <= 0) break;
     const net = orderNetDeal(order);
     const alreadyPaid = paidByOrder.get(order.id) || 0;
-    const remaining = Math.max(0, net - alreadyPaid);
+    let remaining = Math.max(0, net - alreadyPaid);
+    const billCoveredByRepair = Math.min(remaining, repairCover);
+    repairCover -= billCoveredByRepair;
+    remaining = Math.max(0, remaining - billCoveredByRepair);
     if (remaining <= 0) continue;
 
     const apply = Math.min(left, remaining);

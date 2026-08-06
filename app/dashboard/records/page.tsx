@@ -1290,7 +1290,7 @@ export default function RecordsPage() {
                   {billProducts.map((line, i) => (
                     <div
                       key={i}
-                      className="grid grid-cols-[minmax(0,1fr)_5rem_6rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                      className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--border)] p-2.5 sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_auto] sm:items-end"
                     >
                       <div>
                         <label className="label !text-[10px]">Product</label>
@@ -1308,9 +1308,9 @@ export default function RecordsPage() {
                       <div>
                         <label className="label !text-[10px]">Qty</label>
                         <input
-                          className="input !w-full !py-2"
-                          type="number"
-                          min={0}
+                          className="input-qty"
+                          type="text"
+                          inputMode="decimal"
                           value={line.quantity}
                           onChange={(e) =>
                             setBillProducts((prev) =>
@@ -1322,10 +1322,8 @@ export default function RecordsPage() {
                       <div>
                         <label className="label !text-[10px]">₹ / pc</label>
                         <input
-                          className="input !w-full !py-2"
-                          type="number"
-                          min={0}
-                          step="any"
+                          className="input-qty"
+                          type="text"
                           inputMode="decimal"
                           value={line.pricePerPiece}
                           onChange={(e) =>
@@ -1357,15 +1355,15 @@ export default function RecordsPage() {
                   {CHARGE_ITEMS.map(({ type, label }) => (
                     <div
                       key={type}
-                      className="grid grid-cols-[minmax(0,1fr)_5rem_6rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                      className="grid grid-cols-[minmax(0,1fr)_8.5rem_8.5rem] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
                     >
                       <p className="pb-2 text-sm font-semibold">{label}</p>
                       <div>
                         <label className="label !text-[10px]">Qty</label>
                         <input
-                          className="input !w-full !py-2"
-                          type="number"
-                          min={0}
+                          className="input-qty"
+                          type="text"
+                          inputMode="decimal"
                           value={billCharges[type].qty}
                           onChange={(e) =>
                             setBillCharges({
@@ -1378,10 +1376,8 @@ export default function RecordsPage() {
                       <div>
                         <label className="label !text-[10px]">₹ / pc</label>
                         <input
-                          className="input !w-full !py-2"
-                          type="number"
-                          min={0}
-                          step="any"
+                          className="input-qty"
+                          type="text"
                           inputMode="decimal"
                           value={billCharges[type].price}
                           onChange={(e) =>
@@ -1485,7 +1481,7 @@ export default function RecordsPage() {
                   {billMaterials.map((m, index) => (
                     <div
                       key={index}
-                      className="grid grid-cols-[minmax(0,1fr)_5rem_6rem_auto] items-end gap-2 rounded-xl border border-[var(--border)] p-2.5"
+                      className="grid grid-cols-1 gap-2 rounded-xl border border-[var(--border)] p-2.5 sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_auto] sm:items-end"
                     >
                       <div>
                         <label className="label !text-[10px]">Material</label>
@@ -1507,9 +1503,9 @@ export default function RecordsPage() {
                       <div>
                         <label className="label !text-[10px]">Qty</label>
                         <input
-                          className="input !w-full !py-2"
-                          type="number"
-                          min={0}
+                          className="input-qty"
+                          type="text"
+                          inputMode="decimal"
                           value={m.qty}
                           onChange={(e) =>
                             setBillMaterials((prev) =>
@@ -1521,10 +1517,8 @@ export default function RecordsPage() {
                       <div>
                         <label className="label !text-[10px]">₹ / pc</label>
                         <input
-                          className="input !w-full !py-2"
-                          type="number"
-                          min={0}
-                          step="any"
+                          className="input-qty"
+                          type="text"
                           inputMode="decimal"
                           value={m.price}
                           onChange={(e) =>

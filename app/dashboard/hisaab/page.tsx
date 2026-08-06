@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth-context";
 import { downloadCsvRows, formatRupee } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import { isOpeningPayment, orderNetDeal, payKaarigerKharcha } from "@/lib/kaariger-pay";
+import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
   KaarigerOrder,
@@ -250,6 +251,9 @@ export default function HisaabPage() {
 
       // Always allocate: old remaining → active bills → credit/advance.
       // Works even when the kaariger has no orders.
+      const standaloneRepairs = repairs
+        .filter((r) => isStandaloneRepair(r.orderId) && (!r.status || r.status === "APPROVED"))
+        .reduce((s, r) => s + (r.totalRepairCost || 0), 0);
       const result = await payKaarigerKharcha({
         kaarigerId,
         amount,
@@ -259,6 +263,7 @@ export default function HisaabPage() {
         creditBalance: k.creditBalance || 0,
         orders,
         payments,
+        standaloneRepairTotal: standaloneRepairs,
       });
       setPayMsg(result.message);
       setPayForm({ amount: "", remarks: "" });
@@ -295,13 +300,24 @@ export default function HisaabPage() {
     return { deal, paid, balance };
   }, [activeOrders, orderPaidMap]);
 
-  // Remaining = opening balance + unpaid bills − credit (credit reduces what is still owed).
+  // Remaining = opening + unpaid bills − credit − approved no-bill repairing.
   const openingBal = Math.max(0, selectedKaariger?.openingBalance || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
+  const standaloneRepairTotal = useMemo(
+    () =>
+      repairs
+        .filter(
+          (r) =>
+            isStandaloneRepair(r.orderId) &&
+            (!r.status || r.status === "APPROVED")
+        )
+        .reduce((s, r) => s + (r.totalRepairCost || 0), 0),
+    [repairs]
+  );
   const grossOwed = openingBal + activeTotals.balance;
-  const totalRemaining = Math.max(0, grossOwed - creditBal);
-  const surplusCredit = Math.max(0, creditBal - grossOwed);
-  const creditAppliedToRemaining = Math.min(creditBal, grossOwed);
+  const totalRemaining = Math.max(0, grossOwed - creditBal - standaloneRepairTotal);
+  const surplusCredit = Math.max(0, creditBal - Math.max(0, grossOwed - standaloneRepairTotal));
+  const creditAppliedToRemaining = Math.min(creditBal, Math.max(0, grossOwed - standaloneRepairTotal));
   const openingPayments = useMemo(
     () =>
       payments
@@ -530,7 +546,11 @@ export default function HisaabPage() {
             </div>
           </div>
 
-          {(openingBal > 0 || activeTotals.balance > 0 || creditBal > 0 || openingPaidTotal > 0) && (
+          {(openingBal > 0 ||
+            activeTotals.balance > 0 ||
+            creditBal > 0 ||
+            openingPaidTotal > 0 ||
+            standaloneRepairTotal > 0) && (
             <div className="surface space-y-3 p-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
@@ -538,7 +558,8 @@ export default function HisaabPage() {
                 </p>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   Opening balance is old pending money from before this system. New bills add on top.
-                  Pay clears opening first, then bills; leftover becomes credit.
+                  Repairing without a bill also reduces remaining. Pay clears opening first, then bills;
+                  leftover becomes credit.
                 </p>
               </div>
               <div className="overflow-hidden rounded-xl border border-[var(--border)]">
@@ -563,6 +584,14 @@ export default function HisaabPage() {
                   }
                   value={money(activeTotals.balance)}
                 />
+                {standaloneRepairTotal > 0 && (
+                  <CalcRow
+                    label="Repairing (no bill)"
+                    hint="Approved faulty pcs deducted from overall hisaab"
+                    value={`−${money(standaloneRepairTotal)}`}
+                    muted
+                  />
+                )}
                 {creditAppliedToRemaining > 0 && (
                   <CalcRow
                     label="Credit applied"
@@ -576,6 +605,7 @@ export default function HisaabPage() {
                     <p className="font-bold text-amber-900">Remaining to pay</p>
                     <p className="text-xs text-amber-800/80">
                       Opening + unpaid bills
+                      {standaloneRepairTotal > 0 ? " − repairing" : ""}
                       {creditAppliedToRemaining > 0 ? " − credit" : ""}
                     </p>
                   </div>

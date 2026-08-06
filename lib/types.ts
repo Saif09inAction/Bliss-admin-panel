@@ -141,8 +141,19 @@ export interface RepairLineItem {
 /** Staff-submitted repairs start as PENDING; only APPROVED ones deduct from Hisaab. */
 export type RepairStatus = "PENDING" | "APPROVED" | "REJECTED";
 
+/**
+ * Sentinel orderId for repairing when the kaariger has no bill yet.
+ * Approved costs deduct from overall hisaab remaining (not a specific bill).
+ */
+export const STANDALONE_REPAIR_ORDER_ID = "__standalone__";
+
+export function isStandaloneRepair(orderId?: string | null) {
+  return !orderId || orderId === STANDALONE_REPAIR_ORDER_ID;
+}
+
 export interface OrderRepair {
   id: string;
+  /** Bill id, or STANDALONE_REPAIR_ORDER_ID when there is no bill. */
   orderId: string;
   kaarigerId: string;
   kaarigerName: string;

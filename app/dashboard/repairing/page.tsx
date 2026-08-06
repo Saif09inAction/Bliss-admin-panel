@@ -24,12 +24,15 @@ import type {
   RepairLineItem,
   RepairStatus,
 } from "@/lib/types";
+import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
 import { formatRupee, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
 const money = formatRupee;
+
+type CatalogProduct = { id: string; name: string };
 
 function formatDate(ts: number) {
   return ts ? new Date(ts).toLocaleDateString("en-IN") : "—";
@@ -57,7 +60,7 @@ function parseRepair(d: { id: string; data: () => Record<string, unknown> }): Or
       : undefined;
   return {
     id: (data.id as string) || d.id,
-    orderId: data.orderId as string,
+    orderId: (data.orderId as string) || STANDALONE_REPAIR_ORDER_ID,
     kaarigerId: (data.kaarigerId as string) || "",
     kaarigerName: (data.kaarigerName as string) || "",
     productName: (data.productName as string) || "",
@@ -85,7 +88,7 @@ function parseRepair(d: { id: string; data: () => Record<string, unknown> }): Or
 
 /** Recalculate order.repairDeductionTotal from APPROVED repairs only. */
 async function syncOrderRepairTotal(orderId: string) {
-  if (!orderId) return;
+  if (!orderId || isStandaloneRepair(orderId)) return;
   const db = getDb();
   const [orderSnap, repairSnap] = await Promise.all([
     getDoc(doc(db, "kaariger_orders", orderId)),
@@ -124,9 +127,10 @@ type FilterTab = "PENDING" | "APPROVED" | "REJECTED" | "ALL";
 type ProductOption = {
   id: string;
   orderId: string;
-  order: KaarigerOrder;
+  order: KaarigerOrder | null;
   productName: string;
   pricePerPiece: number;
+  fromCatalog: boolean;
 };
 
 export default function RepairingPage() {
@@ -145,6 +149,7 @@ export default function RepairingPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addKaarigerId, setAddKaarigerId] = useState("");
   const [addOrders, setAddOrders] = useState<KaarigerOrder[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [addProductId, setAddProductId] = useState("");
   const [addForm, setAddForm] = useState({
     faultyQuantity: "",
@@ -156,6 +161,8 @@ export default function RepairingPage() {
   const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [approveRepairDoc, setApproveRepairDoc] = useState<OrderRepair | null>(null);
+  const [approvePrice, setApprovePrice] = useState("");
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "order_repairs"), (snap) => {
@@ -182,6 +189,17 @@ export default function RepairingPage() {
             attendancePercentage: 0,
             role: "KAARIGER" as const,
           }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    });
+    getDocs(collection(getDb(), "product_catalog")).then((snap) => {
+      setCatalogProducts(
+        snap.docs
+          .map((d) => ({
+            id: (d.data().id as string) || d.id,
+            name: (d.data().name as string) || "",
+          }))
+          .filter((p) => p.name.trim())
           .sort((a, b) => a.name.localeCompare(b.name))
       );
     });
@@ -239,7 +257,7 @@ export default function RepairingPage() {
     };
   }, [addKaarigerId]);
 
-  const productOptions: ProductOption[] = useMemo(() => {
+  const billProductOptions: ProductOption[] = useMemo(() => {
     const opts: ProductOption[] = [];
     for (const order of addOrders) {
       const lines =
@@ -263,11 +281,31 @@ export default function RepairingPage() {
           order,
           productName: line.productName,
           pricePerPiece: Number(line.pricePerPiece) || 0,
+          fromCatalog: false,
         });
       }
     }
     return opts;
   }, [addOrders]);
+
+  const catalogProductOptions: ProductOption[] = useMemo(() => {
+    const billNames = new Set(billProductOptions.map((p) => p.productName.toLowerCase()));
+    return catalogProducts
+      .filter((p) => !billNames.has(p.name.toLowerCase()))
+      .map((p) => ({
+        id: `catalog::${p.id}`,
+        orderId: STANDALONE_REPAIR_ORDER_ID,
+        order: null,
+        productName: p.name,
+        pricePerPiece: 0,
+        fromCatalog: true,
+      }));
+  }, [catalogProducts, billProductOptions]);
+
+  const productOptions = useMemo(
+    () => [...billProductOptions, ...catalogProductOptions],
+    [billProductOptions, catalogProductOptions]
+  );
 
   const selectedProduct = productOptions.find((p) => p.id === addProductId) || null;
 
@@ -293,7 +331,7 @@ export default function RepairingPage() {
 
   async function saveAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedProduct) {
+    if (!selectedProduct || !addKaarigerId) {
       setMsg("Select a kaariger and product.");
       return;
     }
@@ -307,11 +345,20 @@ export default function RepairingPage() {
       setMsg("Price cannot be negative.");
       return;
     }
+    if (addForm.applyNow && price <= 0) {
+      setMsg("Enter ₹/pc to apply deduction now.");
+      return;
+    }
 
+    const kaariger = kaarigers.find((k) => (k.phone || k.id) === addKaarigerId);
     const order = selectedProduct.order;
+    const standalone = !order || isStandaloneRepair(selectedProduct.orderId);
+    const orderId = standalone ? STANDALONE_REPAIR_ORDER_ID : order!.id;
+    const kaarigerId = order?.kaarigerId || addKaarigerId;
+    const kaarigerName = order?.kaarigerName || kaariger?.name || "Kaariger";
     const faultyTotal = Math.round(qty * price * 100) / 100;
-    const original = order.originalDealAmount ?? order.totalDealAmount;
-    const existingDeduction = order.repairDeductionTotal || 0;
+    const original = standalone ? 0 : order!.originalDealAmount ?? order!.totalDealAmount;
+    const existingDeduction = standalone ? 0 : order!.repairDeductionTotal || 0;
     const dealAfter = Math.max(0, original - existingDeduction - (addForm.applyNow ? faultyTotal : 0));
     const id = uuid();
     const now = Date.now();
@@ -324,9 +371,9 @@ export default function RepairingPage() {
       const notes = addForm.notes.trim();
       await setDoc(doc(getDb(), "order_repairs", id), {
         id,
-        orderId: order.id,
-        kaarigerId: order.kaarigerId,
-        kaarigerName: order.kaarigerName,
+        orderId,
+        kaarigerId,
+        kaarigerName,
         productName: selectedProduct.productName,
         faultyQuantity: qty,
         faultyPricePerPiece: price,
@@ -344,23 +391,24 @@ export default function RepairingPage() {
           : {}),
       });
 
-      // Lock originalDealAmount on the order if missing (same as staff create).
-      if (order.originalDealAmount == null) {
+      if (!standalone && order && order.originalDealAmount == null) {
         await updateDoc(doc(getDb(), "kaariger_orders", order.id), {
           originalDealAmount: original,
         });
       }
 
-      if (status === "APPROVED") {
-        await syncOrderRepairTotal(order.id);
+      if (status === "APPROVED" && !standalone) {
+        await syncOrderRepairTotal(orderId);
       }
 
       setShowAdd(false);
       setTab(status === "APPROVED" ? "APPROVED" : "PENDING");
       setMsg(
         status === "APPROVED"
-          ? `Repairing added — ${money(faultyTotal)} deducted from ${order.kaarigerName}'s bill.`
-          : `Repairing saved as pending for ${order.kaarigerName}.`
+          ? standalone
+            ? `Repairing added — ${money(faultyTotal)} deducted from ${kaarigerName}'s hisaab.`
+            : `Repairing added — ${money(faultyTotal)} deducted from ${kaarigerName}'s bill.`
+          : `Repairing saved as pending for ${kaarigerName}. Set ₹/pc on approve if needed.`
       );
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to add repairing.");
@@ -450,18 +498,51 @@ export default function RepairingPage() {
     }
   }
 
-  async function approveRepair(r: OrderRepair) {
-    if (!confirm(`Approve repairing for "${r.productName}" (−${money(r.totalRepairCost)})? This will deduct from the kaariger's bill.`)) {
+  function startApprove(r: OrderRepair) {
+    if (r.faultyPricePerPiece <= 0 || r.totalRepairCost <= 0) {
+      setApproveRepairDoc(r);
+      setApprovePrice("");
+      setMsg("");
+      return;
+    }
+    void confirmAndApprove(r, r.faultyPricePerPiece);
+  }
+
+  async function confirmAndApprove(r: OrderRepair, pricePerPiece: number) {
+    const qty = r.faultyQuantity || 0;
+    const price = Math.max(0, pricePerPiece);
+    if (qty <= 0) {
+      alert("Faulty quantity must be greater than 0.");
+      return;
+    }
+    if (price <= 0) {
+      alert("Enter ₹/pc before approving.");
+      return;
+    }
+    const faultyTotal = Math.round(qty * price * 100) / 100;
+    const standalone = isStandaloneRepair(r.orderId);
+    const target = standalone ? "hisaab remaining" : "bill";
+    if (
+      !confirm(
+        `Approve repairing for "${r.productName}" (−${money(faultyTotal)})? This deducts from the kaariger's ${target}.`
+      )
+    ) {
       return;
     }
     setActingId(r.id);
     try {
       await updateDoc(doc(getDb(), "order_repairs", r.id), {
         status: "APPROVED",
+        faultyPricePerPiece: price,
+        faultyTotal,
+        totalRepairCost: faultyTotal,
         reviewedBy: session?.name || "Admin",
         reviewedAt: Date.now(),
       });
-      await syncOrderRepairTotal(r.orderId);
+      if (!standalone) {
+        await syncOrderRepairTotal(r.orderId);
+      }
+      setApproveRepairDoc(null);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to approve.");
     } finally {
@@ -470,7 +551,7 @@ export default function RepairingPage() {
   }
 
   async function rejectRepair(r: OrderRepair) {
-    if (!confirm(`Reject repairing for "${r.productName}"? Nothing will be deducted from the bill.`)) {
+    if (!confirm(`Reject repairing for "${r.productName}"? Nothing will be deducted from hisaab.`)) {
       return;
     }
     setActingId(r.id);
@@ -493,7 +574,7 @@ export default function RepairingPage() {
     if (
       !confirm(
         wasApproved
-          ? `Delete approved repairing for "${r.productName}" (−${money(r.totalRepairCost)})? This restores that amount on the bill.`
+          ? `Delete approved repairing for "${r.productName}" (−${money(r.totalRepairCost)})? This restores that amount on hisaab.`
           : `Delete this repairing update for "${r.productName}"?`
       )
     ) {
@@ -590,8 +671,8 @@ export default function RepairingPage() {
           </p>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
             {tab === "PENDING"
-              ? "Staff submissions wait here, or add one yourself with Apply to bill."
-              : "Use Add Repairing, or wait for staff updates from the mobile app."}
+              ? "Staff submissions wait here, or add one yourself (bill or catalog product)."
+              : "Use Add Repairing with a bill product or catalog product, or wait for staff updates."}
           </p>
           <button type="button" className="btn btn-primary mt-4" onClick={openAdd}>
             <Plus size={16} />
@@ -621,9 +702,16 @@ export default function RepairingPage() {
                   return (
                     <tr key={r.id}>
                       <td className="font-medium">{r.kaarigerName || "—"}</td>
-                      <td>{r.productName || "—"}</td>
+                      <td>
+                        <p>{r.productName || "—"}</p>
+                        {isStandaloneRepair(r.orderId) && (
+                          <p className="text-xs text-[var(--text-muted)]">No bill · hisaab</p>
+                        )}
+                      </td>
                       <td className="text-right">{r.faultyQuantity}</td>
-                      <td className="text-right font-semibold text-danger">−{money(r.totalRepairCost)}</td>
+                      <td className="text-right font-semibold text-danger">
+                        {r.totalRepairCost > 0 ? `−${money(r.totalRepairCost)}` : "₹/pc pending"}
+                      </td>
                       <td>
                         <span className={statusBadge(status)}>{status}</span>
                       </td>
@@ -648,7 +736,7 @@ export default function RepairingPage() {
                                 type="button"
                                 className="btn btn-primary btn-sm"
                                 disabled={busy}
-                                onClick={() => approveRepair(r)}
+                                onClick={() => startApprove(r)}
                               >
                                 <Check className="h-3.5 w-3.5" />
                                 Approve
@@ -698,7 +786,10 @@ export default function RepairingPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="font-display font-bold">{r.productName || "—"}</p>
-                      <p className="text-sm text-[var(--text-muted)]">{r.kaarigerName}</p>
+                      <p className="text-sm text-[var(--text-muted)]">
+                        {r.kaarigerName}
+                        {isStandaloneRepair(r.orderId) ? " · no bill" : ""}
+                      </p>
                     </div>
                     <span className={statusBadge(status)}>{status}</span>
                   </div>
@@ -709,7 +800,9 @@ export default function RepairingPage() {
                     </div>
                     <div>
                       <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Amount</p>
-                      <p className="mt-0.5 font-medium text-danger">−{money(r.totalRepairCost)}</p>
+                      <p className="mt-0.5 font-medium text-danger">
+                        {r.totalRepairCost > 0 ? `−${money(r.totalRepairCost)}` : "₹/pc pending"}
+                      </p>
                     </div>
                     <div>
                       <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">By</p>
@@ -729,7 +822,7 @@ export default function RepairingPage() {
                           type="button"
                           className="btn btn-primary btn-sm flex-1"
                           disabled={busy}
-                          onClick={() => approveRepair(r)}
+                          onClick={() => startApprove(r)}
                         >
                           <Check className="h-3.5 w-3.5" />
                           Approve
@@ -801,9 +894,9 @@ export default function RepairingPage() {
               </div>
 
               <div>
-                <label className="label">Product / bill *</label>
+                <label className="label">Product *</label>
                 {loadingOrders ? (
-                  <p className="text-sm text-[var(--text-muted)]">Loading bills…</p>
+                  <p className="text-sm text-[var(--text-muted)]">Loading products…</p>
                 ) : (
                   <select
                     className="input"
@@ -816,17 +909,35 @@ export default function RepairingPage() {
                       {!addKaarigerId
                         ? "Select kaariger first"
                         : productOptions.length === 0
-                          ? "No bills for this kaariger"
+                          ? "No catalog products — add some in Catalog"
                           : "Select product"}
                     </option>
-                    {productOptions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.productName}
-                        {p.order.color ? ` · ${p.order.color}` : ""} · ₹
-                        {p.pricePerPiece.toLocaleString("en-IN")}/pc
-                      </option>
-                    ))}
+                    {billProductOptions.length > 0 && (
+                      <optgroup label="From bills">
+                        {billProductOptions.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.productName}
+                            {p.order?.color ? ` · ${p.order.color}` : ""} · ₹
+                            {p.pricePerPiece.toLocaleString("en-IN")}/pc
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {catalogProductOptions.length > 0 && (
+                      <optgroup label="From catalog (no bill)">
+                        {catalogProductOptions.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.productName}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
+                )}
+                {addKaarigerId && billProductOptions.length === 0 && catalogProductOptions.length > 0 && (
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                    No bills for this kaariger — pick a catalog product. Deduction applies to overall hisaab.
+                  </p>
                 )}
               </div>
 
@@ -836,14 +947,18 @@ export default function RepairingPage() {
                   <input
                     className="input"
                     type="number"
-                    min={1}
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
                     value={addForm.faultyQuantity}
                     onChange={(e) => setAddForm({ ...addForm, faultyQuantity: e.target.value })}
                     required
                   />
                 </div>
                 <div>
-                  <label className="label">₹ / pc *</label>
+                  <label className="label">
+                    ₹ / pc {addForm.applyNow ? "*" : "(on approve)"}
+                  </label>
                   <input
                     className="input"
                     type="number"
@@ -852,7 +967,7 @@ export default function RepairingPage() {
                     inputMode="decimal"
                     value={addForm.faultyPricePerPiece}
                     onChange={(e) => setAddForm({ ...addForm, faultyPricePerPiece: e.target.value })}
-                    required
+                    required={addForm.applyNow}
                   />
                 </div>
               </div>
@@ -861,7 +976,8 @@ export default function RepairingPage() {
                 <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">
                   Deduction: −
                   {money((Number(addForm.faultyQuantity) || 0) * (Number(addForm.faultyPricePerPiece) || 0))}
-                  {addForm.applyNow ? " (applied now)" : " (pending approval)"}
+                  {addForm.applyNow ? " (applied now)" : " (pending — set ₹/pc on approve)"}
+                  {selectedProduct?.fromCatalog ? " · hisaab" : selectedProduct ? " · bill" : ""}
                 </p>
               )}
 
@@ -881,7 +997,7 @@ export default function RepairingPage() {
                   checked={addForm.applyNow}
                   onChange={(e) => setAddForm({ ...addForm, applyNow: e.target.checked })}
                 />
-                Apply to bill now (approve)
+                Apply to hisaab now (approve)
               </label>
 
               {msg && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{msg}</p>}
@@ -980,6 +1096,69 @@ export default function RepairingPage() {
                 </button>
                 <button type="submit" className="btn btn-primary flex-1" disabled={saving}>
                   {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {approveRepairDoc && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setApproveRepairDoc(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              className="surface w-full max-w-sm space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void confirmAndApprove(approveRepairDoc, Number(approvePrice) || 0);
+              }}
+            >
+              <div>
+                <h3 className="font-display text-lg font-bold">Set ₹/pc to approve</h3>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  {approveRepairDoc.kaarigerName} · {approveRepairDoc.productName} ·{" "}
+                  {approveRepairDoc.faultyQuantity} pcs
+                  {isStandaloneRepair(approveRepairDoc.orderId)
+                    ? " · deducts from hisaab (no bill)"
+                    : " · deducts from bill"}
+                </p>
+              </div>
+              <div>
+                <label className="label">₹ / pc *</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  autoFocus
+                  value={approvePrice}
+                  onChange={(e) => setApprovePrice(e.target.value)}
+                  required
+                />
+              </div>
+              {(Number(approvePrice) || 0) > 0 && (
+                <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">
+                  Deduction: −
+                  {money((approveRepairDoc.faultyQuantity || 0) * (Number(approvePrice) || 0))}
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary flex-1"
+                  onClick={() => setApproveRepairDoc(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary flex-1"
+                  disabled={actingId === approveRepairDoc.id}
+                >
+                  {actingId === approveRepairDoc.id ? "Saving…" : "Approve"}
                 </button>
               </div>
             </form>
