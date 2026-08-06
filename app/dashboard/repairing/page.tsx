@@ -13,13 +13,21 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { Check, Pencil, Trash2, Wrench, X } from "lucide-react";
+import { Check, Pencil, Plus, Trash2, Wrench, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import type { OrderRepair, RepairLineItem, RepairStatus } from "@/lib/types";
-import { formatRupee } from "@/lib/csv";
+import type {
+  Employee,
+  KaarigerOrder,
+  OrderProductLine,
+  OrderRepair,
+  RepairLineItem,
+  RepairStatus,
+} from "@/lib/types";
+import { formatRupee, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import SearchSelect from "@/components/admin/SearchSelect";
 
 const money = formatRupee;
 
@@ -113,9 +121,18 @@ async function syncOrderRepairTotal(orderId: string) {
 
 type FilterTab = "PENDING" | "APPROVED" | "REJECTED" | "ALL";
 
+type ProductOption = {
+  id: string;
+  orderId: string;
+  order: KaarigerOrder;
+  productName: string;
+  pricePerPiece: number;
+};
+
 export default function RepairingPage() {
   const { session } = useAuth();
   const [repairs, setRepairs] = useState<OrderRepair[]>([]);
+  const [kaarigers, setKaarigers] = useState<Employee[]>([]);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<FilterTab>("PENDING");
   const [editRepair, setEditRepair] = useState<OrderRepair | null>(null);
@@ -125,6 +142,17 @@ export default function RepairingPage() {
     faultyPricePerPiece: "",
     notes: "",
   });
+  const [showAdd, setShowAdd] = useState(false);
+  const [addKaarigerId, setAddKaarigerId] = useState("");
+  const [addOrders, setAddOrders] = useState<KaarigerOrder[]>([]);
+  const [addProductId, setAddProductId] = useState("");
+  const [addForm, setAddForm] = useState({
+    faultyQuantity: "",
+    faultyPricePerPiece: "",
+    notes: "",
+    applyNow: true,
+  });
+  const [loadingOrders, setLoadingOrders] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -139,6 +167,207 @@ export default function RepairingPage() {
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    getDocs(collection(getDb(), "employees")).then((snap) => {
+      setKaarigers(
+        snap.docs
+          .filter((d) => d.data().role === "KAARIGER")
+          .map((d) => ({
+            id: d.id,
+            name: (d.data().name as string) || "",
+            phone: (d.data().phone as string) || d.id,
+            joiningDate: "",
+            monthlySalary: 0,
+            attendancePercentage: 0,
+            role: "KAARIGER" as const,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!addKaarigerId) {
+      setAddOrders([]);
+      setAddProductId("");
+      return;
+    }
+    let cancelled = false;
+    setLoadingOrders(true);
+    getDocs(query(collection(getDb(), "kaariger_orders"), where("kaarigerId", "==", addKaarigerId)))
+      .then((snap) => {
+        if (cancelled) return;
+        const list = snap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              kaarigerId: (data.kaarigerId as string) || "",
+              kaarigerName: (data.kaarigerName as string) || "",
+              productName: (data.productName as string) || "",
+              targetQuantity: (data.targetQuantity as number) || 0,
+              color: (data.color as string) || "",
+              rawMaterials: [],
+              totalDealAmount: (data.totalDealAmount as number) || 0,
+              pricePerPiece: (data.pricePerPiece as number) || undefined,
+              pricingType: ((data.pricingType as string) || "PER_PIECE") as "PER_PIECE" | "OVERALL",
+              status: (data.status as string) || "",
+              approvedQuantity: (data.approvedQuantity as number) || 0,
+              createdBy: (data.createdBy as string) || "",
+              createdAt: (data.createdAt as number) || 0,
+              originalDealAmount: (data.originalDealAmount as number) || undefined,
+              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+              products: ((data.products as OrderProductLine[]) || []).map((p) => ({
+                productName: p.productName || "",
+                quantity: Number(p.quantity) || 0,
+                pricePerPiece: Number(p.pricePerPiece) || 0,
+                lineTotal: Number(p.lineTotal) || 0,
+              })),
+            } satisfies KaarigerOrder;
+          })
+          .filter((o) => o.status !== "REJECTED")
+          .sort((a, b) => b.createdAt - a.createdAt);
+        setAddOrders(list);
+        setAddProductId("");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOrders(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [addKaarigerId]);
+
+  const productOptions: ProductOption[] = useMemo(() => {
+    const opts: ProductOption[] = [];
+    for (const order of addOrders) {
+      const lines =
+        order.products && order.products.length > 0
+          ? order.products
+          : [
+              {
+                productName: order.productName,
+                quantity: order.targetQuantity,
+                pricePerPiece:
+                  order.pricePerPiece ||
+                  (order.targetQuantity > 0 ? order.totalDealAmount / order.targetQuantity : 0),
+                lineTotal: order.totalDealAmount,
+              },
+            ];
+      for (const line of lines) {
+        if (!line.productName.trim()) continue;
+        opts.push({
+          id: `${order.id}::${line.productName}`,
+          orderId: order.id,
+          order,
+          productName: line.productName,
+          pricePerPiece: Number(line.pricePerPiece) || 0,
+        });
+      }
+    }
+    return opts;
+  }, [addOrders]);
+
+  const selectedProduct = productOptions.find((p) => p.id === addProductId) || null;
+
+  function openAdd() {
+    setShowAdd(true);
+    setMsg("");
+    setAddKaarigerId("");
+    setAddOrders([]);
+    setAddProductId("");
+    setAddForm({ faultyQuantity: "", faultyPricePerPiece: "", notes: "", applyNow: true });
+  }
+
+  function onPickProduct(id: string) {
+    setAddProductId(id);
+    const opt = productOptions.find((p) => p.id === id);
+    if (opt) {
+      setAddForm((f) => ({
+        ...f,
+        faultyPricePerPiece: opt.pricePerPiece ? String(opt.pricePerPiece) : f.faultyPricePerPiece,
+      }));
+    }
+  }
+
+  async function saveAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedProduct) {
+      setMsg("Select a kaariger and product.");
+      return;
+    }
+    const qty = Number(addForm.faultyQuantity) || 0;
+    const price = Number(addForm.faultyPricePerPiece) || 0;
+    if (qty <= 0) {
+      setMsg("Quantity must be greater than 0.");
+      return;
+    }
+    if (price < 0) {
+      setMsg("Price cannot be negative.");
+      return;
+    }
+
+    const order = selectedProduct.order;
+    const faultyTotal = Math.round(qty * price * 100) / 100;
+    const original = order.originalDealAmount ?? order.totalDealAmount;
+    const existingDeduction = order.repairDeductionTotal || 0;
+    const dealAfter = Math.max(0, original - existingDeduction - (addForm.applyNow ? faultyTotal : 0));
+    const id = uuid();
+    const now = Date.now();
+    const status: RepairStatus = addForm.applyNow ? "APPROVED" : "PENDING";
+    const createdBy = session?.name || "Admin";
+
+    setSaving(true);
+    setMsg("");
+    try {
+      const notes = addForm.notes.trim();
+      await setDoc(doc(getDb(), "order_repairs", id), {
+        id,
+        orderId: order.id,
+        kaarigerId: order.kaarigerId,
+        kaarigerName: order.kaarigerName,
+        productName: selectedProduct.productName,
+        faultyQuantity: qty,
+        faultyPricePerPiece: price,
+        faultyTotal,
+        items: [],
+        totalRepairCost: faultyTotal,
+        originalDealAmount: original,
+        dealAfterThisRepair: dealAfter,
+        createdBy,
+        createdAt: now,
+        status,
+        ...(notes ? { notes } : {}),
+        ...(status === "APPROVED"
+          ? { reviewedBy: createdBy, reviewedAt: now }
+          : {}),
+      });
+
+      // Lock originalDealAmount on the order if missing (same as staff create).
+      if (order.originalDealAmount == null) {
+        await updateDoc(doc(getDb(), "kaariger_orders", order.id), {
+          originalDealAmount: original,
+        });
+      }
+
+      if (status === "APPROVED") {
+        await syncOrderRepairTotal(order.id);
+      }
+
+      setShowAdd(false);
+      setTab(status === "APPROVED" ? "APPROVED" : "PENDING");
+      setMsg(
+        status === "APPROVED"
+          ? `Repairing added — ${money(faultyTotal)} deducted from ${order.kaarigerName}'s bill.`
+          : `Repairing saved as pending for ${order.kaarigerName}.`
+      );
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Failed to add repairing.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const pendingCount = useMemo(
     () => repairs.filter((r) => repairStatus(r) === "PENDING").length,
@@ -292,11 +521,23 @@ export default function RepairingPage() {
 
   return (
     <div className="space-y-5">
-      <PageToolbar title="Repairing">
+      <PageToolbar
+        title="Repairing"
+        actions={
+          <button type="button" className="btn btn-primary" onClick={openAdd}>
+            <Plus size={16} />
+            Add Repairing
+          </button>
+        }
+      >
         <p className="section-sub">
-          Staff updates land here for approval — only approved ones are deducted from Hisaab
+          Add faulty pieces yourself, or approve updates from staff — only approved ones deduct from Hisaab
         </p>
       </PageToolbar>
+
+      {msg && !showAdd && !editRepair && (
+        <p className="rounded-xl bg-jade-soft px-4 py-3 text-sm text-jade-deep">{msg}</p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="stat-card">
@@ -349,9 +590,13 @@ export default function RepairingPage() {
           </p>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
             {tab === "PENDING"
-              ? "When staff submit from the mobile Repairing section, they appear here for approval."
-              : "Entries staff record from the mobile app will show up here."}
+              ? "Staff submissions wait here, or add one yourself with Apply to bill."
+              : "Use Add Repairing, or wait for staff updates from the mobile app."}
           </p>
+          <button type="button" className="btn btn-primary mt-4" onClick={openAdd}>
+            <Plus size={16} />
+            Add Repairing
+          </button>
         </div>
       ) : (
         <>
@@ -515,6 +760,141 @@ export default function RepairingPage() {
                 </div>
               );
             })}
+          </div>
+        </>
+      )}
+
+      {showAdd && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setShowAdd(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={saveAdd}
+              className="surface max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Add repairing</h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Faulty pcs deducted from kaariger hisaab
+                  </p>
+                </div>
+                <button type="button" className="btn-icon" onClick={() => setShowAdd(false)} aria-label="Close">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div>
+                <label className="label">Kaariger *</label>
+                <SearchSelect
+                  value={addKaarigerId}
+                  onSelect={setAddKaarigerId}
+                  options={kaarigers.map((k) => ({
+                    id: k.phone || k.id,
+                    label: k.name,
+                    sublabel: k.phone,
+                  }))}
+                  placeholder="Search kaariger…"
+                  emptyText="No kaariger found"
+                />
+              </div>
+
+              <div>
+                <label className="label">Product / bill *</label>
+                {loadingOrders ? (
+                  <p className="text-sm text-[var(--text-muted)]">Loading bills…</p>
+                ) : (
+                  <select
+                    className="input"
+                    value={addProductId}
+                    onChange={(e) => onPickProduct(e.target.value)}
+                    disabled={!addKaarigerId || productOptions.length === 0}
+                    required
+                  >
+                    <option value="">
+                      {!addKaarigerId
+                        ? "Select kaariger first"
+                        : productOptions.length === 0
+                          ? "No bills for this kaariger"
+                          : "Select product"}
+                    </option>
+                    {productOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.productName}
+                        {p.order.color ? ` · ${p.order.color}` : ""} · ₹
+                        {p.pricePerPiece.toLocaleString("en-IN")}/pc
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Faulty qty *</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={addForm.faultyQuantity}
+                    onChange={(e) => setAddForm({ ...addForm, faultyQuantity: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">₹ / pc *</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    value={addForm.faultyPricePerPiece}
+                    onChange={(e) => setAddForm({ ...addForm, faultyPricePerPiece: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              {(Number(addForm.faultyQuantity) || 0) > 0 && (
+                <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">
+                  Deduction: −
+                  {money((Number(addForm.faultyQuantity) || 0) * (Number(addForm.faultyPricePerPiece) || 0))}
+                  {addForm.applyNow ? " (applied now)" : " (pending approval)"}
+                </p>
+              )}
+
+              <div>
+                <label className="label">Notes (optional)</label>
+                <input
+                  className="input"
+                  value={addForm.notes}
+                  onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+                  placeholder="Optional note"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={addForm.applyNow}
+                  onChange={(e) => setAddForm({ ...addForm, applyNow: e.target.checked })}
+                />
+                Apply to bill now (approve)
+              </label>
+
+              {msg && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{msg}</p>}
+
+              <div className="flex gap-2 pt-1">
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setShowAdd(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={saving || !selectedProduct}>
+                  {saving ? "Saving…" : "Add repairing"}
+                </button>
+              </div>
+            </form>
           </div>
         </>
       )}
