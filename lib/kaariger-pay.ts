@@ -11,21 +11,47 @@ export function orderNetDeal(order: KaarigerOrder) {
   return Math.max(0, deal - (order.repairDeductionTotal || 0));
 }
 
+/** True when leftover kharcha was parked as credit / advance. */
+export function isCreditPayment(p: { orderId: string; remarks?: string }) {
+  const remarks = (p.remarks || "").toLowerCase();
+  return (
+    p.remarks === "Extra kharcha — carried as credit" ||
+    remarks.includes("carried as credit") ||
+    remarks.includes("credit carried")
+  );
+}
+
 /** True when kharcha was applied to opening / old remaining (not credit ledger). */
 export function isOpeningPayment(p: { orderId: string; remarks?: string }) {
+  if (isCreditPayment(p)) return false;
   const remarks = p.remarks || "";
-  // Credit leftovers also use OPENING_ORDER_ID — exclude those from opening totals.
-  if (
-    remarks === "Extra kharcha — carried as credit" ||
-    remarks.toLowerCase().includes("carried as credit")
-  ) {
-    return false;
-  }
   return (
     p.orderId === OPENING_ORDER_ID ||
     remarks === "Opening / old remaining payment" ||
-    remarks === "Old remaining payment"
+    remarks === "Old remaining payment" ||
+    remarks === "Opening balance payment" ||
+    remarks.toLowerCase().includes("old remaining") ||
+    remarks.toLowerCase().includes("opening balance")
   );
+}
+
+export type PaymentKind = "opening" | "credit" | "bill";
+
+export function paymentKind(p: { orderId: string; remarks?: string }): PaymentKind {
+  if (isCreditPayment(p)) return "credit";
+  if (isOpeningPayment(p) || p.orderId === OPENING_ORDER_ID) return "opening";
+  return "bill";
+}
+
+/** Human label for a kharcha row in Transactions. */
+export function paymentLabel(
+  p: { orderId: string; remarks?: string },
+  orderNameById: Map<string, string>
+): string {
+  const kind = paymentKind(p);
+  if (kind === "opening") return "Opening balance (purana baaki)";
+  if (kind === "credit") return "Credit / advance";
+  return orderNameById.get(p.orderId) || "Bill payment";
 }
 
 /**
@@ -151,7 +177,7 @@ export async function payKaarigerKharcha(opts: {
         id: paymentId,
         orderId: OPENING_ORDER_ID,
         amount: openingApplied,
-        remarks: note || "Old remaining payment",
+        remarks: note || "Opening balance payment",
       })
     );
     await updateDoc(doc(db, "employees", opts.kaarigerId), {

@@ -19,7 +19,13 @@ import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { downloadCsvRows, formatRupee } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
-import { isOpeningPayment, orderNetDeal, payKaarigerKharcha } from "@/lib/kaariger-pay";
+import {
+  isOpeningPayment,
+  orderNetDeal,
+  payKaarigerKharcha,
+  paymentKind,
+  paymentLabel,
+} from "@/lib/kaariger-pay";
 import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -77,6 +83,8 @@ export default function HisaabPage() {
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
   /** Unified Pay (opening → bills → credit). When true, ignore payOrderId for allocation. */
   const [showUnifiedPay, setShowUnifiedPay] = useState(false);
+  /** When true, scroll/focus the full Transactions list for the selected kaariger. */
+  const [showTransactions, setShowTransactions] = useState(true);
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
@@ -167,7 +175,8 @@ export default function HisaabPage() {
             createdBy: (data.createdBy as string) || "",
           } satisfies KaarigerPayment;
         })
-        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        // Newest first so latest opening / bill payments appear at the top.
+        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
       setPayments(loadedPayments);
 
       // Self-heal stored credit from order overpayments only.
@@ -235,6 +244,7 @@ export default function HisaabPage() {
   useEffect(() => {
     loadKaarigerData(kaarigerId);
     setHistoryOrderId("");
+    setShowTransactions(true);
   }, [kaarigerId]);
 
   async function submitPayment(e: React.FormEvent) {
@@ -327,6 +337,25 @@ export default function HisaabPage() {
   );
   const openingPaidTotal = openingPayments.reduce((s, p) => s + p.amount, 0);
 
+  const orderNameById = useMemo(
+    () => new Map(orders.map((o) => [o.id, o.productName || "Bill"])),
+    [orders]
+  );
+
+  /** Every kharcha row for this kaariger — opening, bills, credit — newest first. */
+  const allTransactions = useMemo(
+    () =>
+      [...payments]
+        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+        .map((p) => ({
+          payment: p,
+          kind: paymentKind(p),
+          label: paymentLabel(p, orderNameById),
+        })),
+    [payments, orderNameById]
+  );
+  const transactionsTotal = allTransactions.reduce((s, t) => s + t.payment.amount, 0);
+
   const previousHisaabOptions = completedOrders.map((o) => ({
     id: o.id,
     label: o.productName,
@@ -377,13 +406,20 @@ export default function HisaabPage() {
     rows.push([]);
 
     if (payments.length > 0) {
-      rows.push(["KHARCHA / PAYMENT TIMELINE"]);
-      rows.push(["Date", "Time", "Order", "Amount", "Remarks", "Created By"]);
-      const orderNameById = new Map(orders.map((o) => [o.id, o.productName]));
+      rows.push(["TRANSACTIONS"]);
+      rows.push(["Date", "Time", "Type", "Amount", "Remarks", "Created By"]);
+      const names = new Map(orders.map((o) => [o.id, o.productName]));
       [...payments]
-        .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
         .forEach((p) => {
-          rows.push([p.date, p.time, orderNameById.get(p.orderId) || "—", String(Math.round(p.amount)), p.remarks || "", p.createdBy]);
+          rows.push([
+            p.date,
+            p.time,
+            paymentLabel(p, names),
+            String(Math.round(p.amount)),
+            p.remarks || "",
+            p.createdBy,
+          ]);
         });
       rows.push(["", "", "TOTAL", String(Math.round(payments.reduce((s, p) => s + p.amount, 0))), "", ""]);
       rows.push([]);
@@ -532,6 +568,23 @@ export default function HisaabPage() {
               )}
               <button
                 type="button"
+                className="btn btn-secondary btn-sm whitespace-nowrap"
+                onClick={() => {
+                  setShowTransactions(true);
+                  requestAnimationFrame(() => {
+                    document.getElementById("hisaab-transactions")?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    });
+                  });
+                }}
+              >
+                <Receipt className="h-3.5 w-3.5" />
+                Transactions
+                {allTransactions.length > 0 ? ` (${allTransactions.length})` : ""}
+              </button>
+              <button
+                type="button"
                 className="btn btn-primary btn-sm whitespace-nowrap"
                 onClick={() => {
                   setShowUnifiedPay(true);
@@ -652,6 +705,85 @@ export default function HisaabPage() {
               </p>
             </div>
           )}
+
+          <div id="hisaab-transactions" className="surface space-y-3 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Transactions
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  Every payment for this kaariger — opening balance, bills, and credit. Newest first.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowTransactions((v) => !v)}
+              >
+                {showTransactions ? "Hide" : "Show"}
+              </button>
+            </div>
+            {showTransactions && (
+              <>
+                {allTransactions.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
+                    No transactions yet. Use Pay — opening balance payments will appear here too.
+                  </p>
+                ) : (
+                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                    {allTransactions.map(({ payment: p, kind, label }) => (
+                      <div key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold">{label}</p>
+                            <span
+                              className={
+                                kind === "opening"
+                                  ? "badge badge-warn"
+                                  : kind === "credit"
+                                    ? "badge badge-success"
+                                    : "badge badge-neutral"
+                              }
+                            >
+                              {kind === "opening"
+                                ? "Opening"
+                                : kind === "credit"
+                                  ? "Credit"
+                                  : "Bill"}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            {p.date} · {p.time}
+                            {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                          </p>
+                          {p.remarks && (
+                            <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-display text-base font-bold text-jade-deep">
+                            {money(p.amount)}
+                          </p>
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
+                            Paid
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
+                      <span className="font-bold text-jade-deep">
+                        All transactions ({allTransactions.length})
+                      </span>
+                      <span className="font-display font-bold text-jade-deep">
+                        {money(transactionsTotal)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
 
           {activeOrders.length === 0 ? (
             <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
