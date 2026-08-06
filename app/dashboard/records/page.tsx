@@ -26,7 +26,7 @@ import type {
   ReturnRecord,
 } from "@/lib/types";
 import { DELIVERY_PARTNERS, MARKETPLACE_COMPANIES } from "@/lib/types";
-import { downloadCsv, formatRupee, uuid } from "@/lib/csv";
+import { downloadCsv, formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -34,6 +34,17 @@ import SearchSelect from "@/components/admin/SearchSelect";
 import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import BillWhatsAppModal from "@/components/BillWhatsAppModal";
 import { useSelection } from "@/lib/use-selection";
+import { useAuth } from "@/lib/auth-context";
+
+type OwnerFilter = "ALL" | "CLARIS" | "BLISS";
+
+function ownerQtys(r: { clarisQuantity?: number; blissQuantity?: number; quantity: number }) {
+  const c = Number(r.clarisQuantity) || 0;
+  const b = Number(r.blissQuantity) || 0;
+  if (c > 0 || b > 0) return { claris: c, bliss: b, total: c + b };
+  // Legacy docs only had total quantity — treat as Claris for filtering/totals.
+  return { claris: r.quantity || 0, bliss: 0, total: r.quantity || 0 };
+}
 
 function qtyBreakdown(claris?: number, bliss?: number, total = 0) {
   const c = claris || 0;
@@ -42,6 +53,77 @@ function qtyBreakdown(claris?: number, bliss?: number, total = 0) {
     return [c > 0 ? `Claris ${c}` : "", b > 0 ? `Bliss ${b}` : ""].filter(Boolean).join(" · ");
   }
   return total > 0 ? `${total} pcs` : "—";
+}
+
+function filteredOwnerQty(
+  r: { clarisQuantity?: number; blissQuantity?: number; quantity: number },
+  owner: OwnerFilter
+) {
+  const q = ownerQtys(r);
+  if (owner === "CLARIS") return q.claris;
+  if (owner === "BLISS") return q.bliss;
+  return q.total;
+}
+
+function companyTotals(
+  rows: { partner: string; clarisQuantity?: number; blissQuantity?: number; quantity: number }[],
+  owner: OwnerFilter
+) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const amount = filteredOwnerQty(row, owner);
+    if (amount <= 0) continue;
+    const key = row.partner?.trim() || "Other";
+    map.set(key, (map.get(key) || 0) + amount);
+  }
+  const known = MARKETPLACE_COMPANIES.filter((c) => map.has(c)).map((c) => ({
+    company: c,
+    qty: map.get(c) || 0,
+  }));
+  const extras = Array.from(map.entries())
+    .filter(([name]) => !(MARKETPLACE_COMPANIES as readonly string[]).includes(name))
+    .map(([company, qty]) => ({ company, qty }))
+    .sort((a, b) => a.company.localeCompare(b.company));
+  const items = [...known, ...extras];
+  const grand = items.reduce((s, i) => s + i.qty, 0);
+  return { items, grand };
+}
+
+function CompanyTotalsBar({
+  title,
+  totals,
+}: {
+  title: string;
+  totals: { items: { company: string; qty: number }[]; grand: number };
+}) {
+  if (totals.items.length === 0) {
+    return (
+      <div className="surface px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{title}</p>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">No quantities for this filter.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="surface space-y-3 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{title}</p>
+      <div className="flex flex-wrap gap-2">
+        {totals.items.map((item) => (
+          <div
+            key={item.company}
+            className="min-w-[7.5rem] rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3 py-2"
+          >
+            <p className="text-[11px] font-medium text-[var(--text-muted)]">{item.company}</p>
+            <p className="font-display text-lg font-bold tabular-nums">{item.qty}</p>
+          </div>
+        ))}
+        <div className="min-w-[7.5rem] rounded-xl border border-jade/30 bg-jade-soft/40 px-3 py-2">
+          <p className="text-[11px] font-medium text-jade-deep">Total</p>
+          <p className="font-display text-lg font-bold tabular-nums text-jade-deep">{totals.grand}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function parsePickupDoc(id: string, data: Record<string, unknown>): PickupRecord {
@@ -135,13 +217,17 @@ function recordStatusBadge(status: string) {
 const money = formatRupee;
 
 export default function RecordsPage() {
+  const { session } = useAuth();
   const [tab, setTab] = useState<Tab>("kaariger");
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [editPickup, setEditPickup] = useState<PickupRecord | null>(null);
-  const [editReturn, setEditReturn] = useState<ReturnRecord | null>(null);
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("ALL");
+  /** null = closed; "add" = create; record = edit */
+  const [pickupModal, setPickupModal] = useState<"add" | PickupRecord | null>(null);
+  const [returnModal, setReturnModal] = useState<"add" | ReturnRecord | null>(null);
+  const [dispatchSaving, setDispatchSaving] = useState(false);
   const [editOrder, setEditOrder] = useState<KaarigerOrder | null>(null);
   const [viewOrder, setViewOrder] = useState<KaarigerOrder | null>(null);
   const [showWhatsAppBill, setShowWhatsAppBill] = useState(false);
@@ -316,25 +402,42 @@ export default function RecordsPage() {
   }, [orders, q]);
 
   const filteredPickups = useMemo(() => {
-    if (!q) return pickups;
-    return pickups.filter(
-      (p) =>
+    return pickups.filter((p) => {
+      const oq = ownerQtys(p);
+      if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
+      if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
+      if (!q) return true;
+      return (
         p.partner.toLowerCase().includes(q) ||
         p.deliveryPartner.toLowerCase().includes(q) ||
         p.staffName.toLowerCase().includes(q)
-    );
-  }, [pickups, q]);
+      );
+    });
+  }, [pickups, q, ownerFilter]);
 
   const filteredReturns = useMemo(() => {
-    if (!q) return returns;
-    return returns.filter(
-      (r) =>
+    return returns.filter((r) => {
+      const oq = ownerQtys(r);
+      if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
+      if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
+      if (!q) return true;
+      return (
         r.partner.toLowerCase().includes(q) ||
         r.deliveryPartner.toLowerCase().includes(q) ||
         r.staffName.toLowerCase().includes(q) ||
         r.returnType.toLowerCase().includes(q)
-    );
-  }, [returns, q]);
+      );
+    });
+  }, [returns, q, ownerFilter]);
+
+  const pickupCompanyTotals = useMemo(
+    () => companyTotals(filteredPickups, ownerFilter),
+    [filteredPickups, ownerFilter]
+  );
+  const returnCompanyTotals = useMemo(
+    () => companyTotals(filteredReturns, ownerFilter),
+    [filteredReturns, ownerFilter]
+  );
 
   const count =
     tab === "kaariger"
@@ -354,10 +457,41 @@ export default function RecordsPage() {
   useEffect(() => {
     selection.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset selection when switching tabs / filters
-  }, [tab, search]);
+  }, [tab, search, ownerFilter]);
+
+  function emptyPickupForm() {
+    return {
+      clarisQuantity: "",
+      blissQuantity: "",
+      partner: "",
+      deliveryPartner: "",
+      staffName: session?.name || "Admin",
+      date: todayStr(),
+      time: nowTimeStr(),
+    };
+  }
+
+  function emptyReturnForm() {
+    return {
+      clarisQuantity: "",
+      blissQuantity: "",
+      partner: "",
+      deliveryPartner: "",
+      returnType: "RTO",
+      staffName: session?.name || "Admin",
+      date: todayStr(),
+      time: nowTimeStr(),
+      notes: "",
+    };
+  }
+
+  function openPickupAdd() {
+    setPickupForm(emptyPickupForm());
+    setPickupModal("add");
+  }
 
   function openPickupEdit(p: PickupRecord) {
-    setEditPickup(p);
+    setPickupModal(p);
     setPickupForm({
       clarisQuantity: String(p.clarisQuantity ?? p.quantity ?? ""),
       blissQuantity: String(p.blissQuantity ?? ""),
@@ -369,26 +503,7 @@ export default function RecordsPage() {
     });
   }
 
-  async function savePickup(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editPickup) return;
-    const claris = Number(pickupForm.clarisQuantity) || 0;
-    const bliss = Number(pickupForm.blissQuantity) || 0;
-    await setDoc(
-      doc(getDb(), "pickup_records", editPickup.id),
-      {
-        clarisQuantity: claris,
-        blissQuantity: bliss,
-        quantity: claris + bliss,
-        partner: pickupForm.partner.trim(),
-        deliveryPartner: pickupForm.deliveryPartner.trim(),
-        staffName: pickupForm.staffName.trim(),
-        date: pickupForm.date,
-        time: pickupForm.time,
-      },
-      { merge: true }
-    );
-    setEditPickup(null);
+  async function reloadPickups() {
     const snap = await getDocs(collection(getDb(), "pickup_records"));
     setPickups(
       snap.docs
@@ -397,8 +512,61 @@ export default function RecordsPage() {
     );
   }
 
+  async function reloadReturns() {
+    const snap = await getDocs(collection(getDb(), "return_records"));
+    setReturns(
+      snap.docs
+        .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+    );
+  }
+
+  async function savePickup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pickupModal) return;
+    const claris = Number(pickupForm.clarisQuantity) || 0;
+    const bliss = Number(pickupForm.blissQuantity) || 0;
+    if (claris + bliss <= 0) {
+      alert("Enter Claris and/or Bliss quantity.");
+      return;
+    }
+    if (!pickupForm.partner.trim()) {
+      alert("Select a company.");
+      return;
+    }
+    const id = pickupModal === "add" ? uuid() : pickupModal.id;
+    const payload = {
+      id,
+      productName: "",
+      color: "",
+      clarisQuantity: claris,
+      blissQuantity: bliss,
+      quantity: claris + bliss,
+      partner: pickupForm.partner.trim(),
+      deliveryPartner: pickupForm.deliveryPartner.trim(),
+      staffName: pickupForm.staffName.trim() || session?.name || "Admin",
+      date: pickupForm.date || todayStr(),
+      time: pickupForm.time || nowTimeStr(),
+    };
+    setDispatchSaving(true);
+    try {
+      await setDoc(doc(getDb(), "pickup_records", id), payload, { merge: true });
+      setPickupModal(null);
+      await reloadPickups();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save pickup.");
+    } finally {
+      setDispatchSaving(false);
+    }
+  }
+
+  function openReturnAdd() {
+    setReturnForm(emptyReturnForm());
+    setReturnModal("add");
+  }
+
   function openReturnEdit(r: ReturnRecord) {
-    setEditReturn(r);
+    setReturnModal(r);
     setReturnForm({
       clarisQuantity: String(r.clarisQuantity ?? r.quantity ?? ""),
       blissQuantity: String(r.blissQuantity ?? ""),
@@ -414,32 +582,44 @@ export default function RecordsPage() {
 
   async function saveReturn(e: React.FormEvent) {
     e.preventDefault();
-    if (!editReturn) return;
+    if (!returnModal) return;
     const claris = Number(returnForm.clarisQuantity) || 0;
     const bliss = Number(returnForm.blissQuantity) || 0;
-    await setDoc(
-      doc(getDb(), "return_records", editReturn.id),
-      {
-        clarisQuantity: claris,
-        blissQuantity: bliss,
-        quantity: claris + bliss,
-        partner: returnForm.partner.trim(),
-        deliveryPartner: returnForm.deliveryPartner.trim(),
-        returnType: returnForm.returnType.trim(),
-        staffName: returnForm.staffName.trim(),
-        date: returnForm.date,
-        time: returnForm.time,
-        notes: returnForm.notes.trim(),
-      },
-      { merge: true }
-    );
-    setEditReturn(null);
-    const snap = await getDocs(collection(getDb(), "return_records"));
-    setReturns(
-      snap.docs
-        .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
-        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
-    );
+    if (claris + bliss <= 0) {
+      alert("Enter Claris and/or Bliss quantity.");
+      return;
+    }
+    if (!returnForm.partner.trim()) {
+      alert("Select a company.");
+      return;
+    }
+    const id = returnModal === "add" ? uuid() : returnModal.id;
+    const notes = returnForm.notes.trim();
+    const payload: Record<string, string | number> = {
+      id,
+      productName: "",
+      color: "",
+      clarisQuantity: claris,
+      blissQuantity: bliss,
+      quantity: claris + bliss,
+      partner: returnForm.partner.trim(),
+      deliveryPartner: returnForm.deliveryPartner.trim(),
+      returnType: returnForm.returnType.trim() || "RTO",
+      staffName: returnForm.staffName.trim() || session?.name || "Admin",
+      date: returnForm.date || todayStr(),
+      time: returnForm.time || nowTimeStr(),
+    };
+    if (notes) payload.notes = notes;
+    setDispatchSaving(true);
+    try {
+      await setDoc(doc(getDb(), "return_records", id), payload, { merge: true });
+      setReturnModal(null);
+      await reloadReturns();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save return.");
+    } finally {
+      setDispatchSaving(false);
+    }
   }
 
   function openOrderEdit(o: KaarigerOrder) {
@@ -606,7 +786,7 @@ export default function RecordsPage() {
     if (!confirm(`Delete pickup (${qty}) via ${rec.partner || "—"}?`)) return;
     await deleteDoc(doc(getDb(), "pickup_records", rec.id));
     setPickups((prev) => prev.filter((x) => x.id !== rec.id));
-    if (editPickup?.id === rec.id) setEditPickup(null);
+    if (typeof pickupModal === "object" && pickupModal?.id === rec.id) setPickupModal(null);
   }
 
   async function deleteReturnRecord(rec: ReturnRecord) {
@@ -614,7 +794,7 @@ export default function RecordsPage() {
     if (!confirm(`Delete return (${qty}) via ${rec.partner || "—"}?`)) return;
     await deleteDoc(doc(getDb(), "return_records", rec.id));
     setReturns((prev) => prev.filter((x) => x.id !== rec.id));
-    if (editReturn?.id === rec.id) setEditReturn(null);
+    if (typeof returnModal === "object" && returnModal?.id === rec.id) setReturnModal(null);
   }
 
   async function deleteSelectedRecords() {
@@ -641,11 +821,15 @@ export default function RecordsPage() {
       } else if (tab === "pickups") {
         await Promise.all(ids.map((id) => deleteDoc(doc(getDb(), "pickup_records", id))));
         setPickups((prev) => prev.filter((x) => !ids.includes(x.id)));
-        if (editPickup && ids.includes(editPickup.id)) setEditPickup(null);
+        if (typeof pickupModal === "object" && pickupModal && ids.includes(pickupModal.id)) {
+          setPickupModal(null);
+        }
       } else {
         await Promise.all(ids.map((id) => deleteDoc(doc(getDb(), "return_records", id))));
         setReturns((prev) => prev.filter((x) => !ids.includes(x.id)));
-        if (editReturn && ids.includes(editReturn.id)) setEditReturn(null);
+        if (typeof returnModal === "object" && returnModal && ids.includes(returnModal.id)) {
+          setReturnModal(null);
+        }
       }
       selection.clear();
     } catch (err) {
@@ -660,10 +844,24 @@ export default function RecordsPage() {
       <PageToolbar
         title="Records"
         actions={
-          <button type="button" className="btn btn-secondary" onClick={exportCsv}>
-            <Download className="h-4 w-4" />
-            Export CSV
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {tab === "pickups" && (
+              <button type="button" className="btn btn-primary" onClick={openPickupAdd}>
+                <Plus className="h-4 w-4" />
+                Add Pickup
+              </button>
+            )}
+            {tab === "returns" && (
+              <button type="button" className="btn btn-primary" onClick={openReturnAdd}>
+                <Plus className="h-4 w-4" />
+                Add Return
+              </button>
+            )}
+            <button type="button" className="btn btn-secondary" onClick={exportCsv}>
+              <Download className="h-4 w-4" />
+              Export CSV
+            </button>
+          </div>
         }
       >
         <p className="section-sub">{count} record{count !== 1 ? "s" : ""}</p>
@@ -684,6 +882,52 @@ export default function RecordsPage() {
           </button>
         ))}
       </div>
+
+      {(tab === "pickups" || tab === "returns") && (
+        <div className="mobile-chip-scroll flex flex-wrap gap-2">
+          {(
+            [
+              { id: "ALL" as const, label: "All" },
+              { id: "CLARIS" as const, label: "Claris" },
+              { id: "BLISS" as const, label: "Bliss" },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setOwnerFilter(f.id)}
+              className={`filter-pill ${ownerFilter === f.id ? "active" : ""}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "pickups" && (
+        <CompanyTotalsBar
+          title={
+            ownerFilter === "CLARIS"
+              ? "Pickup totals · Claris"
+              : ownerFilter === "BLISS"
+                ? "Pickup totals · Bliss"
+                : "Pickup totals by company"
+          }
+          totals={pickupCompanyTotals}
+        />
+      )}
+      {tab === "returns" && (
+        <CompanyTotalsBar
+          title={
+            ownerFilter === "CLARIS"
+              ? "Return totals · Claris"
+              : ownerFilter === "BLISS"
+                ? "Return totals · Bliss"
+                : "Return totals by company"
+          }
+          totals={returnCompanyTotals}
+        />
+      )}
 
       <BulkSelectBar
         selectedCount={selection.selectedCount}
@@ -841,10 +1085,12 @@ export default function RecordsPage() {
                       <td className="font-semibold">{p.partner || "—"}</td>
                       <td className="text-[var(--text-muted)]">{p.deliveryPartner || "—"}</td>
                       <td>
-                        <p className="font-medium">{p.quantity}</p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          {qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)}
-                        </p>
+                        <p className="font-medium">{filteredOwnerQty(p, ownerFilter)}</p>
+                        {ownerFilter === "ALL" && (
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)}
+                          </p>
+                        )}
                       </td>
                       <td>{p.staffName}</td>
                       <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
@@ -892,7 +1138,14 @@ export default function RecordsPage() {
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                       <Field label="Delivery Partner" value={p.deliveryPartner || "—"} />
-                      <Field label="Quantity" value={qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)} />
+                      <Field
+                        label="Quantity"
+                        value={
+                          ownerFilter === "ALL"
+                            ? qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)
+                            : String(filteredOwnerQty(p, ownerFilter))
+                        }
+                      />
                       <Field label="Staff" value={p.staffName} />
                       <Field label="Date" value={`${p.date} ${p.time}`} />
                     </div>
@@ -946,10 +1199,12 @@ export default function RecordsPage() {
                       <td className="font-semibold">{r.partner || "—"}</td>
                       <td className="text-[var(--text-muted)]">{r.deliveryPartner || "—"}</td>
                       <td>
-                        <p className="font-medium">{r.quantity}</p>
-                        <p className="text-xs text-[var(--text-muted)]">
-                          {qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)}
-                        </p>
+                        <p className="font-medium">{filteredOwnerQty(r, ownerFilter)}</p>
+                        {ownerFilter === "ALL" && (
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)}
+                          </p>
+                        )}
                       </td>
                       <td>{r.staffName}</td>
                       <td className="text-[var(--text-muted)]">{r.date} {r.time}</td>
@@ -999,7 +1254,14 @@ export default function RecordsPage() {
                     <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                       <Field label="Type" value={r.returnType} />
                       <Field label="Delivery Partner" value={r.deliveryPartner || "—"} />
-                      <Field label="Quantity" value={qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)} />
+                      <Field
+                        label="Quantity"
+                        value={
+                          ownerFilter === "ALL"
+                            ? qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)
+                            : String(filteredOwnerQty(r, ownerFilter))
+                        }
+                      />
                       <Field label="Staff" value={r.staffName} />
                       <Field label="Date" value={`${r.date} ${r.time}`} />
                       {r.notes && <Field label="Notes" value={r.notes} />}
@@ -1216,19 +1478,21 @@ export default function RecordsPage() {
         </>
       )}
 
-      {editPickup && (
+      {pickupModal && (
         <>
-          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditPickup(null)} />
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setPickupModal(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form onSubmit={savePickup} className="surface w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
-              <h3 className="font-display text-lg font-bold">Edit pickup</h3>
+              <h3 className="font-display text-lg font-bold">
+                {pickupModal === "add" ? "Add pickup" : "Edit pickup"}
+              </h3>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Claris qty</label>
                   <input
-                    className="input"
-                    type="number"
-                    min={0}
+                    className="input input-qty"
+                    type="text"
+                    inputMode="numeric"
                     value={pickupForm.clarisQuantity}
                     onChange={(e) => setPickupForm({ ...pickupForm, clarisQuantity: e.target.value })}
                   />
@@ -1236,9 +1500,9 @@ export default function RecordsPage() {
                 <div>
                   <label className="label">Bliss qty</label>
                   <input
-                    className="input"
-                    type="number"
-                    min={0}
+                    className="input input-qty"
+                    type="text"
+                    inputMode="numeric"
                     value={pickupForm.blissQuantity}
                     onChange={(e) => setPickupForm({ ...pickupForm, blissQuantity: e.target.value })}
                   />
@@ -1250,6 +1514,7 @@ export default function RecordsPage() {
                   className="input"
                   value={pickupForm.partner}
                   onChange={(e) => setPickupForm({ ...pickupForm, partner: e.target.value })}
+                  required
                 >
                   <option value="">Select company</option>
                   {MARKETPLACE_COMPANIES.map((c) => (
@@ -1290,27 +1555,33 @@ export default function RecordsPage() {
                 </div>
               ))}
               <div className="flex gap-2 pt-1">
-                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditPickup(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Save</button>
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setPickupModal(null)} disabled={dispatchSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={dispatchSaving}>
+                  {dispatchSaving ? "Saving…" : pickupModal === "add" ? "Add" : "Save"}
+                </button>
               </div>
             </form>
           </div>
         </>
       )}
 
-      {editReturn && (
+      {returnModal && (
         <>
-          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setEditReturn(null)} />
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setReturnModal(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form onSubmit={saveReturn} className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
-              <h3 className="font-display text-lg font-bold">Edit return</h3>
+              <h3 className="font-display text-lg font-bold">
+                {returnModal === "add" ? "Add return" : "Edit return"}
+              </h3>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Claris qty</label>
                   <input
-                    className="input"
-                    type="number"
-                    min={0}
+                    className="input input-qty"
+                    type="text"
+                    inputMode="numeric"
                     value={returnForm.clarisQuantity}
                     onChange={(e) => setReturnForm({ ...returnForm, clarisQuantity: e.target.value })}
                   />
@@ -1318,9 +1589,9 @@ export default function RecordsPage() {
                 <div>
                   <label className="label">Bliss qty</label>
                   <input
-                    className="input"
-                    type="number"
-                    min={0}
+                    className="input input-qty"
+                    type="text"
+                    inputMode="numeric"
                     value={returnForm.blissQuantity}
                     onChange={(e) => setReturnForm({ ...returnForm, blissQuantity: e.target.value })}
                   />
@@ -1332,6 +1603,7 @@ export default function RecordsPage() {
                   className="input"
                   value={returnForm.partner}
                   onChange={(e) => setReturnForm({ ...returnForm, partner: e.target.value })}
+                  required
                 >
                   <option value="">Select company</option>
                   {MARKETPLACE_COMPANIES.map((c) => (
@@ -1372,8 +1644,12 @@ export default function RecordsPage() {
                 </div>
               ))}
               <div className="flex gap-2 pt-1">
-                <button type="button" className="btn btn-secondary flex-1" onClick={() => setEditReturn(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary flex-1">Save</button>
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setReturnModal(null)} disabled={dispatchSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={dispatchSaving}>
+                  {dispatchSaving ? "Saving…" : returnModal === "add" ? "Add" : "Save"}
+                </button>
               </div>
             </form>
           </div>

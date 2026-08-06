@@ -317,7 +317,6 @@ export default function HisaabPage() {
   const grossOwed = openingBal + activeTotals.balance;
   const totalRemaining = Math.max(0, grossOwed - creditBal - standaloneRepairTotal);
   const surplusCredit = Math.max(0, creditBal - Math.max(0, grossOwed - standaloneRepairTotal));
-  const creditAppliedToRemaining = Math.min(creditBal, Math.max(0, grossOwed - standaloneRepairTotal));
   const openingPayments = useMemo(
     () =>
       payments
@@ -518,6 +517,11 @@ export default function HisaabPage() {
                   <p className="font-display text-base font-bold text-amber-900">
                     {money(totalRemaining)}
                   </p>
+                  {openingBal > 0 && (
+                    <p className="mt-0.5 text-[10px] font-medium text-amber-800/90">
+                      Includes opening {money(openingBal)}
+                    </p>
+                  )}
                 </div>
               )}
               {totalRemaining <= 0 && surplusCredit > 0 && (
@@ -546,97 +550,34 @@ export default function HisaabPage() {
             </div>
           </div>
 
-          {(openingBal > 0 ||
-            activeTotals.balance > 0 ||
-            creditBal > 0 ||
-            openingPaidTotal > 0 ||
-            standaloneRepairTotal > 0) && (
-            <div className="surface space-y-3 p-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  How remaining is calculated
-                </p>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  Opening balance is old pending money from before this system. New bills add on top.
-                  Repairing without a bill also reduces remaining. Pay clears opening first, then bills;
-                  leftover becomes credit.
-                </p>
-              </div>
-              <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-                <CalcRow
-                  label="Opening balance (purana baaki)"
-                  hint={
-                    openingBal > 0
-                      ? "Still pending from before this app"
-                      : openingPaidTotal > 0
-                        ? "Fully cleared by payments"
-                        : "None set on profile"
-                  }
-                  value={money(openingBal)}
-                  emphasize={openingBal > 0}
-                />
-                <CalcRow
-                  label="Unpaid bills"
-                  hint={
-                    activeOrders.length > 0
-                      ? `${activeOrders.length} active bill${activeOrders.length === 1 ? "" : "s"}`
-                      : "No active bills"
-                  }
-                  value={money(activeTotals.balance)}
-                />
-                {standaloneRepairTotal > 0 && (
-                  <CalcRow
-                    label="Repairing (no bill)"
-                    hint="Approved faulty pcs deducted from overall hisaab"
-                    value={`−${money(standaloneRepairTotal)}`}
-                    muted
-                  />
-                )}
-                {creditAppliedToRemaining > 0 && (
-                  <CalcRow
-                    label="Credit applied"
-                    hint="Extra paid earlier — reduces what is owed now"
-                    value={`−${money(creditAppliedToRemaining)}`}
-                    muted
-                  />
-                )}
-                <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
-                  <div>
-                    <p className="font-bold text-amber-900">Remaining to pay</p>
-                    <p className="text-xs text-amber-800/80">
-                      Opening + unpaid bills
-                      {standaloneRepairTotal > 0 ? " − repairing" : ""}
-                      {creditAppliedToRemaining > 0 ? " − credit" : ""}
-                    </p>
-                  </div>
-                  <p className="font-display text-lg font-bold text-amber-900">{money(totalRemaining)}</p>
-                </div>
-              </div>
-              {openingPaidTotal > 0 && (
-                <div>
-                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                    Payments against opening balance
-                  </p>
-                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                    {openingPayments.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
-                        <div className="min-w-0">
-                          <p className="font-medium">
-                            {p.date} · {p.time} · by {p.createdBy}
-                          </p>
-                          <p className="text-xs text-[var(--text-muted)]">
-                            {p.remarks || "Old remaining payment"}
-                          </p>
-                        </div>
-                        <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
-                      <span className="font-bold text-jade-deep">Opening paid so far</span>
-                      <span className="font-bold text-jade-deep">{money(openingPaidTotal)}</span>
+          {openingPaidTotal > 0 && (
+            <div className="surface space-y-2 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                Opening balance payments
+              </p>
+              <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                {openingPayments.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium">
+                        {p.date} · {p.time} · by {p.createdBy}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {p.remarks || "Old remaining payment"}
+                      </p>
                     </div>
+                    <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
                   </div>
+                ))}
+                <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
+                  <span className="font-bold text-jade-deep">Opening paid so far</span>
+                  <span className="font-bold text-jade-deep">{money(openingPaidTotal)}</span>
                 </div>
+              </div>
+              {openingBal > 0 && (
+                <p className="text-xs text-[var(--text-muted)]">
+                  Still left in opening: {money(openingBal)} (included in remaining above)
+                </p>
               )}
             </div>
           )}
@@ -815,36 +756,6 @@ export default function HisaabPage() {
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-function CalcRow({
-  label,
-  hint,
-  value,
-  emphasize,
-  muted,
-}: {
-  label: string;
-  hint?: string;
-  value: string;
-  emphasize?: boolean;
-  muted?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm last:border-b-0">
-      <div className="min-w-0">
-        <p className={`font-medium ${emphasize ? "text-amber-900" : ""}`}>{label}</p>
-        {hint && <p className="text-xs text-[var(--text-muted)]">{hint}</p>}
-      </div>
-      <p
-        className={`shrink-0 font-semibold ${
-          muted ? "text-[var(--text-muted)]" : emphasize ? "text-amber-900" : ""
-        }`}
-      >
-        {value}
-      </p>
     </div>
   );
 }
