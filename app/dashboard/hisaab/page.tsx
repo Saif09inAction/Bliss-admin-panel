@@ -83,8 +83,8 @@ export default function HisaabPage() {
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
   /** Unified Pay (opening → bills → credit). When true, ignore payOrderId for allocation. */
   const [showUnifiedPay, setShowUnifiedPay] = useState(false);
-  /** When true, scroll/focus the full Transactions list for the selected kaariger. */
-  const [showTransactions, setShowTransactions] = useState(true);
+  /** Hidden by default — Transactions button reveals the full payment history. */
+  const [showTransactions, setShowTransactions] = useState(false);
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
@@ -250,7 +250,7 @@ export default function HisaabPage() {
   useEffect(() => {
     loadKaarigerData(kaarigerId);
     setHistoryOrderId("");
-    setShowTransactions(true);
+    setShowTransactions(false);
   }, [kaarigerId]);
 
   async function submitPayment(e: React.FormEvent) {
@@ -285,14 +285,7 @@ export default function HisaabPage() {
       setPayForm({ amount: "", remarks: "" });
       setShowUnifiedPay(false);
       setPayOrderId(null);
-      setShowTransactions(true);
       await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
-      requestAnimationFrame(() => {
-        document.getElementById("hisaab-transactions")?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
     } catch (err) {
       setPayMsg(err instanceof Error ? err.message : "Failed to record kharcha.");
     } finally {
@@ -373,6 +366,12 @@ export default function HisaabPage() {
     [payments, orderNameById]
   );
   const transactionsTotal = allTransactions.reduce((s, t) => s + t.payment.amount, 0);
+  const billPaidTotal = allTransactions
+    .filter((t) => t.kind === "bill")
+    .reduce((s, t) => s + t.payment.amount, 0);
+  const creditPaidTotal = allTransactions
+    .filter((t) => t.kind === "credit")
+    .reduce((s, t) => s + t.payment.amount, 0);
 
   const previousHisaabOptions = completedOrders.map((o) => ({
     id: o.id,
@@ -586,20 +585,27 @@ export default function HisaabPage() {
               )}
               <button
                 type="button"
-                className="btn btn-secondary whitespace-nowrap"
+                className={`btn whitespace-nowrap ${showTransactions ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => {
-                  setShowTransactions(true);
-                  requestAnimationFrame(() => {
-                    document.getElementById("hisaab-transactions")?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start",
-                    });
+                  setShowTransactions((v) => {
+                    const next = !v;
+                    if (next) {
+                      requestAnimationFrame(() => {
+                        document.getElementById("hisaab-transactions")?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                      });
+                    }
+                    return next;
                   });
                 }}
               >
                 <Receipt className="h-4 w-4" />
-                Transactions
-                {allTransactions.length > 0 ? ` (${allTransactions.length})` : ""}
+                {showTransactions ? "Hide transactions" : "Transactions"}
+                {!showTransactions && allTransactions.length > 0
+                  ? ` (${allTransactions.length})`
+                  : ""}
               </button>
               <button
                 type="button"
@@ -617,93 +623,117 @@ export default function HisaabPage() {
             </div>
           </div>
 
-          {/* Always first — every opening / bill / credit payment for this kaariger */}
-          <div
-            id="hisaab-transactions"
-            className="surface space-y-3 border-2 border-jade/25 p-4"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-jade-deep">
-                  <Receipt className="h-4 w-4" />
-                  Transactions
-                </p>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  Every payment — opening balance, bills, and credit. Newest first.
-                  {openingPaidTotal > 0
-                    ? ` Opening paid so far: ${money(openingPaidTotal)}.`
-                    : ""}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setShowTransactions((v) => !v)}
-              >
-                {showTransactions ? "Hide" : "Show"}
-              </button>
-            </div>
-            {showTransactions && (
-              <>
-                {allTransactions.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
-                    No transactions yet. Use Pay — a ₹10,000 opening or bill payment will show here
-                    immediately.
+          {/* Shown only when admin clicks Transactions */}
+          {showTransactions && (
+            <div
+              id="hisaab-transactions"
+              className="surface space-y-3 border-2 border-jade/25 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-jade-deep">
+                    <Receipt className="h-4 w-4" />
+                    All transactions
                   </p>
-                ) : (
-                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                    {allTransactions.map(({ payment: p, kind, label }) => (
-                      <div key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold">{label}</p>
-                            <span
-                              className={
-                                kind === "opening"
-                                  ? "badge badge-warn"
-                                  : kind === "credit"
-                                    ? "badge badge-success"
-                                    : "badge badge-neutral"
-                              }
-                            >
-                              {kind === "opening"
-                                ? "Opening"
+                  <p className="mt-1 text-sm text-[var(--text-muted)]">
+                    Every payment for this kaariger — opening, bills, and credit. Newest first.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowTransactions(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3 py-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Total paid
+                  </p>
+                  <p className="font-display text-lg font-bold text-jade-deep">
+                    {money(transactionsTotal)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3 py-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Opening
+                  </p>
+                  <p className="font-display text-lg font-bold">{money(openingPaidTotal)}</p>
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3 py-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Bills
+                  </p>
+                  <p className="font-display text-lg font-bold">{money(billPaidTotal)}</p>
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3 py-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Credit / advance
+                  </p>
+                  <p className="font-display text-lg font-bold">{money(creditPaidTotal)}</p>
+                </div>
+              </div>
+
+              {allTransactions.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
+                  No transactions yet. Use Pay — opening and bill payments will appear here.
+                </p>
+              ) : (
+                <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                  {allTransactions.map(({ payment: p, kind, label }) => (
+                    <div key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold">{label}</p>
+                          <span
+                            className={
+                              kind === "opening"
+                                ? "badge badge-warn"
                                 : kind === "credit"
-                                  ? "Credit"
-                                  : "Bill"}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                            {p.date} · {p.time}
-                            {p.createdBy ? ` · by ${p.createdBy}` : ""}
-                          </p>
-                          {p.remarks && (
-                            <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>
-                          )}
+                                  ? "badge badge-success"
+                                  : "badge badge-neutral"
+                            }
+                          >
+                            {kind === "opening"
+                              ? "Opening"
+                              : kind === "credit"
+                                ? "Credit"
+                                : "Bill"}
+                          </span>
                         </div>
-                        <div className="shrink-0 text-right">
-                          <p className="font-display text-lg font-bold text-jade-deep">
-                            {money(p.amount)}
-                          </p>
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
-                            Paid
-                          </p>
-                        </div>
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                          {p.date} · {p.time}
+                          {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                        </p>
+                        {p.remarks && (
+                          <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>
+                        )}
                       </div>
-                    ))}
-                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
-                      <span className="font-bold text-jade-deep">
-                        All transactions ({allTransactions.length})
-                      </span>
-                      <span className="font-display font-bold text-jade-deep">
-                        {money(transactionsTotal)}
-                      </span>
+                      <div className="shrink-0 text-right">
+                        <p className="font-display text-lg font-bold text-jade-deep">
+                          {money(p.amount)}
+                        </p>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
+                          Paid
+                        </p>
+                      </div>
                     </div>
+                  ))}
+                  <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
+                    <span className="font-bold text-jade-deep">
+                      All transactions ({allTransactions.length})
+                    </span>
+                    <span className="font-display font-bold text-jade-deep">
+                      {money(transactionsTotal)}
+                    </span>
                   </div>
-                )}
-              </>
-            )}
-          </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {(openingBal > 0 ||
             activeTotals.balance > 0 ||
@@ -771,6 +801,32 @@ export default function HisaabPage() {
                   <p className="font-display text-lg font-bold text-amber-900">{money(totalRemaining)}</p>
                 </div>
               </div>
+              {openingPaidTotal > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                    Payments against opening balance
+                  </p>
+                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                    {openingPayments.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-medium">
+                            {p.date} · {p.time} · by {p.createdBy}
+                          </p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {p.remarks || "Old remaining payment"}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
+                      <span className="font-bold text-jade-deep">Opening paid so far</span>
+                      <span className="font-bold text-jade-deep">{money(openingPaidTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
