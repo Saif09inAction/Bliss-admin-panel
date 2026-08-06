@@ -29,6 +29,8 @@ import { formatRupee, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
+import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
+import { useSelection } from "@/lib/use-selection";
 
 const money = formatRupee;
 
@@ -163,6 +165,7 @@ export default function RepairingPage() {
   const [msg, setMsg] = useState("");
   const [approveRepairDoc, setApproveRepairDoc] = useState<OrderRepair | null>(null);
   const [approvePrice, setApprovePrice] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "order_repairs"), (snap) => {
@@ -440,6 +443,14 @@ export default function RepairingPage() {
     });
   }, [repairs, search, tab]);
 
+  const visibleIds = useMemo(() => filtered.map((r) => r.id), [filtered]);
+  const selection = useSelection(visibleIds);
+
+  useEffect(() => {
+    selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, search]);
+
   function openEdit(r: OrderRepair) {
     setEditRepair(r);
     setMsg("");
@@ -589,6 +600,42 @@ export default function RepairingPage() {
     }
   }
 
+  async function deleteSelectedRepairs() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    const selectedRows = repairs.filter((r) => ids.includes(r.id));
+    const approvedCount = selectedRows.filter(isApproved).length;
+    if (
+      !confirm(
+        `Delete ${ids.length} selected repairing record${ids.length === 1 ? "" : "s"}?${
+          approvedCount > 0
+            ? ` ${approvedCount} approved will be restored on hisaab/bills.`
+            : ""
+        }`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      const orderIdsToSync = new Set<string>();
+      for (const r of selectedRows) {
+        await deleteDoc(doc(getDb(), "order_repairs", r.id));
+        if (isApproved(r) && !isStandaloneRepair(r.orderId)) {
+          orderIdsToSync.add(r.orderId);
+        }
+      }
+      await Promise.all(Array.from(orderIdsToSync).map((id) => syncOrderRepairTotal(id)));
+      setRepairs((prev) => prev.filter((r) => !ids.includes(r.id)));
+      if (editRepair && ids.includes(editRepair.id)) setEditRepair(null);
+      selection.clear();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete selected.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   function statusBadge(status: RepairStatus) {
     switch (status) {
       case "PENDING":
@@ -661,6 +708,18 @@ export default function RepairingPage() {
         ))}
       </div>
 
+      <BulkSelectBar
+        selectedCount={selection.selectedCount}
+        totalVisible={visibleIds.length}
+        allVisibleSelected={selection.allVisibleSelected}
+        someVisibleSelected={selection.someVisibleSelected}
+        onToggleAll={selection.toggleAllVisible}
+        onClear={selection.clear}
+        onDelete={() => void deleteSelectedRepairs()}
+        deleting={bulkDeleting}
+        noun="repairing"
+      />
+
       {filtered.length === 0 ? (
         <div className="surface flex flex-col items-center py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-jade-soft text-jade-deep">
@@ -685,6 +744,13 @@ export default function RepairingPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-10">
+                    <SelectCheckbox
+                      checked={selection.allVisibleSelected}
+                      onChange={selection.toggleAllVisible}
+                      label="Select all repairing"
+                    />
+                  </th>
                   <th>Kaariger</th>
                   <th>Product</th>
                   <th className="text-right">Qty</th>
@@ -700,7 +766,14 @@ export default function RepairingPage() {
                   const status = repairStatus(r);
                   const busy = actingId === r.id;
                   return (
-                    <tr key={r.id}>
+                    <tr key={r.id} className={selection.isSelected(r.id) ? "bg-jade-soft/30" : undefined}>
+                      <td>
+                        <SelectCheckbox
+                          checked={selection.isSelected(r.id)}
+                          onChange={() => selection.toggle(r.id)}
+                          label={`Select ${r.productName}`}
+                        />
+                      </td>
                       <td className="font-medium">{r.kaarigerName || "—"}</td>
                       <td>
                         <p>{r.productName || "—"}</p>
@@ -782,16 +855,28 @@ export default function RepairingPage() {
               const status = repairStatus(r);
               const busy = actingId === r.id;
               return (
-                <div key={r.id} className="record-card space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-display font-bold">{r.productName || "—"}</p>
-                      <p className="text-sm text-[var(--text-muted)]">
-                        {r.kaarigerName}
-                        {isStandaloneRepair(r.orderId) ? " · no bill" : ""}
-                      </p>
+                <div
+                  key={r.id}
+                  className={`record-card space-y-3 ${selection.isSelected(r.id) ? "ring-2 ring-jade/40" : ""}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="pt-1">
+                      <SelectCheckbox
+                        checked={selection.isSelected(r.id)}
+                        onChange={() => selection.toggle(r.id)}
+                        label={`Select ${r.productName}`}
+                      />
                     </div>
-                    <span className={statusBadge(status)}>{status}</span>
+                    <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
+                      <div>
+                        <p className="font-display font-bold">{r.productName || "—"}</p>
+                        <p className="text-sm text-[var(--text-muted)]">
+                          {r.kaarigerName}
+                          {isStandaloneRepair(r.orderId) ? " · no bill" : ""}
+                        </p>
+                      </div>
+                      <span className={statusBadge(status)}>{status}</span>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>

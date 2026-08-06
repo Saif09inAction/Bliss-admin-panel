@@ -31,7 +31,9 @@ import { exportBillExcel } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
+import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import BillWhatsAppModal from "@/components/BillWhatsAppModal";
+import { useSelection } from "@/lib/use-selection";
 
 function qtyBreakdown(claris?: number, bliss?: number, total = 0) {
   const c = claris || 0;
@@ -175,6 +177,7 @@ export default function RecordsPage() {
   const [showNewMaterial, setShowNewMaterial] = useState(false);
   const [newMaterialName, setNewMaterialName] = useState("");
   const [addingMaterial, setAddingMaterial] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -339,6 +342,19 @@ export default function RecordsPage() {
       : tab === "pickups"
         ? filteredPickups.length
         : filteredReturns.length;
+
+  const visibleIds = useMemo(() => {
+    if (tab === "kaariger") return filteredOrders.map((o) => o.id);
+    if (tab === "pickups") return filteredPickups.map((p) => p.id);
+    return filteredReturns.map((r) => r.id);
+  }, [tab, filteredOrders, filteredPickups, filteredReturns]);
+
+  const selection = useSelection(visibleIds);
+
+  useEffect(() => {
+    selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset selection when switching tabs / filters
+  }, [tab, search]);
 
   function openPickupEdit(p: PickupRecord) {
     setEditPickup(p);
@@ -558,15 +574,14 @@ export default function RecordsPage() {
   }
 
 
-  async function deleteOrderRecord(o: KaarigerOrder) {
-    if (!confirm(`Delete order "${o.productName}" for ${o.kaarigerName}? Related payments/repairs will also be removed.`)) return;
+  async function cascadeDeleteOrder(orderId: string) {
     const db = getDb();
-    await deleteDoc(doc(db, "kaariger_orders", o.id));
+    await deleteDoc(doc(db, "kaariger_orders", orderId));
     try {
       const [paySnap, repairSnap, approvalSnap] = await Promise.all([
-        getDocs(query(collection(db, "kaariger_payments"), where("orderId", "==", o.id))),
-        getDocs(query(collection(db, "order_repairs"), where("orderId", "==", o.id))),
-        getDocs(query(collection(db, "order_approval_records"), where("orderId", "==", o.id))),
+        getDocs(query(collection(db, "kaariger_payments"), where("orderId", "==", orderId))),
+        getDocs(query(collection(db, "order_repairs"), where("orderId", "==", orderId))),
+        getDocs(query(collection(db, "order_approval_records"), where("orderId", "==", orderId))),
       ]);
       await Promise.all([
         ...paySnap.docs.map((d) => deleteDoc(d.ref)),
@@ -576,6 +591,11 @@ export default function RecordsPage() {
     } catch {
       // best-effort related cleanup
     }
+  }
+
+  async function deleteOrderRecord(o: KaarigerOrder) {
+    if (!confirm(`Delete order "${o.productName}" for ${o.kaarigerName}? Related payments/repairs will also be removed.`)) return;
+    await cascadeDeleteOrder(o.id);
     setOrders((prev) => prev.filter((x) => x.id !== o.id));
     if (editOrder?.id === o.id) setEditOrder(null);
     if (viewOrder?.id === o.id) setViewOrder(null);
@@ -595,6 +615,44 @@ export default function RecordsPage() {
     await deleteDoc(doc(getDb(), "return_records", rec.id));
     setReturns((prev) => prev.filter((x) => x.id !== rec.id));
     if (editReturn?.id === rec.id) setEditReturn(null);
+  }
+
+  async function deleteSelectedRecords() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    const label =
+      tab === "kaariger" ? "bill" : tab === "pickups" ? "pickup" : "return";
+    if (
+      !confirm(
+        `Delete ${ids.length} selected ${label}${ids.length === 1 ? "" : "s"}?${
+          tab === "kaariger" ? " Related payments/repairs will also be removed." : ""
+        }`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      if (tab === "kaariger") {
+        await Promise.all(ids.map((id) => cascadeDeleteOrder(id)));
+        setOrders((prev) => prev.filter((x) => !ids.includes(x.id)));
+        if (editOrder && ids.includes(editOrder.id)) setEditOrder(null);
+        if (viewOrder && ids.includes(viewOrder.id)) setViewOrder(null);
+      } else if (tab === "pickups") {
+        await Promise.all(ids.map((id) => deleteDoc(doc(getDb(), "pickup_records", id))));
+        setPickups((prev) => prev.filter((x) => !ids.includes(x.id)));
+        if (editPickup && ids.includes(editPickup.id)) setEditPickup(null);
+      } else {
+        await Promise.all(ids.map((id) => deleteDoc(doc(getDb(), "return_records", id))));
+        setReturns((prev) => prev.filter((x) => !ids.includes(x.id)));
+        if (editReturn && ids.includes(editReturn.id)) setEditReturn(null);
+      }
+      selection.clear();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete selected records.");
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   return (
@@ -627,6 +685,18 @@ export default function RecordsPage() {
         ))}
       </div>
 
+      <BulkSelectBar
+        selectedCount={selection.selectedCount}
+        totalVisible={visibleIds.length}
+        allVisibleSelected={selection.allVisibleSelected}
+        someVisibleSelected={selection.someVisibleSelected}
+        onToggleAll={selection.toggleAllVisible}
+        onClear={selection.clear}
+        onDelete={() => void deleteSelectedRecords()}
+        deleting={bulkDeleting}
+        noun={tab === "kaariger" ? "bill" : tab === "pickups" ? "pickup" : "return"}
+      />
+
       {/* Kaariger orders — table on desktop, cards on mobile. Click a row to see the full bill breakdown. */}
       {tab === "kaariger" && (
         <>
@@ -635,6 +705,13 @@ export default function RecordsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th className="w-10">
+                      <SelectCheckbox
+                        checked={selection.allVisibleSelected}
+                        onChange={selection.toggleAllVisible}
+                        label="Select all bills"
+                      />
+                    </th>
                     <th>Product</th>
                     <th>Kaariger</th>
                     <th className="text-right">Deal</th>
@@ -643,7 +720,18 @@ export default function RecordsPage() {
                 </thead>
                 <tbody>
                   {filteredOrders.map((o) => (
-                    <tr key={o.id} className="cursor-pointer" onClick={() => setViewOrder(o)}>
+                    <tr
+                      key={o.id}
+                      className={`cursor-pointer ${selection.isSelected(o.id) ? "bg-jade-soft/30" : ""}`}
+                      onClick={() => setViewOrder(o)}
+                    >
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <SelectCheckbox
+                          checked={selection.isSelected(o.id)}
+                          onChange={() => selection.toggle(o.id)}
+                          label={`Select ${o.productName}`}
+                        />
+                      </td>
                       <td>
                         <p className="font-semibold">{o.productName}</p>
                         {o.color && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{o.color}</p>}
@@ -671,31 +759,44 @@ export default function RecordsPage() {
           </div>
           <div className="space-y-3 lg:hidden">
             {filteredOrders.map((o) => (
-              <button
+              <div
                 key={o.id}
-                type="button"
-                className="record-card block w-full text-left"
-                onClick={() => setViewOrder(o)}
+                className={`record-card ${selection.isSelected(o.id) ? "ring-2 ring-jade/40" : ""}`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-display font-bold">{o.productName}</p>
-                    <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
+                <div className="flex items-start gap-3">
+                  <div className="pt-1">
+                    <SelectCheckbox
+                      checked={selection.isSelected(o.id)}
+                      onChange={() => selection.toggle(o.id)}
+                      label={`Select ${o.productName}`}
+                    />
                   </div>
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
-                      <Pencil size={14} />
-                    </button>
-                    <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => setViewOrder(o)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-display font-bold">{o.productName}</p>
+                        <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
+                      </div>
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
+                          <Pencil size={14} />
+                        </button>
+                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
+                      {o.color && <Field label="Color" value={o.color} />}
+                    </div>
+                  </button>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <Field label="Deal" value={`₹${o.totalDealAmount.toLocaleString("en-IN")}`} />
-                  {o.color && <Field label="Color" value={o.color} />}
-                </div>
-              </button>
+              </div>
             ))}
             {filteredOrders.length === 0 && (
               <div className="card py-10 text-center text-sm text-[var(--text-muted)]">No records found.</div>
@@ -712,6 +813,13 @@ export default function RecordsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th className="w-10">
+                      <SelectCheckbox
+                        checked={selection.allVisibleSelected}
+                        onChange={selection.toggleAllVisible}
+                        label="Select all pickups"
+                      />
+                    </th>
                     <th>Company</th>
                     <th>Delivery Partner</th>
                     <th>Qty</th>
@@ -722,7 +830,14 @@ export default function RecordsPage() {
                 </thead>
                 <tbody>
                   {filteredPickups.map((p) => (
-                    <tr key={p.id}>
+                    <tr key={p.id} className={selection.isSelected(p.id) ? "bg-jade-soft/30" : undefined}>
+                      <td>
+                        <SelectCheckbox
+                          checked={selection.isSelected(p.id)}
+                          onChange={() => selection.toggle(p.id)}
+                          label={`Select pickup ${p.partner}`}
+                        />
+                      </td>
                       <td className="font-semibold">{p.partner || "—"}</td>
                       <td className="text-[var(--text-muted)]">{p.deliveryPartner || "—"}</td>
                       <td>
@@ -754,21 +869,34 @@ export default function RecordsPage() {
           </div>
           <div className="space-y-3 lg:hidden">
             {filteredPickups.map((p) => (
-              <div key={p.id} className="record-card">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-display font-bold">{p.partner || "—"}</p>
-                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
-                    <Pencil size={14} />
-                  </button>
-                  <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <Field label="Delivery Partner" value={p.deliveryPartner || "—"} />
-                  <Field label="Quantity" value={qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)} />
-                  <Field label="Staff" value={p.staffName} />
-                  <Field label="Date" value={`${p.date} ${p.time}`} />
+              <div key={p.id} className={`record-card ${selection.isSelected(p.id) ? "ring-2 ring-jade/40" : ""}`}>
+                <div className="flex items-start gap-3">
+                  <div className="pt-1">
+                    <SelectCheckbox
+                      checked={selection.isSelected(p.id)}
+                      onChange={() => selection.toggle(p.id)}
+                      label={`Select pickup ${p.partner}`}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-display font-bold">{p.partner || "—"}</p>
+                      <div className="flex items-center gap-1">
+                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
+                          <Pencil size={14} />
+                        </button>
+                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <Field label="Delivery Partner" value={p.deliveryPartner || "—"} />
+                      <Field label="Quantity" value={qtyBreakdown(p.clarisQuantity, p.blissQuantity, p.quantity)} />
+                      <Field label="Staff" value={p.staffName} />
+                      <Field label="Date" value={`${p.date} ${p.time}`} />
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
@@ -787,6 +915,13 @@ export default function RecordsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th className="w-10">
+                      <SelectCheckbox
+                        checked={selection.allVisibleSelected}
+                        onChange={selection.toggleAllVisible}
+                        label="Select all returns"
+                      />
+                    </th>
                     <th>Type</th>
                     <th>Company</th>
                     <th>Delivery Partner</th>
@@ -799,7 +934,14 @@ export default function RecordsPage() {
                 </thead>
                 <tbody>
                   {filteredReturns.map((r) => (
-                    <tr key={r.id}>
+                    <tr key={r.id} className={selection.isSelected(r.id) ? "bg-jade-soft/30" : undefined}>
+                      <td>
+                        <SelectCheckbox
+                          checked={selection.isSelected(r.id)}
+                          onChange={() => selection.toggle(r.id)}
+                          label={`Select return ${r.partner}`}
+                        />
+                      </td>
                       <td><span className="badge badge-neutral">{r.returnType}</span></td>
                       <td className="font-semibold">{r.partner || "—"}</td>
                       <td className="text-[var(--text-muted)]">{r.deliveryPartner || "—"}</td>
@@ -833,23 +975,36 @@ export default function RecordsPage() {
           </div>
           <div className="space-y-3 lg:hidden">
             {filteredReturns.map((r) => (
-              <div key={r.id} className="record-card">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-display font-bold">{r.partner || "—"}</p>
-                  <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
-                    <Pencil size={14} />
-                  </button>
-                  <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                  <Field label="Type" value={r.returnType} />
-                  <Field label="Delivery Partner" value={r.deliveryPartner || "—"} />
-                  <Field label="Quantity" value={qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)} />
-                  <Field label="Staff" value={r.staffName} />
-                  <Field label="Date" value={`${r.date} ${r.time}`} />
-                  {r.notes && <Field label="Notes" value={r.notes} />}
+              <div key={r.id} className={`record-card ${selection.isSelected(r.id) ? "ring-2 ring-jade/40" : ""}`}>
+                <div className="flex items-start gap-3">
+                  <div className="pt-1">
+                    <SelectCheckbox
+                      checked={selection.isSelected(r.id)}
+                      onChange={() => selection.toggle(r.id)}
+                      label={`Select return ${r.partner}`}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-display font-bold">{r.partner || "—"}</p>
+                      <div className="flex items-center gap-1">
+                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
+                          <Pencil size={14} />
+                        </button>
+                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <Field label="Type" value={r.returnType} />
+                      <Field label="Delivery Partner" value={r.deliveryPartner || "—"} />
+                      <Field label="Quantity" value={qtyBreakdown(r.clarisQuantity, r.blissQuantity, r.quantity)} />
+                      <Field label="Staff" value={r.staffName} />
+                      <Field label="Date" value={`${r.date} ${r.time}`} />
+                      {r.notes && <Field label="Notes" value={r.notes} />}
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}

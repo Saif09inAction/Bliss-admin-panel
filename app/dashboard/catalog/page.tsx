@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, deleteDoc, doc, getDocs, setDoc } from "firebase/firestore";
 import { BookOpen, Plus, Trash2, X } from "lucide-react";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import PageToolbar from "@/components/admin/PageToolbar";
 import { useAuth } from "@/lib/auth-context";
 import { uuid } from "@/lib/csv";
 import { getDb } from "@/lib/firebase";
+import { useSelection } from "@/lib/use-selection";
 
 type CatalogProduct = {
   id: string;
@@ -25,6 +27,7 @@ export default function CatalogPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   async function loadProducts() {
     setLoading(true);
@@ -60,6 +63,14 @@ export default function CatalogPage() {
       product.name.toLowerCase().includes(query)
     );
   }, [products, search]);
+
+  const visibleIds = useMemo(() => filteredProducts.map((p) => p.id), [filteredProducts]);
+  const selection = useSelection(visibleIds);
+
+  useEffect(() => {
+    selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   async function addProduct(e: React.FormEvent) {
     e.preventDefault();
@@ -108,6 +119,23 @@ export default function CatalogPage() {
     }
   }
 
+  async function deleteSelected() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} selected catalog product${ids.length === 1 ? "" : "s"}?`)) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(ids.map((id) => deleteDoc(doc(getDb(), "product_catalog", id))));
+      setProducts((current) => current.filter((item) => !ids.includes(item.id)));
+      selection.clear();
+      setMessage(`Deleted ${ids.length} product${ids.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not delete selected.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageToolbar
@@ -144,6 +172,18 @@ export default function CatalogPage() {
         </p>
       )}
 
+      <BulkSelectBar
+        selectedCount={selection.selectedCount}
+        totalVisible={visibleIds.length}
+        allVisibleSelected={selection.allVisibleSelected}
+        someVisibleSelected={selection.someVisibleSelected}
+        onToggleAll={selection.toggleAllVisible}
+        onClear={selection.clear}
+        onDelete={() => void deleteSelected()}
+        deleting={bulkDeleting}
+        noun="product"
+      />
+
       {loading ? (
         <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">
           Loading catalog…
@@ -165,7 +205,17 @@ export default function CatalogPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {filteredProducts.map((product) => (
-            <div key={product.id} className="surface flex items-center gap-3 p-4">
+            <div
+              key={product.id}
+              className={`surface flex items-center gap-3 p-4 ${
+                selection.isSelected(product.id) ? "ring-2 ring-jade/40" : ""
+              }`}
+            >
+              <SelectCheckbox
+                checked={selection.isSelected(product.id)}
+                onChange={() => selection.toggle(product.id)}
+                label={`Select ${product.name}`}
+              />
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
                 <BookOpen size={18} />
               </div>

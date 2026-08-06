@@ -9,6 +9,8 @@ import type { RawMaterial } from "@/lib/types";
 import { uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
+import { useSelection } from "@/lib/use-selection";
 
 export default function MaterialsPage() {
   const { session } = useAuth();
@@ -19,6 +21,7 @@ export default function MaterialsPage() {
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   async function load() {
     const snap = await getDocs(collection(getDb(), "raw_materials"));
@@ -121,6 +124,32 @@ export default function MaterialsPage() {
     return materials.filter((m) => m.name.toLowerCase().includes(q));
   }, [materials, search]);
 
+  const visibleIds = useMemo(() => filtered.map((m) => m.id), [filtered]);
+  const selection = useSelection(visibleIds);
+
+  useEffect(() => {
+    selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  async function deleteSelected() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} selected material${ids.length === 1 ? "" : "s"}?`)) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(ids.map((id) => deleteDoc(doc(getDb(), "raw_materials", id))));
+      setMaterials((prev) => prev.filter((x) => !ids.includes(x.id)));
+      if (editing && ids.includes(editing.id)) closeForm();
+      selection.clear();
+      setMessage(`Deleted ${ids.length} material${ids.length === 1 ? "" : "s"}.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to delete selected.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageToolbar
@@ -155,6 +184,18 @@ export default function MaterialsPage() {
       {message && (
         <p className="rounded-xl bg-jade-soft px-3 py-2 text-sm text-jade-deep">{message}</p>
       )}
+
+      <BulkSelectBar
+        selectedCount={selection.selectedCount}
+        totalVisible={visibleIds.length}
+        allVisibleSelected={selection.allVisibleSelected}
+        someVisibleSelected={selection.someVisibleSelected}
+        onToggleAll={selection.toggleAllVisible}
+        onClear={selection.clear}
+        onDelete={() => void deleteSelected()}
+        deleting={bulkDeleting}
+        noun="material"
+      />
 
       <div className={`grid gap-5 ${showForm ? "xl:grid-cols-[320px_1fr]" : ""}`}>
         {showForm && (
@@ -192,13 +233,27 @@ export default function MaterialsPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-10">
+                    <SelectCheckbox
+                      checked={selection.allVisibleSelected}
+                      onChange={selection.toggleAllVisible}
+                      label="Select all materials"
+                    />
+                  </th>
                   <th>Name</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((m) => (
-                  <tr key={m.id}>
+                  <tr key={m.id} className={selection.isSelected(m.id) ? "bg-jade-soft/30" : undefined}>
+                    <td>
+                      <SelectCheckbox
+                        checked={selection.isSelected(m.id)}
+                        onChange={() => selection.toggle(m.id)}
+                        label={`Select ${m.name}`}
+                      />
+                    </td>
                     <td className="font-medium">{m.name}</td>
                     <td className="text-right">
                       <div className="inline-flex items-center gap-1">
@@ -228,8 +283,16 @@ export default function MaterialsPage() {
 
         <div className="space-y-3 lg:hidden">
           {filtered.map((m) => (
-            <div key={m.id} className="record-card flex items-center justify-between gap-3">
-              <p className="font-semibold">{m.name}</p>
+            <div
+              key={m.id}
+              className={`record-card flex items-center gap-3 ${selection.isSelected(m.id) ? "ring-2 ring-jade/40" : ""}`}
+            >
+              <SelectCheckbox
+                checked={selection.isSelected(m.id)}
+                onChange={() => selection.toggle(m.id)}
+                label={`Select ${m.name}`}
+              />
+              <p className="min-w-0 flex-1 font-semibold">{m.name}</p>
               <div className="flex gap-1">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(m)}>
                   Edit
