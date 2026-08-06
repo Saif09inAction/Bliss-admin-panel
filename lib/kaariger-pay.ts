@@ -154,6 +154,7 @@ export async function payKaarigerKharcha(opts: {
       amount: fields.amount,
       date: todayStr(),
       time: nowTimeStr(),
+      createdAt: Date.now(),
       createdBy: opts.createdBy,
     };
     if (fields.remarks) payload.remarks = fields.remarks;

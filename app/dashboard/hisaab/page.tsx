@@ -173,10 +173,16 @@ export default function HisaabPage() {
             time: (data.time as string) || "",
             remarks: data.remarks as string | undefined,
             createdBy: (data.createdBy as string) || "",
+            createdAt: (data.createdAt as number) || 0,
           } satisfies KaarigerPayment;
         })
-        // Newest first so latest opening / bill payments appear at the top.
-        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+        // Newest first (createdAt when present, else date+time).
+        .sort((a, b) => {
+          const ac = a.createdAt || 0;
+          const bc = b.createdAt || 0;
+          if (ac !== bc) return bc - ac;
+          return (b.date + b.time).localeCompare(a.date + a.time);
+        });
       setPayments(loadedPayments);
 
       // Self-heal stored credit from order overpayments only.
@@ -279,7 +285,14 @@ export default function HisaabPage() {
       setPayForm({ amount: "", remarks: "" });
       setShowUnifiedPay(false);
       setPayOrderId(null);
+      setShowTransactions(true);
       await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
+      requestAnimationFrame(() => {
+        document.getElementById("hisaab-transactions")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
     } catch (err) {
       setPayMsg(err instanceof Error ? err.message : "Failed to record kharcha.");
     } finally {
@@ -346,7 +359,12 @@ export default function HisaabPage() {
   const allTransactions = useMemo(
     () =>
       [...payments]
-        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+        .sort((a, b) => {
+          const ac = a.createdAt || 0;
+          const bc = b.createdAt || 0;
+          if (ac !== bc) return bc - ac;
+          return (b.date + b.time).localeCompare(a.date + a.time);
+        })
         .map((p) => ({
           payment: p,
           kind: paymentKind(p),
@@ -545,7 +563,7 @@ export default function HisaabPage() {
                 {completedOrders.length > 0 ? ` · ${completedOrders.length} completed` : ""}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
               {totalRemaining > 0 && (
                 <div className="rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 text-right">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
@@ -568,7 +586,7 @@ export default function HisaabPage() {
               )}
               <button
                 type="button"
-                className="btn btn-secondary btn-sm whitespace-nowrap"
+                className="btn btn-secondary whitespace-nowrap"
                 onClick={() => {
                   setShowTransactions(true);
                   requestAnimationFrame(() => {
@@ -579,13 +597,13 @@ export default function HisaabPage() {
                   });
                 }}
               >
-                <Receipt className="h-3.5 w-3.5" />
+                <Receipt className="h-4 w-4" />
                 Transactions
                 {allTransactions.length > 0 ? ` (${allTransactions.length})` : ""}
               </button>
               <button
                 type="button"
-                className="btn btn-primary btn-sm whitespace-nowrap"
+                className="btn btn-primary whitespace-nowrap"
                 onClick={() => {
                   setShowUnifiedPay(true);
                   setPayOrderId(null);
@@ -593,10 +611,98 @@ export default function HisaabPage() {
                   setPayMsg("");
                 }}
               >
-                <IndianRupee className="h-3.5 w-3.5" />
+                <IndianRupee className="h-4 w-4" />
                 Pay
               </button>
             </div>
+          </div>
+
+          {/* Always first — every opening / bill / credit payment for this kaariger */}
+          <div
+            id="hisaab-transactions"
+            className="surface space-y-3 border-2 border-jade/25 p-4"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-jade-deep">
+                  <Receipt className="h-4 w-4" />
+                  Transactions
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  Every payment — opening balance, bills, and credit. Newest first.
+                  {openingPaidTotal > 0
+                    ? ` Opening paid so far: ${money(openingPaidTotal)}.`
+                    : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowTransactions((v) => !v)}
+              >
+                {showTransactions ? "Hide" : "Show"}
+              </button>
+            </div>
+            {showTransactions && (
+              <>
+                {allTransactions.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
+                    No transactions yet. Use Pay — a ₹10,000 opening or bill payment will show here
+                    immediately.
+                  </p>
+                ) : (
+                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                    {allTransactions.map(({ payment: p, kind, label }) => (
+                      <div key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold">{label}</p>
+                            <span
+                              className={
+                                kind === "opening"
+                                  ? "badge badge-warn"
+                                  : kind === "credit"
+                                    ? "badge badge-success"
+                                    : "badge badge-neutral"
+                              }
+                            >
+                              {kind === "opening"
+                                ? "Opening"
+                                : kind === "credit"
+                                  ? "Credit"
+                                  : "Bill"}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            {p.date} · {p.time}
+                            {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                          </p>
+                          {p.remarks && (
+                            <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-display text-lg font-bold text-jade-deep">
+                            {money(p.amount)}
+                          </p>
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
+                            Paid
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
+                      <span className="font-bold text-jade-deep">
+                        All transactions ({allTransactions.length})
+                      </span>
+                      <span className="font-display font-bold text-jade-deep">
+                        {money(transactionsTotal)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {(openingBal > 0 ||
@@ -665,32 +771,6 @@ export default function HisaabPage() {
                   <p className="font-display text-lg font-bold text-amber-900">{money(totalRemaining)}</p>
                 </div>
               </div>
-              {openingPaidTotal > 0 && (
-                <div>
-                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                    Payments against opening balance
-                  </p>
-                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                    {openingPayments.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
-                        <div className="min-w-0">
-                          <p className="font-medium">
-                            {p.date} · {p.time} · by {p.createdBy}
-                          </p>
-                          <p className="text-xs text-[var(--text-muted)]">
-                            {p.remarks || "Old remaining payment"}
-                          </p>
-                        </div>
-                        <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
-                      <span className="font-bold text-jade-deep">Opening paid so far</span>
-                      <span className="font-bold text-jade-deep">{money(openingPaidTotal)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -705,85 +785,6 @@ export default function HisaabPage() {
               </p>
             </div>
           )}
-
-          <div id="hisaab-transactions" className="surface space-y-3 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Transactions
-                </p>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  Every payment for this kaariger — opening balance, bills, and credit. Newest first.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setShowTransactions((v) => !v)}
-              >
-                {showTransactions ? "Hide" : "Show"}
-              </button>
-            </div>
-            {showTransactions && (
-              <>
-                {allTransactions.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
-                    No transactions yet. Use Pay — opening balance payments will appear here too.
-                  </p>
-                ) : (
-                  <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                    {allTransactions.map(({ payment: p, kind, label }) => (
-                      <div key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-semibold">{label}</p>
-                            <span
-                              className={
-                                kind === "opening"
-                                  ? "badge badge-warn"
-                                  : kind === "credit"
-                                    ? "badge badge-success"
-                                    : "badge badge-neutral"
-                              }
-                            >
-                              {kind === "opening"
-                                ? "Opening"
-                                : kind === "credit"
-                                  ? "Credit"
-                                  : "Bill"}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                            {p.date} · {p.time}
-                            {p.createdBy ? ` · by ${p.createdBy}` : ""}
-                          </p>
-                          {p.remarks && (
-                            <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>
-                          )}
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="font-display text-base font-bold text-jade-deep">
-                            {money(p.amount)}
-                          </p>
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
-                            Paid
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
-                      <span className="font-bold text-jade-deep">
-                        All transactions ({allTransactions.length})
-                      </span>
-                      <span className="font-display font-bold text-jade-deep">
-                        {money(transactionsTotal)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
 
           {activeOrders.length === 0 ? (
             <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">

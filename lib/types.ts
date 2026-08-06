@@ -126,6 +126,8 @@ export interface KaarigerPayment {
   time: string;
   remarks?: string;
   createdBy: string;
+  /** Epoch ms when payment was written — preferred for newest-first sorting. */
+  createdAt?: number;
 }
 
 export type RepairItemType = "RUNNER" | "FITTING" | "ASTAR" | "MATERIAL";

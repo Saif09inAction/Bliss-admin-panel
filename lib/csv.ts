@@ -17,12 +17,24 @@ export function downloadCsvRows(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
+/** Calendar date in India (YYYY-MM-DD). Avoids UTC day-rollover around midnight IST. */
 export function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
+/** 24h clock in India (HH:mm) so transaction lists sort newest-first correctly. */
 export function nowTimeStr() {
-  return new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
 }
 
 export function uuid() {
