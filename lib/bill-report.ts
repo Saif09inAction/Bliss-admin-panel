@@ -1,3 +1,4 @@
+import { formatDisplayTime, timeSortKey } from "@/lib/csv";
 import { downloadCsvRows } from "@/lib/csv";
 import type { BillCompany, BillEntry, BillOwner } from "@/lib/types";
 
@@ -66,7 +67,7 @@ export function exportBillReportCsv(opts: {
   for (const company of list) {
     const scoped = entries
       .filter((e) => e.companyId === company.id)
-      .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      .sort((a, b) => `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`));
 
     if (company.openingBalance > 0) {
       rows.push([
@@ -98,7 +99,7 @@ export function exportBillReportCsv(opts: {
         isExtra ? entry.date : "",
         entry.driveLink || "",
         company.name,
-        [entry.time, entry.remarks].filter(Boolean).join(" · "),
+        [formatDisplayTime(entry.time), entry.remarks].filter(Boolean).join(" · "),
       ]);
       wroteAny = true;
     }

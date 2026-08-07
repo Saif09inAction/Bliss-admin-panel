@@ -1,7 +1,7 @@
 import { toPng } from "html-to-image";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
-import { formatRupee } from "@/lib/csv";
+import { formatDisplayTime, formatRupee, timeSortKey } from "@/lib/csv";
 import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
 import type { BillExportExtras } from "@/lib/bill-export";
 
@@ -172,11 +172,11 @@ function buildBillHtml(
     body += sectionTitle("Kharcha received");
     payments
       .slice()
-      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+      .sort((a, b) => `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`))
       .forEach((p) => {
         const note = p.remarks ? ` · ${esc(p.remarks)}` : "";
         body += row(
-          `${esc(p.date)}${p.time ? ` · ${esc(p.time)}` : ""}${note}`,
+          `${esc(p.date)}${p.time ? ` · ${esc(formatDisplayTime(p.time))}` : ""}${note}`,
           money(p.amount)
         );
       });

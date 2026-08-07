@@ -1,5 +1,5 @@
 import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
-import { downloadCsvRows } from "@/lib/csv";
+import { downloadCsvRows, formatDisplayTime } from "@/lib/csv";
 
 function formatDate(ts: number) {
   return ts
@@ -86,7 +86,7 @@ export function exportBillExcel(order: KaarigerOrder, extras: BillExportExtras =
     rows.push(["KHARCHA TIMELINE"]);
     rows.push(["Date", "Time", "Amount", "Remarks", "Created By"]);
     payments.forEach((p) => {
-      rows.push([p.date, p.time, amt(p.amount), p.remarks || "", p.createdBy]);
+      rows.push([p.date, formatDisplayTime(p.time), amt(p.amount), p.remarks || "", p.createdBy]);
     });
     rows.push(["Total", "", amt(paid), "", ""]);
     rows.push([]);

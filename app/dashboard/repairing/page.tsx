@@ -25,7 +25,7 @@ import type {
   RepairStatus,
 } from "@/lib/types";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
-import { formatRupee, uuid } from "@/lib/csv";
+import { formatRupee, uuid, formatClockTime } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
@@ -41,7 +41,7 @@ function formatDate(ts: number) {
 }
 
 function formatTime(ts: number) {
-  return ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
+  return formatClockTime(ts, "—");
 }
 
 /** Older docs without status were already deducted — treat them as APPROVED. */

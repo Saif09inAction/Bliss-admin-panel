@@ -25,7 +25,7 @@ import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import PageToolbar from "@/components/admin/PageToolbar";
 import { useAuth } from "@/lib/auth-context";
 import { companyTotals, exportBillReportCsv } from "@/lib/bill-report";
-import { formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { formatDisplayTime, formatRupee, nowTimeStr, timeSortKey, todayStr, uuid } from "@/lib/csv";
 import { getDb } from "@/lib/firebase";
 import type { BillCompany, BillEntry, BillEntryType, BillOwner } from "@/lib/types";
 
@@ -109,7 +109,7 @@ export default function BillReportPage() {
             } satisfies BillEntry;
           })
           .sort((a, b) => {
-            const dk = `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+            const dk = `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`);
             return dk !== 0 ? dk : b.createdAt - a.createdAt;
           })
       );
@@ -295,7 +295,7 @@ export default function BillReportPage() {
       });
       setEntries((cur) =>
         [entry, ...cur].sort((a, b) => {
-          const dk = `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+          const dk = `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`);
           return dk !== 0 ? dk : b.createdAt - a.createdAt;
         })
       );
@@ -836,7 +836,7 @@ function CompanyLedger({
                       <td>
                         <div>{formatDisplayDate(entry.date)}</div>
                         {entry.time && (
-                          <div className="text-xs text-[var(--text-muted)]">{entry.time}</div>
+                          <div className="text-xs text-[var(--text-muted)]">{formatDisplayTime(entry.time)}</div>
                         )}
                       </td>
                       <td>
@@ -918,7 +918,7 @@ function CompanyLedger({
                       </p>
                       <p className="text-xs text-[var(--text-muted)]">
                         {formatDisplayDate(entry.date)}
-                        {entry.time ? ` · ${entry.time}` : ""}
+                        {entry.time ? ` · ${formatDisplayTime(entry.time)}` : ""}
                       </p>
                     </div>
                     <button

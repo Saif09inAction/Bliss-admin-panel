@@ -43,10 +43,7 @@ export function salaryStatus(
   return "PARTIAL";
 }
 
-export function nowTimeStr(): string {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-}
+export { nowTimeStr } from "@/lib/csv";
 
 export function todayDateStr(): string {
   const now = new Date();

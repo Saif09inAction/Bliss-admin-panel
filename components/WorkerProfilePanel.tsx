@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
+import { formatDisplayTime, timeSortKey } from "@/lib/csv";
 import { useAuth } from "@/lib/auth-context";
 import { payKaarigerKharcha } from "@/lib/kaariger-pay";
 import { isStandaloneRepair } from "@/lib/types";
@@ -211,7 +212,7 @@ export default function WorkerProfilePanel({
     () =>
       [...payments]
         .filter((p) => p.date.startsWith(monthPrefix))
-        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+        .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
         .slice(0, 5),
     [payments, monthPrefix]
   );

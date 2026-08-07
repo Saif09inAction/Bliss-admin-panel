@@ -15,8 +15,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
-import {
-  computeEarlyLeaveMinutes,
+import { computeEarlyLeaveMinutes,
   computeLateMinutes,
   defaultSettings,
   effectiveDayStatus,
@@ -25,6 +24,7 @@ import {
   normalizeTime,
   parseAttendance,
   statusLabel,
+  formatDisplayTime,
 } from "@/lib/attendance-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -268,8 +268,8 @@ export default function AttendancePage() {
                       <p className="font-semibold text-[var(--text)]">{e.name}</p>
                       {r?.signInTime ? (
                         <p className="mt-0.5 text-xs text-[var(--text-faint)]">
-                          In {r.signInTime}
-                          {r.signOutTime ? ` · Out ${r.signOutTime}` : ""}
+                          In {formatDisplayTime(r.signInTime)}
+                          {r.signOutTime ? ` · Out ${formatDisplayTime(r.signOutTime)}` : ""}
                           {r.dayCredit === "FULL"
                             ? " · Full day (forgiven)"
                             : r.dayCredit === "HALF"
@@ -328,7 +328,7 @@ export default function AttendancePage() {
                 <div>
                   <p className="font-semibold text-sm">Shift timings</p>
                   <p className="text-xs text-[var(--text-muted)]">
-                    {settings.dailySignInTime} – {settings.dailySignOutTime}
+                    {formatDisplayTime(settings.dailySignInTime)} – {formatDisplayTime(settings.dailySignOutTime)}
                   </p>
                 </div>
               </div>

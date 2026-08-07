@@ -26,7 +26,7 @@ import type {
   ReturnRecord,
 } from "@/lib/types";
 import { DELIVERY_PARTNERS, MARKETPLACE_COMPANIES } from "@/lib/types";
-import { downloadCsv, formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { downloadCsv, formatDisplayTime, formatRupee, nowTimeStr, timeSortKey, todayStr, uuid } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -331,13 +331,13 @@ export default function RecordsPage() {
       setPickups(
         pSnap.docs
           .map((d) => parsePickupDoc(d.id, d.data() as Record<string, unknown>))
-          .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+          .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
       );
 
       setReturns(
         rSnap.docs
           .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
-          .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+          .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
       );
     }
     load();
@@ -367,7 +367,7 @@ export default function RecordsPage() {
           String(p.quantity),
           p.staffName,
           p.date,
-          p.time,
+          formatDisplayTime(p.time),
         ])
       );
     } else {
@@ -383,7 +383,7 @@ export default function RecordsPage() {
           String(r.quantity),
           r.staffName,
           r.date,
-          r.time,
+          formatDisplayTime(r.time),
           r.notes || "",
         ])
       );
@@ -508,7 +508,7 @@ export default function RecordsPage() {
     setPickups(
       snap.docs
         .map((d) => parsePickupDoc(d.id, d.data() as Record<string, unknown>))
-        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+        .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
     );
   }
 
@@ -517,7 +517,7 @@ export default function RecordsPage() {
     setReturns(
       snap.docs
         .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
-        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+        .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
     );
   }
 
@@ -1093,7 +1093,7 @@ export default function RecordsPage() {
                         )}
                       </td>
                       <td>{p.staffName}</td>
-                      <td className="text-[var(--text-muted)]">{p.date} {p.time}</td>
+                      <td className="text-[var(--text-muted)]">{p.date} {formatDisplayTime(p.time)}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
                           <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
@@ -1147,7 +1147,7 @@ export default function RecordsPage() {
                         }
                       />
                       <Field label="Staff" value={p.staffName} />
-                      <Field label="Date" value={`${p.date} ${p.time}`} />
+                      <Field label="Date" value={`${p.date} ${formatDisplayTime(p.time)}`} />
                     </div>
                   </div>
                 </div>
@@ -1207,7 +1207,7 @@ export default function RecordsPage() {
                         )}
                       </td>
                       <td>{r.staffName}</td>
-                      <td className="text-[var(--text-muted)]">{r.date} {r.time}</td>
+                      <td className="text-[var(--text-muted)]">{r.date} {formatDisplayTime(r.time)}</td>
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
@@ -1263,7 +1263,7 @@ export default function RecordsPage() {
                         }
                       />
                       <Field label="Staff" value={r.staffName} />
-                      <Field label="Date" value={`${r.date} ${r.time}`} />
+                      <Field label="Date" value={`${r.date} ${formatDisplayTime(r.time)}`} />
                       {r.notes && <Field label="Notes" value={r.notes} />}
                     </div>
                   </div>

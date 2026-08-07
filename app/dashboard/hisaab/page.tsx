@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { downloadCsvRows, formatRupee } from "@/lib/csv";
+import { downloadCsvRows, formatClockTime, formatDisplayTime, formatRupee, timeSortKey } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import {
   isOpeningPayment,
@@ -64,7 +64,7 @@ function formatDate(ts: number) {
 }
 
 function formatTime(ts: number) {
-  return ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+  return formatClockTime(ts);
 }
 
 /** Older repair docs without status were already deducted. */
@@ -181,7 +181,7 @@ export default function HisaabPage() {
           const ac = a.createdAt || 0;
           const bc = b.createdAt || 0;
           if (ac !== bc) return bc - ac;
-          return (b.date + b.time).localeCompare(a.date + a.time);
+          return `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`);
         });
       setPayments(loadedPayments);
 
@@ -338,7 +338,7 @@ export default function HisaabPage() {
     () =>
       payments
         .filter(isOpeningPayment)
-        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)),
+        .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`)),
     [payments]
   );
   const openingPaidTotal = openingPayments.reduce((s, p) => s + p.amount, 0);
@@ -356,7 +356,7 @@ export default function HisaabPage() {
           const ac = a.createdAt || 0;
           const bc = b.createdAt || 0;
           if (ac !== bc) return bc - ac;
-          return (b.date + b.time).localeCompare(a.date + a.time);
+          return `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`);
         })
         .map((p) => ({
           payment: p,
@@ -427,11 +427,11 @@ export default function HisaabPage() {
       rows.push(["Date", "Time", "Type", "Amount", "Remarks", "Created By"]);
       const names = new Map(orders.map((o) => [o.id, o.productName]));
       [...payments]
-        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+        .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
         .forEach((p) => {
           rows.push([
             p.date,
-            p.time,
+            formatDisplayTime(p.time),
             paymentLabel(p, names),
             String(Math.round(p.amount)),
             p.remarks || "",
@@ -705,7 +705,7 @@ export default function HisaabPage() {
                           </span>
                         </div>
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                          {p.date} · {p.time}
+                          {p.date} · {formatDisplayTime(p.time)}
                           {p.createdBy ? ` · by ${p.createdBy}` : ""}
                         </p>
                         {p.remarks && (
@@ -811,7 +811,7 @@ export default function HisaabPage() {
                       <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
                         <div className="min-w-0">
                           <p className="font-medium">
-                            {p.date} · {p.time} · by {p.createdBy}
+                            {p.date} · {formatDisplayTime(p.time)} · by {p.createdBy}
                           </p>
                           <p className="text-xs text-[var(--text-muted)]">
                             {p.remarks || "Old remaining payment"}
@@ -1055,7 +1055,7 @@ function OrderDetailCard({
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const orderPayments = payments
     .filter((p) => p.orderId === order.id)
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    .sort((a, b) => `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`));
   const orderRepairs = repairs.filter((r) => r.orderId === order.id && isApprovedRepair(r));
 
   const net = orderNetDeal(order);
@@ -1240,7 +1240,7 @@ function OrderDetailCard({
               <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
                 <div className="min-w-0">
                   <p className="font-medium">
-                    {p.date} · {p.time} · by {p.createdBy}
+                    {p.date} · {formatDisplayTime(p.time)} · by {p.createdBy}
                   </p>
                   {p.remarks && <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>}
                 </div>

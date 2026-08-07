@@ -6,8 +6,7 @@ import { ChevronLeft, ChevronRight, MapPin, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
-import {
-  computeEarlyLeaveMinutes,
+import { computeEarlyLeaveMinutes,
   computeLateMinutes,
   dateKey,
   daysInMonth,
@@ -21,6 +20,7 @@ import {
   parseAttendance,
   resolveAttendanceImage,
   statusLabel,
+  formatDisplayTime,
 } from "@/lib/attendance-utils";
 
 interface Props {
@@ -364,7 +364,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                 <div className="grid gap-4">
                   <DetailBlock
                     title="Clock In"
-                    time={selected.signInTime}
+                    time={formatDisplayTime(selected.signInTime)}
                     address={selected.signInAddress}
                     gps={selected.signInGps}
                     image={selected.signInImageLocalPath}
@@ -373,12 +373,12 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         ? selectedLate > 0
                           ? `Was late (${formatLateDuration(selectedLate)}) — forgiven by admin`
                           : selected.signInTime
-                            ? `On time (expected ${settings.dailySignInTime})`
+                            ? `On time (expected ${formatDisplayTime(settings.dailySignInTime)})`
                             : undefined
                         : selectedLate > 0
-                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${settings.dailySignInTime})`
+                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${formatDisplayTime(settings.dailySignInTime)})`
                           : selected.signInTime
-                            ? `On time (expected ${settings.dailySignInTime})`
+                            ? `On time (expected ${formatDisplayTime(settings.dailySignInTime)})`
                             : undefined
                     }
                     extraTone={
@@ -391,7 +391,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                   />
                   <DetailBlock
                     title="Clock Out"
-                    time={selected.signOutTime}
+                    time={formatDisplayTime(selected.signOutTime)}
                     address={selected.signOutAddress}
                     gps={selected.signOutGps}
                     image={selected.signOutImageLocalPath}
@@ -400,8 +400,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         ? selected.dayCredit && selectedEarly > 0
                           ? `Left early (${formatEarlyLeaveDuration(selectedEarly)}) — forgiven by admin`
                           : selectedEarly > 0
-                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${settings.dailySignOutTime})`
-                            : `On time (expected ${settings.dailySignOutTime})`
+                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${formatDisplayTime(settings.dailySignOutTime)})`
+                            : `On time (expected ${formatDisplayTime(settings.dailySignOutTime)})`
                         : undefined
                     }
                     extraTone={

@@ -1,5 +1,17 @@
 import type { Attendance, AttendanceSettings } from "./types";
 
+/** Display any stored time as 12-hour (e.g. "2:41 PM"). */
+export function formatDisplayTime(time?: string): string {
+  if (!time?.trim()) return "";
+  const mins = timeToMinutes(time);
+  if (mins == null) return time.trim();
+  const h24 = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 || 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 export type DayStatus =
   | "PRESENT"
   | "ON_TIME"
