@@ -27,6 +27,80 @@ export function todayStr() {
   }).format(new Date());
 }
 
+/**
+ * Display date as dd/mm/yy.
+ * Accepts YYYY-MM-DD strings or epoch milliseconds.
+ */
+export function formatDisplayDate(value?: string | number | null): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "number") {
+    if (!value) return "";
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    }).format(new Date(value));
+  }
+  const iso = String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    return `${iso[3]}/${iso[2]}/${iso[1].slice(-2)}`;
+  }
+  // Already dd/mm/yy or similar — pass through
+  return String(value).trim();
+}
+
+/**
+ * True when a stored YYYY-MM-DD (or epoch) matches a search query.
+ * Supports dd/mm/yy, dd/mm/yyyy, YYYY-MM-DD, and partials like 08/08.
+ */
+export function dateMatchesSearch(
+  stored?: string | number | null,
+  query?: string
+): boolean {
+  const qRaw = query?.trim().toLowerCase() || "";
+  if (!qRaw || stored == null || stored === "") return false;
+
+  const iso =
+    typeof stored === "number"
+      ? todayStrFromEpoch(stored)
+      : String(stored).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return formatDisplayDate(stored).toLowerCase().includes(qRaw);
+  }
+
+  const display = formatDisplayDate(iso).toLowerCase(); // dd/mm/yy
+  const q = qRaw.replace(/[-.]/g, "/");
+  if (display.includes(q) || iso.toLowerCase().includes(qRaw)) return true;
+
+  const full = q.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (full) {
+    const day = full[1].padStart(2, "0");
+    const month = full[2].padStart(2, "0");
+    let year = full[3];
+    if (year.length === 2) year = Number(year) >= 70 ? `19${year}` : `20${year}`;
+    return iso === `${year}-${month}-${day}`;
+  }
+
+  const partial = q.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (partial) {
+    const day = partial[1].padStart(2, "0");
+    const month = partial[2].padStart(2, "0");
+    return iso.endsWith(`-${month}-${day}`);
+  }
+
+  return false;
+}
+
+function todayStrFromEpoch(ts: number): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ts));
+}
+
 /** Minutes from midnight. Accepts 24h ("14:41", "14:41:05") and 12h ("2:41 PM"). */
 export function parseTimeToMinutes(value?: string): number | null {
   if (!value?.trim()) return null;

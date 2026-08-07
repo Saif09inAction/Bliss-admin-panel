@@ -26,7 +26,17 @@ import type {
   ReturnRecord,
 } from "@/lib/types";
 import { DELIVERY_PARTNERS, MARKETPLACE_COMPANIES } from "@/lib/types";
-import { downloadCsv, formatDisplayTime, formatRupee, nowTimeStr, timeSortKey, todayStr, uuid } from "@/lib/csv";
+import {
+  dateMatchesSearch,
+  downloadCsv,
+  formatDisplayDate,
+  formatDisplayTime,
+  formatRupee,
+  nowTimeStr,
+  timeSortKey,
+  todayStr,
+  uuid,
+} from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -366,7 +376,7 @@ export default function RecordsPage() {
           String(p.blissQuantity || 0),
           String(p.quantity),
           p.staffName,
-          p.date,
+          formatDisplayDate(p.date),
           formatDisplayTime(p.time),
         ])
       );
@@ -382,7 +392,7 @@ export default function RecordsPage() {
           String(r.blissQuantity || 0),
           String(r.quantity),
           r.staffName,
-          r.date,
+          formatDisplayDate(r.date),
           formatDisplayTime(r.time),
           r.notes || "",
         ])
@@ -397,7 +407,9 @@ export default function RecordsPage() {
       (o) =>
         o.productName.toLowerCase().includes(q) ||
         o.kaarigerName.toLowerCase().includes(q) ||
-        o.status.toLowerCase().includes(q)
+        o.status.toLowerCase().includes(q) ||
+        dateMatchesSearch(o.createdAt, q) ||
+        formatDisplayDate(o.createdAt).toLowerCase().includes(q)
     );
   }, [orders, q]);
 
@@ -410,7 +422,9 @@ export default function RecordsPage() {
       return (
         p.partner.toLowerCase().includes(q) ||
         p.deliveryPartner.toLowerCase().includes(q) ||
-        p.staffName.toLowerCase().includes(q)
+        p.staffName.toLowerCase().includes(q) ||
+        dateMatchesSearch(p.date, q) ||
+        formatDisplayDate(p.date).toLowerCase().includes(q)
       );
     });
   }, [pickups, q, ownerFilter]);
@@ -425,7 +439,9 @@ export default function RecordsPage() {
         r.partner.toLowerCase().includes(q) ||
         r.deliveryPartner.toLowerCase().includes(q) ||
         r.staffName.toLowerCase().includes(q) ||
-        r.returnType.toLowerCase().includes(q)
+        r.returnType.toLowerCase().includes(q) ||
+        dateMatchesSearch(r.date, q) ||
+        formatDisplayDate(r.date).toLowerCase().includes(q)
       );
     });
   }, [returns, q, ownerFilter]);
@@ -867,7 +883,11 @@ export default function RecordsPage() {
         <p className="section-sub">{count} record{count !== 1 ? "s" : ""}</p>
       </PageToolbar>
 
-      <AdminSearchBar value={search} onChange={setSearch} placeholder="Search records..." />
+      <AdminSearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Search name, partner, date (dd/mm/yy)…"
+      />
 
       <div className="mobile-chip-scroll flex flex-wrap gap-2">
         {TABS.map(({ id, label, icon: Icon }) => (
@@ -1093,7 +1113,7 @@ export default function RecordsPage() {
                         )}
                       </td>
                       <td>{p.staffName}</td>
-                      <td className="text-[var(--text-muted)]">{p.date} {formatDisplayTime(p.time)}</td>
+                      <td className="text-[var(--text-muted)]">{formatDisplayDate(p.date)} {formatDisplayTime(p.time)}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
                           <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
@@ -1147,7 +1167,7 @@ export default function RecordsPage() {
                         }
                       />
                       <Field label="Staff" value={p.staffName} />
-                      <Field label="Date" value={`${p.date} ${formatDisplayTime(p.time)}`} />
+                      <Field label="Date" value={`${formatDisplayDate(p.date)} ${formatDisplayTime(p.time)}`} />
                     </div>
                   </div>
                 </div>
@@ -1207,7 +1227,7 @@ export default function RecordsPage() {
                         )}
                       </td>
                       <td>{r.staffName}</td>
-                      <td className="text-[var(--text-muted)]">{r.date} {formatDisplayTime(r.time)}</td>
+                      <td className="text-[var(--text-muted)]">{formatDisplayDate(r.date)} {formatDisplayTime(r.time)}</td>
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
@@ -1263,7 +1283,7 @@ export default function RecordsPage() {
                         }
                       />
                       <Field label="Staff" value={r.staffName} />
-                      <Field label="Date" value={`${r.date} ${formatDisplayTime(r.time)}`} />
+                      <Field label="Date" value={`${formatDisplayDate(r.date)} ${formatDisplayTime(r.time)}`} />
                       {r.notes && <Field label="Notes" value={r.notes} />}
                     </div>
                   </div>
@@ -1329,11 +1349,7 @@ export default function RecordsPage() {
                 <div className="stat-card !p-3">
                   <p className="stat-card-label">Created</p>
                   <p className="stat-card-value !text-xl">
-                    {new Date(viewOrder.createdAt).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
+                    {formatDisplayDate(viewOrder.createdAt)}
                   </p>
                   <p className="mt-0.5 text-xs text-[var(--text-muted)]">by {viewOrder.createdBy}</p>
                 </div>
