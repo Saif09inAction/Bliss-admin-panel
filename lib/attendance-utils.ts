@@ -1,4 +1,28 @@
-import type { Attendance, AttendanceSettings } from "./types";
+import type { Attendance, AttendanceSettings, Employee } from "./types";
+
+type ShiftSource = Pick<Employee, "dailySignInTime" | "dailySignOutTime"> | null | undefined;
+
+/** True when this staff has at least one custom shift time saved. */
+export function hasCustomShift(employee?: ShiftSource): boolean {
+  return Boolean(employee?.dailySignInTime?.trim() || employee?.dailySignOutTime?.trim());
+}
+
+/**
+ * Per-staff shift if set, otherwise company default from Attendance settings.
+ * If only one side is set, the other falls back to the global default.
+ */
+export function resolveShiftSettings(
+  employee: ShiftSource,
+  global: AttendanceSettings
+): AttendanceSettings {
+  const inTime = employee?.dailySignInTime?.trim();
+  const outTime = employee?.dailySignOutTime?.trim();
+  if (!inTime && !outTime) return global;
+  return {
+    dailySignInTime: normalizeTime(inTime || global.dailySignInTime),
+    dailySignOutTime: normalizeTime(outTime || global.dailySignOutTime),
+  };
+}
 
 /** Display any stored time as 12-hour (e.g. "2:41 PM"). */
 export function formatDisplayTime(time?: string): string {

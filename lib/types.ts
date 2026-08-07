@@ -22,6 +22,12 @@ export interface Employee {
    * Hisaab remaining = openingBalance + unpaid bill balances − creditBalance.
    */
   openingBalance?: number;
+  /**
+   * Optional per-staff shift. When set, late/early/pay use these instead of
+   * the global Attendance settings. Empty/missing → company default.
+   */
+  dailySignInTime?: string;
+  dailySignOutTime?: string;
 }
 
 export interface RawMaterial {

@@ -6,11 +6,13 @@ import { ChevronLeft, ChevronRight, MapPin, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
-import { computeEarlyLeaveMinutes,
+import {
+  computeEarlyLeaveMinutes,
   computeLateMinutes,
   dateKey,
   daysInMonth,
   effectiveDayStatus,
+  formatDisplayTime,
   formatEarlyLeaveDuration,
   formatLateDuration,
   formatWorkingHours,
@@ -19,8 +21,8 @@ import { computeEarlyLeaveMinutes,
   monthLabel,
   parseAttendance,
   resolveAttendanceImage,
+  resolveShiftSettings,
   statusLabel,
-  formatDisplayTime,
 } from "@/lib/attendance-utils";
 
 interface Props {
@@ -80,6 +82,10 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
   );
   const [creditSaving, setCreditSaving] = useState(false);
   const [creditMsg, setCreditMsg] = useState("");
+  const shift = useMemo(
+    () => resolveShiftSettings(employee, settings),
+    [employee, settings]
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -129,7 +135,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
       const day = new Date(year, month, d);
       if (day > new Date(today.getFullYear(), today.getMonth(), today.getDate())) continue;
       workingDays++;
-      const st = effectiveDayStatus(byDate.get(key), key, settings);
+      const st = effectiveDayStatus(byDate.get(key), key, shift);
       if (st === "ABSENT") absent++;
       else if (st === "LATE") late++;
       else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY" || st === "HALF_DAY")
@@ -137,14 +143,14 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
     }
     const rate = workingDays ? Math.round(((present + late) / workingDays) * 100) : 0;
     return { present, late, absent, workingDays, rate };
-  }, [byDate, year, month, settings]);
+  }, [byDate, year, month, shift]);
 
   const selected = selectedDate ? byDate.get(selectedDate) : undefined;
   const selectedStatus = selectedDate
-    ? effectiveDayStatus(selected, selectedDate, settings)
+    ? effectiveDayStatus(selected, selectedDate, shift)
     : "NONE";
-  const selectedLate = computeLateMinutes(selected?.signInTime, settings.dailySignInTime);
-  const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, settings.dailySignOutTime);
+  const selectedLate = computeLateMinutes(selected?.signInTime, shift.dailySignInTime);
+  const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, shift.dailySignOutTime);
   const showCreditActions =
     selectedDate &&
     selectedStatus !== "FUTURE" &&
@@ -322,7 +328,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                       if (!day) return <div key={di} />;
                       const key = dateKey(year, month, day);
                       const rec = byDate.get(key);
-                      const st = effectiveDayStatus(rec, key, settings);
+                      const st = effectiveDayStatus(rec, key, shift);
                       const isSelected = selectedDate === key;
                       return (
                         <button
@@ -373,12 +379,12 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         ? selectedLate > 0
                           ? `Was late (${formatLateDuration(selectedLate)}) — forgiven by admin`
                           : selected.signInTime
-                            ? `On time (expected ${formatDisplayTime(settings.dailySignInTime)})`
+                            ? `On time (expected ${formatDisplayTime(shift.dailySignInTime)})`
                             : undefined
                         : selectedLate > 0
-                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${formatDisplayTime(settings.dailySignInTime)})`
+                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${formatDisplayTime(shift.dailySignInTime)})`
                           : selected.signInTime
-                            ? `On time (expected ${formatDisplayTime(settings.dailySignInTime)})`
+                            ? `On time (expected ${formatDisplayTime(shift.dailySignInTime)})`
                             : undefined
                     }
                     extraTone={
@@ -400,8 +406,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         ? selected.dayCredit && selectedEarly > 0
                           ? `Left early (${formatEarlyLeaveDuration(selectedEarly)}) — forgiven by admin`
                           : selectedEarly > 0
-                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${formatDisplayTime(settings.dailySignOutTime)})`
-                            : `On time (expected ${formatDisplayTime(settings.dailySignOutTime)})`
+                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${formatDisplayTime(shift.dailySignOutTime)})`
+                            : `On time (expected ${formatDisplayTime(shift.dailySignOutTime)})`
                         : undefined
                     }
                     extraTone={

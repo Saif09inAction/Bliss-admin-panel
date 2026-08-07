@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -33,10 +34,13 @@ import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } fro
 import {
   computeMonthAttendanceStats,
   defaultSettings,
+  formatDisplayTime as formatShiftHint,
+  hasCustomShift,
   monthDateRange,
   monthLabel,
   normalizeTime,
   parseAttendance,
+  resolveShiftSettings,
 } from "@/lib/attendance-utils";
 import {
   computeEarnedSalary,
@@ -87,6 +91,16 @@ export default function WorkerProfilePanel({
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
+  const [shiftDraft, setShiftDraft] = useState({
+    dailySignInTime: employee.dailySignInTime
+      ? normalizeTime(employee.dailySignInTime)
+      : "",
+    dailySignOutTime: employee.dailySignOutTime
+      ? normalizeTime(employee.dailySignOutTime)
+      : "",
+  });
+  const [shiftSaving, setShiftSaving] = useState(false);
+  const [shiftMsg, setShiftMsg] = useState("");
 
   const monthPrefix = monthKey(year, month);
   const { start, end } = monthDateRange(year, month);
@@ -94,7 +108,20 @@ export default function WorkerProfilePanel({
   useEffect(() => {
     setLocalEmployee(employee);
     setOpeningDraft(String(employee.openingBalance || ""));
+    setShiftDraft({
+      dailySignInTime: employee.dailySignInTime
+        ? normalizeTime(employee.dailySignInTime)
+        : "",
+      dailySignOutTime: employee.dailySignOutTime
+        ? normalizeTime(employee.dailySignOutTime)
+        : "",
+    });
   }, [employee]);
+
+  const effectiveShift = useMemo(
+    () => resolveShiftSettings(localEmployee, settings),
+    [localEmployee, settings]
+  );
 
   useEffect(() => {
     if (settingsProp) setSettings(settingsProp);
@@ -184,7 +211,7 @@ export default function WorkerProfilePanel({
       joiningDate: employee.joiningDate,
       asOfDate: asOf,
       records: attendanceRecords,
-      settings,
+      settings: effectiveShift,
       overrides,
       employeePhone: employee.phone,
     });
@@ -196,7 +223,7 @@ export default function WorkerProfilePanel({
     month,
     monthPrefix,
     attendanceRecords,
-    settings,
+    effectiveShift,
     overrides,
   ]);
 
@@ -234,6 +261,41 @@ export default function WorkerProfilePanel({
       setOpeningMsg(err instanceof Error ? err.message : "Failed to save.");
     } finally {
       setOpeningSaving(false);
+    }
+  }
+
+  async function saveStaffShift(e: React.FormEvent) {
+    e.preventDefault();
+    const inTime = shiftDraft.dailySignInTime.trim();
+    const outTime = shiftDraft.dailySignOutTime.trim();
+    setShiftSaving(true);
+    setShiftMsg("");
+    try {
+      const payload: Record<string, unknown> = {};
+      if (inTime || outTime) {
+        payload.dailySignInTime = inTime ? normalizeTime(inTime) : deleteField();
+        payload.dailySignOutTime = outTime ? normalizeTime(outTime) : deleteField();
+      } else {
+        payload.dailySignInTime = deleteField();
+        payload.dailySignOutTime = deleteField();
+      }
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), payload);
+      const next: Employee = {
+        ...localEmployee,
+        dailySignInTime: inTime ? normalizeTime(inTime) : undefined,
+        dailySignOutTime: outTime ? normalizeTime(outTime) : undefined,
+      };
+      setLocalEmployee(next);
+      onUpdated?.(next);
+      setShiftMsg(
+        inTime || outTime
+          ? "Custom shift saved — late / early / pay use this time."
+          : "Using company default shift from Attendance."
+      );
+    } catch (err) {
+      setShiftMsg(err instanceof Error ? err.message : "Failed to save shift.");
+    } finally {
+      setShiftSaving(false);
     }
   }
 
@@ -349,6 +411,12 @@ export default function WorkerProfilePanel({
                         label="Monthly Salary"
                         value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
                       />
+                      <InfoRow
+                        label="Shift"
+                        value={`${formatShiftHint(effectiveShift.dailySignInTime)} – ${formatShiftHint(effectiveShift.dailySignOutTime)}${
+                          hasCustomShift(localEmployee) ? " (custom)" : " (default)"
+                        }`}
+                      />
                     </>
                   )}
                   {localEmployee.role === "KAARIGER" && (
@@ -356,6 +424,64 @@ export default function WorkerProfilePanel({
                   )}
                 </div>
               </section>
+
+              {localEmployee.role === "STAFF" && (
+                <section>
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <Clock size={16} className="text-jade-deep" />
+                    Shift time
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Optional. Leave blank to follow the company default from Attendance (
+                    {formatShiftHint(settings.dailySignInTime)} –{" "}
+                    {formatShiftHint(settings.dailySignOutTime)}). Custom shift is used for late,
+                    early leave, and salary cuts.
+                  </p>
+                  <form onSubmit={saveStaffShift} className="mt-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label">Login</label>
+                        <input
+                          className="input"
+                          type="time"
+                          value={shiftDraft.dailySignInTime}
+                          onChange={(e) =>
+                            setShiftDraft({ ...shiftDraft, dailySignInTime: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Logout</label>
+                        <input
+                          className="input"
+                          type="time"
+                          value={shiftDraft.dailySignOutTime}
+                          onChange={(e) =>
+                            setShiftDraft({ ...shiftDraft, dailySignOutTime: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="submit" className="btn btn-secondary flex-1" disabled={shiftSaving}>
+                        {shiftSaving ? "…" : "Save shift"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost shrink-0"
+                        disabled={shiftSaving}
+                        onClick={() => {
+                          setShiftDraft({ dailySignInTime: "", dailySignOutTime: "" });
+                          setShiftMsg("");
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {shiftMsg && <p className="text-xs text-jade-deep">{shiftMsg}</p>}
+                  </form>
+                </section>
+              )}
 
               {localEmployee.role === "KAARIGER" && (
                 <section>
@@ -605,7 +731,7 @@ export default function WorkerProfilePanel({
 
       {showCalendar && employee.role === "STAFF" && (
         <EmployeeAttendancePanel
-          employee={employee}
+          employee={localEmployee}
           settings={settings}
           onClose={() => setShowCalendar(false)}
         />

@@ -28,7 +28,7 @@ import {
   nowTimeStr,
   type SalaryFilter,
 } from "@/lib/salary-utils";
-import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
+import { defaultSettings, parseAttendance, resolveShiftSettings } from "@/lib/attendance-utils";
 import {
   computeEarnedSalary,
   parseCalendarOverride,
@@ -117,6 +117,8 @@ export default function SalaryPage() {
                 monthlySalary: (data.monthlySalary as number) || 0,
                 attendancePercentage: (data.attendancePercentage as number) || 0,
                 role: ((data.role as string) || "STAFF") as Employee["role"],
+                dailySignInTime: (data.dailySignInTime as string) || "",
+                dailySignOutTime: (data.dailySignOutTime as string) || "",
               };
             })
             .filter((e) => e.role === "STAFF")
@@ -184,7 +186,7 @@ export default function SalaryPage() {
           joiningDate: e.joiningDate,
           asOfDate,
           records: empAtt,
-          settings,
+          settings: resolveShiftSettings(e, settings),
           overrides,
           employeePhone: e.phone,
         });
@@ -231,7 +233,7 @@ export default function SalaryPage() {
         joiningDate: e.joiningDate,
         asOfDate,
         records: empAtt,
-        settings,
+        settings: resolveShiftSettings(e, settings),
         overrides,
         employeePhone: e.phone,
       });

@@ -25,6 +25,7 @@ import { computeEarlyLeaveMinutes,
   parseAttendance,
   statusLabel,
   formatDisplayTime,
+  resolveShiftSettings,
 } from "@/lib/attendance-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -66,15 +67,20 @@ export default function AttendancePage() {
         setStaff(
           snap.docs
             .filter((d) => (d.data().role as string) === "STAFF" || !d.data().role)
-            .map((d) => ({
-              id: (d.data().id as string) || d.id,
-              name: d.data().name as string,
-              phone: d.data().phone as string,
-              joiningDate: (d.data().joiningDate as string) || "",
-              monthlySalary: (d.data().monthlySalary as number) || 0,
-              attendancePercentage: (d.data().attendancePercentage as number) || 0,
-              role: "STAFF" as const,
-            }))
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: (data.id as string) || d.id,
+                name: data.name as string,
+                phone: data.phone as string,
+                joiningDate: (data.joiningDate as string) || "",
+                monthlySalary: (data.monthlySalary as number) || 0,
+                attendancePercentage: (data.attendancePercentage as number) || 0,
+                role: "STAFF" as const,
+                dailySignInTime: (data.dailySignInTime as string) || "",
+                dailySignOutTime: (data.dailySignOutTime as string) || "",
+              };
+            })
             .sort((a, b) => a.name.localeCompare(b.name))
         );
       },
@@ -154,8 +160,16 @@ export default function AttendancePage() {
       return 4;
     };
     return [...list].sort((a, b) => {
-      const sa = effectiveDayStatus(byEmployee.get(a.phone), date, settings);
-      const sb = effectiveDayStatus(byEmployee.get(b.phone), date, settings);
+      const sa = effectiveDayStatus(
+        byEmployee.get(a.phone),
+        date,
+        resolveShiftSettings(a, settings)
+      );
+      const sb = effectiveDayStatus(
+        byEmployee.get(b.phone),
+        date,
+        resolveShiftSettings(b, settings)
+      );
       const ra = rank(String(sa));
       const rb = rank(String(sb));
       if (ra !== rb) return ra - rb;
@@ -169,7 +183,7 @@ export default function AttendancePage() {
     let absent = 0;
     for (const e of staff) {
       const r = byEmployee.get(e.phone);
-      const st = effectiveDayStatus(r, date, settings);
+      const st = effectiveDayStatus(r, date, resolveShiftSettings(e, settings));
       if (st === "ABSENT") absent++;
       else if (st === "LATE") late++;
       else present++;
@@ -251,9 +265,10 @@ export default function AttendancePage() {
             <div className="divide-y divide-[var(--border)]">
               {filteredStaff.map((e) => {
                 const r = byEmployee.get(e.phone);
-                const st = effectiveDayStatus(r, date, settings);
-                const lateMins = computeLateMinutes(r?.signInTime, settings.dailySignInTime);
-                const earlyMins = computeEarlyLeaveMinutes(r?.signOutTime, settings.dailySignOutTime);
+                const shift = resolveShiftSettings(e, settings);
+                const st = effectiveDayStatus(r, date, shift);
+                const lateMins = computeLateMinutes(r?.signInTime, shift.dailySignInTime);
+                const earlyMins = computeEarlyLeaveMinutes(r?.signOutTime, shift.dailySignOutTime);
                 return (
                   <button
                     key={e.phone}

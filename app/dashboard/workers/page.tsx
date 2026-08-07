@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   onSnapshot,
   setDoc,
@@ -19,6 +20,7 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
 import { todayStr } from "@/lib/csv";
+import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import PageToolbar from "@/components/admin/PageToolbar";
@@ -34,6 +36,8 @@ const emptyForm = {
   monthlySalary: "",
   joiningDate: todayStr(),
   openingBalance: "",
+  dailySignInTime: "",
+  dailySignOutTime: "",
 };
 
 function WorkerAvatar({ name }: { name: string }) {
@@ -78,6 +82,8 @@ export default function WorkersPage() {
           role: ((data.role as Role) || "STAFF") as Role,
           creditBalance: (data.creditBalance as number) || 0,
           openingBalance: (data.openingBalance as number) || 0,
+          dailySignInTime: (data.dailySignInTime as string) || "",
+          dailySignOutTime: (data.dailySignOutTime as string) || "",
         };
       });
       setEmployees(list.sort((a, b) => a.name.localeCompare(b.name)));
@@ -118,6 +124,12 @@ export default function WorkersPage() {
           : employee.role === "KAARIGER"
             ? String(employee.openingBalance || "")
             : "",
+      dailySignInTime: employee.dailySignInTime
+        ? normalizeTime(employee.dailySignInTime)
+        : "",
+      dailySignOutTime: employee.dailySignOutTime
+        ? normalizeTime(employee.dailySignOutTime)
+        : "",
     });
     setError("");
   }
@@ -180,6 +192,18 @@ export default function WorkersPage() {
 
       if (resolvedRole === "KAARIGER") {
         data.openingBalance = Math.max(0, Number(form.openingBalance) || 0);
+      }
+
+      if (resolvedRole === "STAFF") {
+        const inTime = form.dailySignInTime.trim();
+        const outTime = form.dailySignOutTime.trim();
+        if (inTime || outTime) {
+          data.dailySignInTime = inTime ? normalizeTime(inTime) : deleteField();
+          data.dailySignOutTime = outTime ? normalizeTime(outTime) : deleteField();
+        } else if (formMode === "edit") {
+          data.dailySignInTime = deleteField();
+          data.dailySignOutTime = deleteField();
+        }
       }
 
       if (isNew || password) {
@@ -534,6 +558,44 @@ export default function WorkersPage() {
                       value={form.joiningDate}
                       onChange={(e) => setForm({ ...form, joiningDate: e.target.value })}
                     />
+                  </div>
+                )}
+                {(formMode === "staff" ||
+                  (formMode === "edit" &&
+                    editingPhone &&
+                    employees.find((e) => e.phone === editingPhone)?.role === "STAFF")) && (
+                  <div className="sm:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/50 p-3">
+                    <label className="label">Shift time (optional)</label>
+                    <p className="mb-2 text-xs text-[var(--text-muted)]">
+                      Leave blank to use the company default from Attendance. If set, late / early /
+                      salary cuts use this staff&apos;s shift.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="label">Login</label>
+                        <input
+                          className="input"
+                          type="time"
+                          value={form.dailySignInTime}
+                          onChange={(e) => setForm({ ...form, dailySignInTime: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Logout</label>
+                        <input
+                          className="input"
+                          type="time"
+                          value={form.dailySignOutTime}
+                          onChange={(e) => setForm({ ...form, dailySignOutTime: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    {(form.dailySignInTime || form.dailySignOutTime) && (
+                      <p className="mt-2 text-xs text-jade-deep">
+                        Custom: {form.dailySignInTime ? formatDisplayTime(form.dailySignInTime) : "—"} –{" "}
+                        {form.dailySignOutTime ? formatDisplayTime(form.dailySignOutTime) : "—"}
+                      </p>
+                    )}
                   </div>
                 )}
                 {(formMode === "kaariger" ||
