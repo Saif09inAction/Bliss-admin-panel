@@ -903,17 +903,22 @@ export default function HisaabPage() {
                         const delta = line.deltaRemaining;
                         const isBudget =
                           line.kind === "week_kharcha" && delta === 0 && line.deltaKharcha > 0;
-                        const isTransfer =
-                          line.kind === "payment" &&
-                          line.deltaKharcha < 0 &&
-                          line.deltaRemaining < 0;
-                        const deltaLabel = isBudget
-                          ? "Budget"
-                          : delta === 0
-                            ? "—"
-                            : delta > 0
-                              ? `+${money(delta)}`
-                              : `−${money(Math.abs(delta))}`;
+                        const isCreditLine = line.kind === "credit";
+                        const showPayAmount =
+                          line.kind === "payment" && (line.paidTotal || 0) > 0
+                            ? Math.max(0, line.paidTotal || 0)
+                            : null;
+                        const deltaLabel = isCreditLine
+                          ? `Credit ${money(line.creditAdded || 0)}`
+                          : isBudget
+                            ? "Budget"
+                            : showPayAmount != null
+                              ? `−${money(showPayAmount)}`
+                              : delta === 0
+                                ? "—"
+                                : delta > 0
+                                  ? `+${money(delta)}`
+                                  : `−${money(Math.abs(delta))}`;
                         return (
                           <div
                             key={line.id}
@@ -929,43 +934,59 @@ export default function HisaabPage() {
                                     {line.subtitle}
                                   </p>
                                 )}
-                                {line.deltaKharcha !== 0 && (
-                                  <p className="mt-0.5 text-[11px] text-jade-deep">
-                                    {isBudget
-                                      ? `Kharcha box ${money(line.kharchaAfter)}`
-                                      : isTransfer
-                                        ? `Out of kharcha −${money(Math.abs(line.deltaKharcha))} → box ${money(line.kharchaAfter)}`
-                                        : `Kharcha ${line.deltaKharcha > 0 ? "+" : "−"}${money(Math.abs(line.deltaKharcha))} → box ${money(line.kharchaAfter)}`}
-                                  </p>
-                                )}
+                                {line.creditAdded != null &&
+                                  line.creditAdded > 0 &&
+                                  line.kind === "payment" && (
+                                    <p className="mt-0.5 text-[11px] font-medium text-jade-deep">
+                                      Extra {money(line.creditAdded)} → Credit (next bill)
+                                    </p>
+                                  )}
                               </div>
                               <div className="shrink-0 text-right">
                                 <p
                                   className={`text-sm font-bold ${
-                                    isBudget
+                                    isCreditLine
                                       ? "text-jade-deep"
-                                      : delta < 0
-                                        ? "text-danger"
-                                        : delta > 0
-                                          ? "text-jade-deep"
-                                          : "text-[var(--text-muted)]"
+                                      : isBudget
+                                        ? "text-jade-deep"
+                                        : showPayAmount != null || delta < 0
+                                          ? "text-danger"
+                                          : delta > 0
+                                            ? "text-jade-deep"
+                                            : "text-[var(--text-muted)]"
                                   }`}
                                 >
                                   {deltaLabel}
                                 </p>
-                                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                                  Remaining {money(line.remainingAfter)}
-                                </p>
+                                {isCreditLine ? (
+                                  <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-jade-deep">
+                                    Credit
+                                  </p>
+                                ) : (
+                                  <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                                    Remaining {money(line.remainingAfter)}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </div>
                         );
                       })}
-                      <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
-                        <p className="font-bold text-amber-900">Live Total remaining</p>
-                        <p className="font-display text-lg font-bold text-amber-900">
-                          {money(totalRemaining)}
-                        </p>
+                      <div className="space-y-2 bg-amber-50 px-3 py-3 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-bold text-amber-900">Live Total remaining</p>
+                          <p className="font-display text-lg font-bold text-amber-900">
+                            {money(totalRemaining)}
+                          </p>
+                        </div>
+                        {surplusCredit > 0 && (
+                          <div className="flex items-center justify-between gap-3 border-t border-amber-200/80 pt-2">
+                            <p className="font-bold text-jade-deep">Credit (next bill)</p>
+                            <p className="font-display text-lg font-bold text-jade-deep">
+                              {money(surplusCredit)}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

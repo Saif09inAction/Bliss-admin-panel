@@ -165,6 +165,10 @@ export type HisaabLedgerLine = {
   remainingAfter: number;
   kharchaAfter: number;
   at: number;
+  /** Full cash paid on this Pay (may exceed deltaRemaining when part is credit). */
+  paidTotal?: number;
+  /** Extra parked as credit on this Pay. */
+  creditAdded?: number;
 };
 
 function paymentSortKey(p: KaarigerPayment): number {
@@ -215,6 +219,8 @@ type RawEvent = {
   deltaRemaining: number;
   deltaKharcha: number;
   at: number;
+  paidTotal?: number;
+  creditAdded?: number;
 };
 
 /**
@@ -285,18 +291,8 @@ export function buildHisaabLedger(opts: {
     });
   }
 
-  const credit = Math.max(0, opts.creditBalance || 0);
-  if (credit > 0) {
-    events.push({
-      id: "credit_applied",
-      kind: "credit",
-      title: "Credit applied",
-      subtitle: "Extra paid earlier — reduces Total Remaining",
-      deltaRemaining: -credit,
-      deltaKharcha: 0,
-      at: startAt + 2,
-    });
-  }
+  // Do NOT apply creditBalance at the start — that rewrites every old Remaining
+  // when an overpay creates credit. Credit is shown on the Pay line + at the end.
 
   const repair = Math.max(0, opts.standaloneRepairTotal || 0);
   if (repair > 0) {
@@ -391,37 +387,78 @@ export function buildHisaabLedger(opts: {
   const paymentGroupsChrono = Array.from(buckets.values()).sort((a, b) => a.at - b.at);
 
   for (const g of paymentGroupsChrono) {
-    const onlyCredit = g.payments.every((p) => payIsCredit(p));
-    if (onlyCredit) {
+    let remCut = 0;
+    let kharchaCut = 0;
+    let creditAmt = 0;
+    let paidTotal = 0;
+    for (const p of g.payments) {
+      const amount = Math.max(0, p.amount || 0);
+      paidTotal += amount;
+      if (payIsCredit(p)) {
+        creditAmt += amount;
+        continue;
+      }
+      remCut += amount;
+      if (!payIsOpening(p)) kharchaCut += amount;
+    }
+
+    if (paidTotal <= 0) continue;
+
+    if (remCut <= 0 && creditAmt > 0) {
       events.push({
         id: `pay-batch-${g.id}`,
-        kind: "payment",
-        title: "Paid → credit / advance",
-        subtitle: [g.date, g.time].filter(Boolean).join(" · "),
+        kind: "credit",
+        title: "Credit (next bill)",
+        subtitle: [g.date, g.time, `Extra paid ${Math.round(creditAmt).toLocaleString("en-IN")}`]
+          .filter(Boolean)
+          .join(" · "),
         deltaRemaining: 0,
         deltaKharcha: 0,
         at: g.at,
+        paidTotal,
+        creditAdded: creditAmt,
       });
       continue;
     }
 
-    let remCut = 0;
-    let kharchaCut = 0;
-    for (const p of g.payments) {
-      if (payIsCredit(p)) continue;
-      const amount = Math.max(0, p.amount || 0);
-      remCut += amount;
-      if (!payIsOpening(p)) kharchaCut += amount;
+    const subtitleParts = [g.date, g.time].filter(Boolean);
+    if (creditAmt > 0) {
+      subtitleParts.push(
+        `Paid ${Math.round(paidTotal).toLocaleString("en-IN")} · ${Math.round(remCut).toLocaleString("en-IN")} cleared remaining · ${Math.round(creditAmt).toLocaleString("en-IN")} credit`
+      );
     }
 
     events.push({
       id: `pay-batch-${g.id}`,
       kind: "payment",
       title: "Paid",
-      subtitle: [g.date, g.time].filter(Boolean).join(" · "),
+      subtitle: subtitleParts.join(" · "),
+      // Only what was owed — overpay is credit, must not rewrite older Remaining lines.
       deltaRemaining: -remCut,
       deltaKharcha: -kharchaCut,
       at: g.at,
+      paidTotal,
+      creditAdded: creditAmt > 0 ? creditAmt : undefined,
+    });
+  }
+
+  const creditBal = Math.max(0, opts.creditBalance || 0);
+  const creditFromPays = payments
+    .filter(payIsCredit)
+    .reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
+  // Show current credit once at the end (profile may differ slightly from sum of rows).
+  const creditShow = Math.max(creditBal, creditFromPays);
+  if (creditShow > 0) {
+    const lastPayAt = paymentGroupsChrono.reduce((m, g) => Math.max(m, g.at), startAt);
+    events.push({
+      id: "credit_balance",
+      kind: "credit",
+      title: "Credit (next bill)",
+      subtitle: `Extra paid — will adjust on the next bill`,
+      deltaRemaining: 0,
+      deltaKharcha: 0,
+      at: lastPayAt + 1,
+      creditAdded: creditShow,
     });
   }
 
