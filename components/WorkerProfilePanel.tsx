@@ -29,6 +29,7 @@ import { getDb } from "@/lib/firebase";
 import { formatDisplayTime, timeSortKey } from "@/lib/csv";
 import { useAuth } from "@/lib/auth-context";
 import { payKaarigerKharcha } from "@/lib/kaariger-pay";
+import { clearKaarigerBusinessData } from "@/lib/delete-worker";
 import { isStandaloneRepair } from "@/lib/types";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
@@ -101,6 +102,7 @@ export default function WorkerProfilePanel({
   });
   const [shiftSaving, setShiftSaving] = useState(false);
   const [shiftMsg, setShiftMsg] = useState("");
+  const [clearingHisaab, setClearingHisaab] = useState(false);
 
   const monthPrefix = monthKey(year, month);
   const { start, end } = monthDateRange(year, month);
@@ -261,6 +263,40 @@ export default function WorkerProfilePanel({
       setOpeningMsg(err instanceof Error ? err.message : "Failed to save.");
     } finally {
       setOpeningSaving(false);
+    }
+  }
+
+  async function clearAllHisaabData() {
+    if (
+      !confirm(
+        `Clear ALL bills, payments, repairs and hisaab for ${localEmployee.name}? Opening/credit will reset to 0. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setClearingHisaab(true);
+    setOpeningMsg("");
+    try {
+      const n = await clearKaarigerBusinessData(localEmployee.phone);
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), {
+        openingBalance: 0,
+        creditBalance: 0,
+        oldKharcha: 0,
+      });
+      const next = {
+        ...localEmployee,
+        openingBalance: 0,
+        creditBalance: 0,
+        oldKharcha: 0,
+      };
+      setLocalEmployee(next);
+      setOpeningDraft("0");
+      onUpdated?.(next);
+      setOpeningMsg(`Cleared ${n} record(s). Hisaab is empty now.`);
+    } catch (err) {
+      setOpeningMsg(err instanceof Error ? err.message : "Failed to clear hisaab.");
+    } finally {
+      setClearingHisaab(false);
     }
   }
 
@@ -538,6 +574,17 @@ export default function WorkerProfilePanel({
                     <IndianRupee size={15} />
                     Pay
                   </button>
+                  <button
+                    type="button"
+                    className="btn mt-2 w-full !bg-danger/10 !text-danger hover:!bg-danger/20"
+                    disabled={clearingHisaab}
+                    onClick={clearAllHisaabData}
+                  >
+                    {clearingHisaab ? "Clearing…" : "Clear all bills & hisaab"}
+                  </button>
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                    Use this if you deleted and re-added the same number — old bills stay linked by phone.
+                  </p>
                 </section>
               )}
 

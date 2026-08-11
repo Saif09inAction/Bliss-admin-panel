@@ -227,7 +227,7 @@ export default function WorkersPage() {
   async function removeEmployee(phone: string) {
     if (
       !confirm(
-        "Delete this brother? Their attendance, payments, and profile will also be removed. They will be logged out of the app."
+        "Delete this brother? Their attendance, salary, bills, hisaab, repairs, and profile will all be removed. They will be logged out of the app."
       )
     ) {
       return;
