@@ -126,13 +126,20 @@ export interface KaarigerOrder {
    */
   kharchaGiven?: number;
   /**
-   * Portion of kharchaGiven already rolled into employees.oldKharcha when the
+   * Portion of kharchaGiven already rolled into employees.oldKharcha / opening when the
    * next Saturday bill was created — so it is not double-counted.
    */
   kharchaCarriedForward?: number;
+  /**
+   * Human week name for this Saturday bill, e.g. "October 1st week".
+   * Derived from createdAt when missing (backfill on read).
+   */
+  weekLabel?: string;
+  /** Stable week id for sorting, e.g. "2025-10-W1". */
+  weekKey?: string;
   /** Opening balance snapshot when this week bill was created (before ADD). */
   openingAtCreation?: number;
-  /** ADD BALANCE = MAAL − deductions − week kharcha at creation. */
+  /** ADD BALANCE = MAAL − deductions − repair at creation (kharcha not included). */
   addBalance?: number;
   /** Closing = openingAtCreation + addBalance at creation. */
   closingAtCreation?: number;

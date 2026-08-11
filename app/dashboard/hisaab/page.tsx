@@ -35,7 +35,7 @@ import {
   paymentKind,
   paymentLabel,
 } from "@/lib/kaariger-pay";
-import { orderKharchaUnpaid } from "@/lib/kaariger-hisaab";
+import { buildHisaabLedger, orderKharchaUnpaid, orderWeekMeta } from "@/lib/kaariger-hisaab";
 import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -172,6 +172,8 @@ export default function HisaabPage() {
             materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
             kharchaGiven: data.kharchaGiven as number | undefined,
             kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
+            weekLabel: data.weekLabel as string | undefined,
+            weekKey: data.weekKey as string | undefined,
             openingAtCreation: data.openingAtCreation as number | undefined,
             addBalance: data.addBalance as number | undefined,
             closingAtCreation: data.closingAtCreation as number | undefined,
@@ -429,13 +431,29 @@ export default function HisaabPage() {
     .filter((t) => t.kind === "credit")
     .reduce((s, t) => s + t.payment.amount, 0);
 
-  const previousHisaabOptions = completedOrders.map((o) => ({
-    id: o.id,
-    label: o.productName,
-    sublabel: `${formatDate(o.createdAt)} · Deal ${money(orderNetDeal(o))}`,
-  }));
+  const previousHisaabOptions = completedOrders.map((o) => {
+    const week = orderWeekMeta(o);
+    return {
+      id: o.id,
+      label: `${week.label}${o.productName ? ` · ${o.productName}` : ""}`,
+      sublabel: `${formatDate(o.createdAt)} · ADD ${money(orderNetDeal(o))}`,
+    };
+  });
 
   const historyOrder = completedOrders.find((o) => o.id === historyOrderId) || null;
+
+  const ledgerLines = useMemo(
+    () =>
+      buildHisaabLedger({
+        orders,
+        payments,
+        openingBalance: openingBal,
+        oldKharcha: oldKharchaBal,
+        creditBalance: creditBal,
+        standaloneRepairTotal,
+      }),
+    [orders, payments, openingBal, oldKharchaBal, creditBal, standaloneRepairTotal]
+  );
 
   function exportStatement() {
     if (!selectedKaariger) return;
@@ -639,7 +657,7 @@ export default function HisaabPage() {
                 <p className="font-display text-base font-bold text-amber-900">
                   {money(totalRemaining)}
                 </p>
-                <p className="text-[10px] text-amber-800/80">Tap for calculation</p>
+                <p className="text-[10px] text-amber-800/80">Tap for full ledger</p>
               </button>
               <button
                 type="button"
@@ -830,12 +848,10 @@ export default function HisaabPage() {
             <div className="surface space-y-2 p-4">
               <p className="text-sm text-[var(--text-muted)]">
                 <span className="font-semibold text-[var(--text)]">Total remaining</span>{" "}
-                {money(totalRemaining)} = running balance {money(runningBalance)} + week kharcha{" "}
-                {money(kharchaRemaining)}
-                {standaloneRepairTotal > 0 ? ` − repairing ${money(standaloneRepairTotal)}` : ""}
-                {creditAppliedToRemaining > 0 ? ` − credit ${money(creditAppliedToRemaining)}` : ""}.
-                Tap <span className="font-semibold">Total remaining</span> above for the full
-                breakdown. Paying kharcha reduces both boxes.
+                {money(totalRemaining)}
+                {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Each payment
+                is listed separately with date &amp; time — tap Total remaining for the full ledger.
+                Paying kharcha reduces both Total remaining and Kharcha.
               </p>
             </div>
           )}
@@ -848,14 +864,14 @@ export default function HisaabPage() {
               />
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                 <div
-                  className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-4 p-5"
+                  className="surface !overflow-y-auto max-h-[90vh] w-full max-w-lg space-y-4 p-5"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-display text-lg font-bold">Total remaining</h3>
+                      <h3 className="font-display text-lg font-bold">Hisaab ledger</h3>
                       <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-                        How {money(totalRemaining)} is calculated
+                        Line by line — oldest first. Running Total Remaining after each row.
                       </p>
                     </div>
                     <button
@@ -867,78 +883,97 @@ export default function HisaabPage() {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-                    <CalcRow
-                      label="Running balance"
-                      hint="Opening / closing after Saturday bills (includes kharcha folded from earlier weeks)"
-                      value={money(runningBalance)}
-                      emphasize={runningBalance > 0}
-                    />
-                    {oldKharchaBal > 0 && (
-                      <CalcRow
-                        label="Incl. old kharcha (not yet folded)"
-                        hint="Will move into running balance on next Saturday bill"
-                        value={money(oldKharchaBal)}
-                      />
-                    )}
-                    <CalcRow
-                      label="This week's kharcha"
-                      hint={
-                        activeOrders.length > 0
-                          ? `Set ${formatDisplayDate(activeOrders[0]?.createdAt)} · pay in parts`
-                          : "No active week bill"
-                      }
-                      value={money(weekKharchaUnpaid)}
-                      emphasize={weekKharchaUnpaid > 0}
-                    />
-                    {activeOrders.map((o) => {
-                      const paid = orderPaidMap.get(o.id) || 0;
-                      const due = Math.max(0, o.kharchaGiven || 0);
-                      const unpaid = orderKharchaUnpaid(o, paid);
-                      if (due <= 0) return null;
-                      return (
-                        <CalcRow
-                          key={o.id}
-                          label={`Week bill · ${formatDisplayDate(o.createdAt)}`}
-                          hint={`${money(due)} kharcha − ${money(paid)} paid`}
-                          value={money(unpaid)}
-                          muted
-                        />
-                      );
-                    })}
-                    {standaloneRepairTotal > 0 && (
-                      <CalcRow
-                        label="Repairing (no bill)"
-                        hint="Approved faulty pcs"
-                        value={`−${money(standaloneRepairTotal)}`}
-                        muted
-                      />
-                    )}
-                    {creditAppliedToRemaining > 0 && (
-                      <CalcRow
-                        label="Credit applied"
-                        hint="Extra paid earlier"
-                        value={`−${money(creditAppliedToRemaining)}`}
-                        muted
-                      />
-                    )}
-                    <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
-                      <p className="font-bold text-amber-900">Total remaining</p>
+
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    <div className="rounded-xl bg-amber-50 px-3 py-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                        Total remaining
+                      </p>
                       <p className="font-display text-lg font-bold text-amber-900">
                         {money(totalRemaining)}
                       </p>
                     </div>
+                    <div className="rounded-xl bg-jade-soft px-3 py-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
+                        Kharcha (this week)
+                      </p>
+                      <p className="font-display text-lg font-bold text-jade-deep">
+                        {money(kharchaRemaining)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-jade/20 bg-jade-soft/40 px-3 py-3 text-sm">
-                    <p className="font-bold text-jade-deep">Kharcha (this week)</p>
-                    <p className="mt-1 font-display text-xl font-bold text-jade-deep">
-                      {money(kharchaRemaining)}
+
+                  {ledgerLines.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
+                      No ledger lines yet.
                     </p>
-                    <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                      Pay this in parts. Each payment reduces Kharcha and Total remaining. Leftover
-                      on next Saturday goes into running balance.
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+                      {ledgerLines.map((line, idx) => {
+                        const delta = line.deltaRemaining;
+                        const deltaLabel =
+                          delta === 0
+                            ? "—"
+                            : delta > 0
+                              ? `+${money(delta)}`
+                              : `−${money(Math.abs(delta))}`;
+                        return (
+                          <div
+                            key={line.id}
+                            className={`border-b border-[var(--border)] px-3 py-2.5 last:border-b-0 ${
+                              idx % 2 === 0 ? "bg-white" : "bg-[var(--surface-mist)]"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold">{line.title}</p>
+                                {line.subtitle && (
+                                  <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                                    {line.subtitle}
+                                  </p>
+                                )}
+                                {line.deltaKharcha !== 0 && (
+                                  <p className="mt-0.5 text-[11px] text-jade-deep">
+                                    Kharcha {line.deltaKharcha > 0 ? "+" : "−"}
+                                    {money(Math.abs(line.deltaKharcha))} → box{" "}
+                                    {money(line.kharchaAfter)}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p
+                                  className={`text-sm font-bold ${
+                                    delta < 0
+                                      ? "text-danger"
+                                      : delta > 0
+                                        ? "text-jade-deep"
+                                        : "text-[var(--text-muted)]"
+                                  }`}
+                                >
+                                  {deltaLabel}
+                                </p>
+                                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                                  Remaining {money(line.remainingAfter)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
+                        <p className="font-bold text-amber-900">Live Total remaining</p>
+                        <p className="font-display text-lg font-bold text-amber-900">
+                          {money(totalRemaining)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    Payments are never merged — each Pay is its own row with date &amp; time. When a
+                    new Saturday bill is created, unpaid week kharcha folds into running balance and
+                    keeps its week label (e.g. October 1st week).
+                  </p>
                 </div>
               </div>
             </>
@@ -982,11 +1017,12 @@ export default function HisaabPage() {
                     {activeOrders.map((o) => {
                       const budget = Math.max(0, o.kharchaGiven || 0);
                       if (budget <= 0) return null;
+                      const week = orderWeekMeta(o);
                       return (
                         <CalcRow
                           key={o.id}
-                          label={`Bill · ${formatDisplayDate(o.createdAt)}`}
-                          hint={o.productName || "Week bill"}
+                          label={`${week.label} kharcha`}
+                          hint={`${formatDisplayDate(o.createdAt)}${o.productName ? ` · ${o.productName}` : ""}`}
                           value={money(budget)}
                           muted
                         />
@@ -1348,6 +1384,7 @@ function OrderDetailCard({
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
   const weekKharchaUnpaid = orderKharchaUnpaid(order, paid);
   const balance = weekKharchaUnpaid;
+  const week = orderWeekMeta(order);
   const isCompleted = order.status === "COMPLETED" || weekKharchaUnpaid <= 0;
 
   return (
@@ -1355,11 +1392,12 @@ function OrderDetailCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-display text-base font-bold">{order.productName}</p>
+            <p className="font-display text-base font-bold">{week.label}</p>
             <span className={orderStatusBadge(order.status)}>{order.status.replace(/_/g, " ")}</span>
           </div>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
             {formatDate(order.createdAt)}
+            {order.productName ? ` · ${order.productName}` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

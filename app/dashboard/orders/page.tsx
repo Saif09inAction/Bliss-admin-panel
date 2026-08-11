@@ -29,6 +29,7 @@ import {
   orderAddBalance,
   orderKharchaUnpaid,
   totalRemainingAmount,
+  weekLabelFromDate,
 } from "@/lib/kaariger-hisaab";
 import {
   isCreditPayment,
@@ -293,8 +294,18 @@ export default function OrdersPage() {
     const kharchaAmount = Number(kharcha) || 0;
     // ADD = MAAL − deductions (kharcha is separate — adds to Total Remaining via Kharcha box).
     const addBalance = productsTotal - deductionsTotal;
-    const closing = currentOpening + currentOldKharcha + addBalance;
-    const totalRemainingPreview = closing + kharchaAmount;
+    const grossOpening = currentOpening + currentOldKharcha;
+    const netOpening = totalRemainingAmount({
+      openingBalance: grossOpening,
+      weekKharchaUnpaid: 0,
+      creditBalance: currentCredit,
+    });
+    const closing = grossOpening + addBalance;
+    const totalRemainingPreview = totalRemainingAmount({
+      openingBalance: closing,
+      weekKharchaUnpaid: kharchaAmount,
+      creditBalance: currentCredit,
+    });
 
     return {
       lines,
@@ -306,10 +317,12 @@ export default function OrdersPage() {
       afterDeductions,
       kharchaAmount,
       addBalance,
+      grossOpening,
+      netOpening,
       closing,
       totalRemainingPreview,
     };
-  }, [productLines, deductions, materialLines, kharcha, currentOpening, currentOldKharcha]);
+  }, [productLines, deductions, materialLines, kharcha, currentOpening, currentOldKharcha, currentCredit]);
 
   function addMaterialLine() {
     setMaterialLines((prev) => [...prev, emptyMaterialLine()]);
@@ -469,6 +482,8 @@ export default function OrdersPage() {
         });
       }
 
+      const createdAt = Date.now();
+      const weekMeta = weekLabelFromDate(createdAt);
       const order: KaarigerOrder = {
         id,
         kaarigerId: kaariger.phone,
@@ -483,7 +498,7 @@ export default function OrdersPage() {
         status: calc.kharchaAmount > 0 ? "ASSIGNED" : "COMPLETED",
         approvedQuantity: 0,
         createdBy: session?.name || "Admin",
-        createdAt: Date.now(),
+        createdAt,
         notes: notes.trim(),
         products,
         productsTotal: calc.productsTotal,
@@ -491,6 +506,8 @@ export default function OrdersPage() {
         materialDeductionsTotal: calc.deductionsTotal,
         kharchaGiven: calc.kharchaAmount,
         kharchaCarriedForward: 0,
+        weekLabel: weekMeta.label,
+        weekKey: weekMeta.key,
       };
 
       // Running balance += ADD (MAAL − deductions). Week kharcha stays in Kharcha box.
@@ -507,12 +524,18 @@ export default function OrdersPage() {
         oldKharcha: 0,
       });
 
-      const totalAfterCreate = Math.max(0, closingAtCreation) + Math.max(0, calc.kharchaAmount);
+      const creditBal = Math.max(0, kaariger.creditBalance || 0);
+      const totalAfterCreate = totalRemainingAmount({
+        openingBalance: closingAtCreation,
+        weekKharchaUnpaid: calc.kharchaAmount,
+        creditBalance: creditBal,
+      });
       setSuccessMsg(
-        `Week bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
+        `${weekMeta.label} bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
           (calc.kharchaAmount > 0
             ? ` · Kharcha ${money(calc.kharchaAmount)} (pay through the week).`
-            : ".")
+            : ".") +
+          (creditBal > 0 ? ` Credit ${money(creditBal)} already applied.` : "")
       );
       resetForm();
       loadMeta();
@@ -876,19 +899,26 @@ export default function OrdersPage() {
             <p className="text-xs font-bold uppercase tracking-wider">Week total</p>
           </div>
           <div className="space-y-1 text-sm">
-            <Row label="Running balance (opening)" value={money(currentOpening + currentOldKharcha)} />
+            <Row label="Opening (gross)" value={money(calc.grossOpening)} />
+            {currentCredit > 0 && (
+              <Row label="Credit applied" value={`−${money(currentCredit)}`} />
+            )}
+            {currentCredit > 0 && (
+              <Row label="Net opening (Total Remaining now)" value={money(calc.netOpening)} bold />
+            )}
             <Row label="MAAL (products)" value={money(calc.productsTotal)} />
             <Row label="Less: Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} />
             <div className="my-2 border-t border-jade/20" />
-            <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
+            <Row label="ADD BALANCE (goes to Total Remaining)" value={money(calc.addBalance)} bold />
             <Row label="Running balance after bill" value={money(calc.closing)} bold />
-            <Row label="This week's kharcha" value={money(calc.kharchaAmount)} accent />
+            <Row label="This week's kharcha (Kharcha box)" value={money(calc.kharchaAmount)} accent />
             <div className="my-2 border-t border-jade/20" />
-            <Row label="Total remaining" value={money(calc.totalRemainingPreview)} bold accent />
+            <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Total remaining = running balance + week kharcha. Pay kharcha through the week — it reduces
-            both. Next Saturday unpaid kharcha folds into running balance.
+            ADD goes to Total Remaining. Week kharcha goes to the Kharcha box (and Total Remaining).
+            Credit reduces Total Remaining. Pay reduces both boxes. Next Saturday unpaid kharcha folds
+            into running balance.
           </p>
         </div>
 

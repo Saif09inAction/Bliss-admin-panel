@@ -39,6 +39,7 @@ import {
   uuid,
 } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
+import { orderWeekMeta } from "@/lib/kaariger-hisaab";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import SearchSelect from "@/components/admin/SearchSelect";
@@ -406,6 +407,12 @@ export default function RecordsPage() {
               materialDeductions,
               materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
               kharchaGiven: data.kharchaGiven as number | undefined,
+              kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
+              weekLabel: data.weekLabel as string | undefined,
+              weekKey: data.weekKey as string | undefined,
+              openingAtCreation: data.openingAtCreation as number | undefined,
+              addBalance: data.addBalance as number | undefined,
+              closingAtCreation: data.closingAtCreation as number | undefined,
             };
           })
           .sort((a, b) => b.createdAt - a.createdAt)
@@ -430,8 +437,9 @@ export default function RecordsPage() {
     if (tab === "kaariger") {
       downloadCsv(
         "kaariger_orders.csv",
-        ["Product", "Kaariger", "Status", "Deal"],
+        ["Week", "Product", "Kaariger", "Status", "ADD (Deal)"],
         orders.map((o) => [
+          orderWeekMeta(o).label,
           orderProductsLabel(o),
           o.kaarigerName,
           o.status,
@@ -479,6 +487,7 @@ export default function RecordsPage() {
     return orders.filter(
       (o) =>
         orderProductsLabel(o).toLowerCase().includes(q) ||
+        orderWeekMeta(o).label.toLowerCase().includes(q) ||
         o.productName.toLowerCase().includes(q) ||
         (o.products || []).some((p) => (p.productName || "").toLowerCase().includes(q)) ||
         o.kaarigerName.toLowerCase().includes(q) ||
@@ -856,6 +865,9 @@ export default function RecordsPage() {
         materialDeductionsTotal,
         totalDealAmount,
         kharchaGiven,
+        // Preserve week identity when editing older bills that already have a label.
+        weekLabel: editOrder.weekLabel || orderWeekMeta(editOrder).label,
+        weekKey: editOrder.weekKey || orderWeekMeta(editOrder).key,
         // Keep originalDealAmount in sync when no repairing has been applied yet.
         ...(editOrder.repairDeductionTotal
           ? {}
@@ -1168,7 +1180,7 @@ export default function RecordsPage() {
                     </th>
                     <th>Product</th>
                     <th>Kaariger</th>
-                    <th className="text-right">Deal</th>
+                    <th className="text-right">ADD</th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
@@ -1187,7 +1199,8 @@ export default function RecordsPage() {
                         />
                       </td>
                       <td>
-                        <p className="font-semibold">{orderProductsLabel(o)}</p>
+                        <p className="font-semibold">{orderWeekMeta(o).label}</p>
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">{orderProductsLabel(o)}</p>
                         {o.products && o.products.length > 1 && (
                           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                             {o.products.length} products
@@ -1237,7 +1250,8 @@ export default function RecordsPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <p className="font-display font-bold">{orderProductsLabel(o)}</p>
+                        <p className="font-display font-bold">{orderWeekMeta(o).label}</p>
+                        <p className="text-sm text-[var(--text-muted)]">{orderProductsLabel(o)}</p>
                         {o.products && o.products.length > 1 && (
                           <p className="text-xs text-[var(--text-muted)]">{o.products.length} products</p>
                         )}
@@ -1512,11 +1526,12 @@ export default function RecordsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-display text-lg font-bold">{orderProductsLabel(viewOrder)}</h3>
+                    <h3 className="font-display text-lg font-bold">{orderWeekMeta(viewOrder).label}</h3>
                     <span className={recordStatusBadge(viewOrder.status)}>{statusLabel(viewOrder.status)}</span>
                   </div>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
                     {viewOrder.kaarigerName}
+                    {orderProductsLabel(viewOrder) !== "—" ? ` · ${orderProductsLabel(viewOrder)}` : ""}
                   </p>
                 </div>
                 <button
@@ -1534,9 +1549,9 @@ export default function RecordsPage() {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="stat-card !p-3">
-                  <p className="stat-card-label">Deal Amount</p>
+                  <p className="stat-card-label">ADD (MAAL − deductions)</p>
                   <p className="stat-card-value !text-xl">
-                    ₹{(viewOrder.originalDealAmount ?? viewOrder.totalDealAmount).toLocaleString("en-IN")}
+                    ₹{(viewOrder.addBalance ?? viewOrder.originalDealAmount ?? viewOrder.totalDealAmount).toLocaleString("en-IN")}
                   </p>
                   {(viewOrder.repairDeductionTotal || 0) > 0 && (
                     <p className="mt-0.5 text-xs text-danger">
@@ -1626,7 +1641,7 @@ export default function RecordsPage() {
               <div className="flex items-center justify-between rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm">
                   <span className="flex items-center gap-1.5 font-medium text-[var(--text-muted)]">
                     <Package className="h-3.5 w-3.5" />
-                    This week&apos;s kharcha
+                    {orderWeekMeta(viewOrder).label} kharcha
                   </span>
                   <span className="font-bold">
                     {(viewOrder.kharchaGiven || 0) > 0
@@ -1634,6 +1649,16 @@ export default function RecordsPage() {
                       : "—"}
                   </span>
                 </div>
+              {(viewOrder.kharchaCarriedForward || 0) > 0 && (
+                <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm">
+                  <span className="font-medium text-amber-900">
+                    Carried into running balance
+                  </span>
+                  <span className="font-bold text-amber-950">
+                    {money(viewOrder.kharchaCarriedForward || 0)}
+                  </span>
+                </div>
+              )}
 
               {viewOrder.notes && (
                 <div>
