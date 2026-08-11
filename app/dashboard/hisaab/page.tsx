@@ -1222,8 +1222,12 @@ export default function HisaabPage() {
                   <p className="stat-card-label">Bill balance</p>
                   <p className="stat-card-value">{money(activeTotals.balance)}</p>
                   <p className="mt-1 text-[10px] text-[var(--text-muted)]">
-                    Total remaining {money(totalRemaining)} includes opening
-                    {openingBal > 0 ? ` ${money(openingBal)}` : ""}
+                    Live remaining {money(totalRemaining)}
+                    {weekKharchaUnpaid > 0
+                      ? ` = stored ${money(openingBal)} + unpaid kharcha ${money(weekKharchaUnpaid)}`
+                      : openingBal > 0
+                        ? ` (opening ${money(openingBal)})`
+                        : ""}
                   </p>
                 </div>
               </div>
