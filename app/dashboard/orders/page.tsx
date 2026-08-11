@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import {
   Calculator,
   CheckCircle2,
@@ -169,6 +169,36 @@ export default function OrdersPage() {
   useEffect(() => {
     loadMeta();
   }, []);
+
+  /** Always refresh balances when selecting a kaariger (Pay on Hisaab may have changed them). */
+  useEffect(() => {
+    if (!kaarigerId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(getDb(), "employees", kaarigerId));
+        if (cancelled || !snap.exists()) return;
+        const data = snap.data();
+        setKaarigers((prev) =>
+          prev.map((k) =>
+            k.phone === kaarigerId
+              ? {
+                  ...k,
+                  openingBalance: (data.openingBalance as number) || 0,
+                  oldKharcha: (data.oldKharcha as number) || 0,
+                  creditBalance: (data.creditBalance as number) || 0,
+                }
+              : k
+          )
+        );
+      } catch {
+        /* keep cached */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kaarigerId]);
 
   const selectedKaariger = useMemo(
     () => kaarigers.find((k) => k.phone === kaarigerId),
@@ -387,6 +417,22 @@ export default function OrdersPage() {
     setSending(true);
     try {
       const db = getDb();
+      // Fresh balances — never trust page cache after a Pay on Hisaab.
+      const empSnap = await getDoc(doc(db, "employees", kaariger.phone));
+      const empData = empSnap.exists() ? empSnap.data() : null;
+      const liveOpening = Math.max(
+        0,
+        empData ? (empData.openingBalance as number) || 0 : kaariger.openingBalance || 0
+      );
+      const liveOldKharcha = Math.max(
+        0,
+        empData ? (empData.oldKharcha as number) || 0 : kaariger.oldKharcha || 0
+      );
+      const liveCredit = Math.max(
+        0,
+        empData ? (empData.creditBalance as number) || 0 : kaariger.creditBalance || 0
+      );
+
       const id = uuid();
       const targetQuantity = validLines.reduce((s, l) => s + l.quantity, 0);
       const productName =
@@ -416,10 +462,9 @@ export default function OrdersPage() {
         paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + ((data.amount as number) || 0));
       });
 
-      let openingBase = Math.max(0, kaariger.openingBalance || 0);
+      let openingBase = liveOpening;
       // Any previously carried oldKharcha folds into running remaining (no longer a separate bucket).
-      const priorOldKharcha = Math.max(0, kaariger.oldKharcha || 0);
-      openingBase += priorOldKharcha;
+      openingBase += liveOldKharcha;
 
       for (const d of orderSnap.docs) {
         const data = d.data();
@@ -486,6 +531,7 @@ export default function OrdersPage() {
       };
 
       // Running balance += ADD − week kharcha given (cash to kaariger).
+      // openingBase is CURRENT remaining after pays — not the original admin opening.
       const openingAtCreation = openingBase;
       const addBalance = orderAddBalance(order);
       const closingAtCreation = Math.max(0, openingAtCreation + addBalance - calc.kharchaAmount);
@@ -499,17 +545,16 @@ export default function OrdersPage() {
         oldKharcha: 0,
       });
 
-      const creditBal = Math.max(0, kaariger.creditBalance || 0);
       const totalAfterCreate = totalRemainingAmount({
         openingBalance: closingAtCreation,
-        creditBalance: creditBal,
+        creditBalance: liveCredit,
       });
       setSuccessMsg(
         `${weekMeta.label} bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
           (calc.kharchaAmount > 0
             ? ` · Kharcha given ${money(calc.kharchaAmount)} (deducted; Pay is breakup only).`
             : ".") +
-          (creditBal > 0 ? ` Credit ${money(creditBal)} already applied.` : "")
+          (liveCredit > 0 ? ` Credit ${money(liveCredit)} already applied.` : "")
       );
       resetForm();
       loadMeta();
@@ -873,7 +918,7 @@ export default function OrdersPage() {
             <p className="text-xs font-bold uppercase tracking-wider">Week total</p>
           </div>
           <div className="space-y-1 text-sm">
-            <Row label="Opening (gross)" value={money(calc.grossOpening)} />
+            <Row label="Opening (current remaining)" value={money(calc.grossOpening)} />
             {currentCredit > 0 && (
               <Row label="Credit applied" value={`−${money(currentCredit)}`} />
             )}
@@ -890,9 +935,9 @@ export default function OrdersPage() {
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Kharcha is money you give now — it reduces Total Remaining. Kharcha box tracks that
-            amount; Pay only shows breakup (does not deduct again). Unused leftover on next Saturday
-            adds back to remaining.
+            Opening is the current Total Remaining after any Pay (not the old admin-set amount).
+            Kharcha given reduces Total Remaining; Pay against kharcha is breakup only. Unused
+            leftover on next Saturday adds back to remaining.
           </p>
         </div>
 

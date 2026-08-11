@@ -215,7 +215,11 @@ type RawEvent = {
 
 /**
  * Oldest-first ledger with running Total Remaining after each line.
- * Opening starts at GROSS (current opening + opening payments) so pays are not double-counted.
+ *
+ * Opening line is GROSS (before opening payments), reconstructed from live
+ * openingBalance so the ledger ends on Total Remaining even if an old bill
+ * snapshot ignored a Pay.
+ *
  * Week kharcha given reduces remaining; week kharcha pays only reduce the Kharcha box.
  */
 export function buildHisaabLedger(opts: {
@@ -233,12 +237,17 @@ export function buildHisaabLedger(opts: {
   const openingPays = payments.filter(payIsOpening);
   const openingPaidTotal = openingPays.reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
 
-  const firstSnap = orders.find((o) => o.openingAtCreation != null);
-  // Gross opening before opening payments (and before bills when no snapshot).
-  const startOpening =
-    firstSnap?.openingAtCreation != null
-      ? Math.max(0, firstSnap.openingAtCreation)
-      : Math.max(0, opts.openingBalance || 0) + openingPaidTotal;
+  const billNetTotal = orders.reduce(
+    (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
+    0
+  );
+  const foldTotal = orders.reduce((s, o) => s + Math.max(0, o.kharchaCarriedForward || 0), 0);
+
+  // Live opening = start − openingPays + billNets + folds (folds also emitted as lines).
+  const startOpening = Math.max(
+    0,
+    Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
+  );
 
   const startAt =
     openingPays[0] != null
@@ -415,4 +424,29 @@ export function buildHisaabLedger(opts: {
     });
   }
   return lines;
+}
+
+/**
+ * Gross opening before any opening payments (for Hisaab "was the opening" copy).
+ * Same reconstruction as the ledger opening line.
+ */
+export function grossOpeningBeforePays(opts: {
+  orders: KaarigerOrder[];
+  payments: KaarigerPayment[];
+  openingBalance: number;
+}): number {
+  const openingPays = opts.payments.filter(payIsOpening);
+  const openingPaidTotal = openingPays.reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
+  const billNetTotal = opts.orders.reduce(
+    (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
+    0
+  );
+  const foldTotal = opts.orders.reduce(
+    (s, o) => s + Math.max(0, o.kharchaCarriedForward || 0),
+    0
+  );
+  return Math.max(
+    0,
+    Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
+  );
 }

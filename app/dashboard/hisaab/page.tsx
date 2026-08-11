@@ -35,7 +35,7 @@ import {
   paymentKind,
   paymentLabel,
 } from "@/lib/kaariger-pay";
-import { buildHisaabLedger, orderKharchaUnpaid, orderWeekMeta } from "@/lib/kaariger-hisaab";
+import { buildHisaabLedger, grossOpeningBeforePays, orderKharchaUnpaid, orderWeekMeta } from "@/lib/kaariger-hisaab";
 import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -399,8 +399,16 @@ export default function HisaabPage() {
     [payments]
   );
   const openingPaidTotal = openingPayments.reduce((s, p) => s + p.amount, 0);
-  /** Original opening before payments (stored remaining + what was already paid). */
-  const originalOpening = openingBal + openingPaidTotal;
+  /** Gross opening before opening payments (not openingBal + all pays after bills). */
+  const originalOpening = useMemo(
+    () =>
+      grossOpeningBeforePays({
+        orders,
+        payments,
+        openingBalance: openingBal,
+      }),
+    [orders, payments, openingBal]
+  );
 
   const orderNameById = useMemo(
     () => new Map(orders.map((o) => [o.id, o.productName || "Bill"])),
@@ -1112,8 +1120,9 @@ export default function HisaabPage() {
                 Opening payments (with date &amp; time)
               </p>
               <p className="mb-2 text-xs text-[var(--text-muted)]">
-                {money(originalOpening)} was the opening · {money(openingPaidTotal)} paid ·{" "}
-                {money(openingBal)} still pending
+                {orders.length > 0
+                  ? `${money(openingPaidTotal)} paid against opening / running · current remaining ${money(openingBal)}`
+                  : `${money(originalOpening)} was the opening · ${money(openingPaidTotal)} paid · ${money(openingBal)} still pending`}
               </p>
               <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
                 {openingPayments.map((p) => (
@@ -1137,9 +1146,13 @@ export default function HisaabPage() {
                 ))}
                 <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
                   <span className="font-bold text-jade-deep">
-                    {money(originalOpening)} − {money(openingPaidTotal)} = {money(openingBal)}
+                    {orders.length > 0
+                      ? `Opening pays ${money(openingPaidTotal)}`
+                      : `${money(originalOpening)} − ${money(openingPaidTotal)} = ${money(openingBal)}`}
                   </span>
-                  <span className="font-bold text-jade-deep">Pending {money(openingBal)}</span>
+                  <span className="font-bold text-jade-deep">
+                    Remaining {money(openingBal)}
+                  </span>
                 </div>
               </div>
             </div>
