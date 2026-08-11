@@ -247,7 +247,9 @@ export function buildHisaabLedger(opts: {
   );
   const foldTotal = orders.reduce((s, o) => s + Math.max(0, o.kharchaCarriedForward || 0), 0);
 
-  // Live opening = start − openingPays + billNets + folds (folds also emitted as lines).
+  // Live opening reconstructed so playback ends on OB + unpaid.
+  // Installment model: budgets/folds do not move remaining in the ledger — only Pay transfers do.
+  // Storage still writes closing = open + ADD − budget and folds unused into OB on next bill.
   const startOpening = Math.max(
     0,
     Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
@@ -348,9 +350,11 @@ export function buildHisaabLedger(opts: {
       events.push({
         id: `fold-${order.id}`,
         kind: "kharcha_fold",
-        title: `${week.label} unused kharcha returned`,
-        subtitle: "Not transferred out of the budget — added back to Total Remaining",
-        deltaRemaining: carried,
+        title: `${week.label} unused kharcha cleared`,
+        subtitle:
+          "Unused budget folded into next bill’s stored opening — live Total Remaining unchanged (was never deducted)",
+        // Unpaid budget was never removed from live remaining (only transfers were), so do not +again.
+        deltaRemaining: 0,
         deltaKharcha: -carried,
         at: foldAt,
       });
