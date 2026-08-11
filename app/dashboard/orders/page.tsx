@@ -1106,12 +1106,6 @@ export default function OrdersPage() {
           </div>
           <div className="space-y-1 text-sm">
             <Row label="Opening (current remaining)" value={money(calc.grossOpening)} />
-            {calc.pendingUnpaidKharcha > 0 && (
-              <Row
-                label="Incl. unpaid week kharcha (folds on send)"
-                value={money(calc.pendingUnpaidKharcha)}
-              />
-            )}
             {currentCredit > 0 && (
               <Row label="Credit applied" value={`−${money(currentCredit)}`} />
             )}
@@ -1128,9 +1122,8 @@ export default function OrdersPage() {
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Opening matches Hisaab Total Remaining (stored opening + unpaid kharcha still in the
-            box). Budget alone does not drop live remaining — each Pay transfer does. Unused
-            leftover returns next Saturday.
+            Opening is the outstanding Total Remaining (same as Hisaab). Budget alone does not drop
+            live remaining — each Pay transfer does. Unused leftover returns next Saturday.
           </p>
         </div>
 
