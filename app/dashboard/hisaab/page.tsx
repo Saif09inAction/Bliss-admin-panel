@@ -793,91 +793,32 @@ export default function HisaabPage() {
 
               {paymentGroups.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
-                  No transactions yet. Use Pay — one Pay can clear week kharcha then opening in a
-                  single card.
+                  No payments yet. Use Pay — amount is cut from Total Remaining.
                 </p>
               ) : (
                 <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                  {paymentGroups.map((g) => {
-                    const parts = g.payments.map((p) => ({
-                      p,
-                      kind: paymentKind(p),
-                      label: paymentLabel(p, orderNameById),
-                    }));
-                    const multi = parts.length > 1;
-                    return (
-                      <div key={g.id} className="p-3 text-sm">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-semibold">
-                              {multi ? `Paid ${money(g.total)} once` : parts[0].label}
-                            </p>
-                            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                              {formatDisplayDate(g.date)} · {formatDisplayTime(g.time)}
-                              {g.createdBy ? ` · by ${g.createdBy}` : ""}
-                            </p>
-                            {multi ? (
-                              <ul className="mt-1.5 space-y-0.5 text-xs text-[var(--text-muted)]">
-                                {parts.map(({ p, kind, label }) => (
-                                  <li key={p.id}>
-                                    → {label}:{" "}
-                                    <span className="font-semibold text-jade-deep">
-                                      {money(p.amount)}
-                                    </span>
-                                    <span className="ml-1 text-[10px] uppercase tracking-wide opacity-70">
-                                      ({kind === "bill" ? "week kharcha" : kind.replace("_", " ")})
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <div className="mt-1 flex flex-wrap items-center gap-2">
-                                <span
-                                  className={
-                                    parts[0].kind === "opening"
-                                      ? "badge badge-warn"
-                                      : parts[0].kind === "old_kharcha"
-                                        ? "badge badge-warn"
-                                        : parts[0].kind === "credit"
-                                          ? "badge badge-success"
-                                          : "badge badge-neutral"
-                                  }
-                                >
-                                  {parts[0].kind === "opening"
-                                    ? "Opening"
-                                    : parts[0].kind === "old_kharcha"
-                                      ? "Old kharcha"
-                                      : parts[0].kind === "credit"
-                                        ? "Credit"
-                                        : "Week kharcha"}
-                                </span>
-                                {parts[0].p.remarks && (
-                                  <span className="text-xs text-[var(--text-muted)]">
-                                    {parts[0].p.remarks}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <div className="shrink-0 text-right">
-                            <p className="font-display text-lg font-bold text-jade-deep">
-                              {money(g.total)}
-                            </p>
-                            <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
-                              Paid
-                            </p>
-                          </div>
-                        </div>
+                  {paymentGroups.map((g) => (
+                    <div key={g.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-semibold">Paid</p>
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                          {formatDisplayDate(g.date)} · {formatDisplayTime(g.time)}
+                          {g.createdBy ? ` · by ${g.createdBy}` : ""}
+                        </p>
                       </div>
-                    );
-                  })}
+                      <div className="shrink-0 text-right">
+                        <p className="font-display text-lg font-bold text-danger">
+                          −{money(g.total)}
+                        </p>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                          Total Remaining
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                   <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
                     <span className="font-bold text-jade-deep">
-                      All pays ({paymentGroups.length}
-                      {allTransactions.length !== paymentGroups.length
-                        ? ` · ${allTransactions.length} lines`
-                        : ""}
-                      )
+                      All pays ({paymentGroups.length})
                     </span>
                     <span className="font-display font-bold text-jade-deep">
                       {money(transactionsTotal)}
@@ -1335,13 +1276,9 @@ export default function HisaabPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold">Pay / transfer</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    {weekKharchaUnpaid > 0
-                      ? `Applying to week kharcha first — ${money(weekKharchaUnpaid)} left of ${money(weekKharchaBudget)} budget. Total Remaining drops by each transfer.`
-                      : oldKharchaBal > 0
-                        ? `No week kharcha left. Next: old kharcha ${money(oldKharchaBal)}, then opening.`
-                        : totalRemaining > 0
-                          ? `No week kharcha left. Paying opening / remaining (${money(totalRemaining)}).`
-                          : "Nothing pending — leftover becomes credit."}
+                    Amount is cut from Total Remaining. Example: remaining 28k, Pay 20k → remaining
+                    8k.
+                    {totalRemaining > 0 ? ` Now: ${money(totalRemaining)}.` : ""}
                   </p>
                 </div>
                 <button

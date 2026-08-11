@@ -361,77 +361,67 @@ export function buildHisaabLedger(opts: {
     }
   }
 
-  // Chronological so “₹2k of ₹3k” running totals match transfer order.
-  const paymentsChrono = [...payments].sort((a, b) => paymentSortKey(a) - paymentSortKey(b));
-  const paidOfBudget = new Map<string, number>();
+  // One Pay click → one ledger line (− total), even if Firestore stored splits.
+  type PayBucket = {
+    id: string;
+    payments: KaarigerPayment[];
+    at: number;
+    date: string;
+    time: string;
+  };
+  const buckets = new Map<string, PayBucket>();
+  for (const p of payments) {
+    const batch = (p.payBatchId || "").trim();
+    const key = batch
+      ? `b:${batch}`
+      : `t:${p.date}|${p.time}|${p.createdBy || ""}|${Math.floor((p.createdAt || 0) / 2000)}`;
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.payments.push(p);
+    } else {
+      buckets.set(key, {
+        id: key,
+        payments: [p],
+        at: paymentSortKey(p),
+        date: p.date || "",
+        time: p.time || "",
+      });
+    }
+  }
+  const paymentGroupsChrono = Array.from(buckets.values()).sort((a, b) => a.at - b.at);
 
-  for (const p of paymentsChrono) {
-    if (payIsCredit(p)) {
+  for (const g of paymentGroupsChrono) {
+    const onlyCredit = g.payments.every((p) => payIsCredit(p));
+    if (onlyCredit) {
       events.push({
-        id: `pay-${p.id}`,
+        id: `pay-batch-${g.id}`,
         kind: "payment",
         title: "Paid → credit / advance",
-        subtitle: [p.date, p.time, p.remarks].filter(Boolean).join(" · "),
+        subtitle: [g.date, g.time].filter(Boolean).join(" · "),
         deltaRemaining: 0,
         deltaKharcha: 0,
-        at: paymentSortKey(p),
+        at: g.at,
       });
       continue;
     }
 
-    const amount = Math.max(0, p.amount || 0);
-    if (payIsOpening(p)) {
-      events.push({
-        id: `pay-${p.id}`,
-        kind: "payment",
-        title: "Paid · opening / purana baaki",
-        subtitle: [p.date, p.time, p.remarks].filter(Boolean).join(" · "),
-        deltaRemaining: -amount,
-        deltaKharcha: 0,
-        at: paymentSortKey(p),
-      });
-      continue;
+    let remCut = 0;
+    let kharchaCut = 0;
+    for (const p of g.payments) {
+      if (payIsCredit(p)) continue;
+      const amount = Math.max(0, p.amount || 0);
+      remCut += amount;
+      if (!payIsOpening(p)) kharchaCut += amount;
     }
-
-    if (payIsOldKharcha(p)) {
-      events.push({
-        id: `pay-${p.id}`,
-        kind: "payment",
-        title: "Paid · old kharcha",
-        subtitle: [p.date, p.time, p.remarks].filter(Boolean).join(" · "),
-        deltaRemaining: 0,
-        deltaKharcha: -amount,
-        at: paymentSortKey(p),
-      });
-      continue;
-    }
-
-    const order = orders.find((o) => o.id === p.orderId);
-    const week = order ? orderWeekMeta(order) : null;
-    const budget = order ? orderWeekKharcha(order) : 0;
-    const carried = order ? Math.max(0, order.kharchaCarriedForward || 0) : 0;
-    const due = Math.max(0, budget - carried);
-    const paidAfter = (paidOfBudget.get(p.orderId) || 0) + amount;
-    paidOfBudget.set(p.orderId, paidAfter);
-    const leftAfter = Math.max(0, due - paidAfter);
-    const when = [p.date, p.time].filter(Boolean).join(" · ");
-    const outOf =
-      due > 0
-        ? `${Math.round(paidAfter).toLocaleString("en-IN")} of ${Math.round(due).toLocaleString("en-IN")} kharcha` +
-          (leftAfter > 0
-            ? ` · ${Math.round(leftAfter).toLocaleString("en-IN")} left`
-            : " · cleared")
-        : "";
 
     events.push({
-      id: `pay-${p.id}`,
+      id: `pay-batch-${g.id}`,
       kind: "payment",
-      title: week ? `Transfer · ${week.label} kharcha` : "Transfer · week kharcha",
-      subtitle: [when, outOf, p.remarks].filter(Boolean).join(" · "),
-      // Each installment reduces live Total Remaining (budget line does not).
-      deltaRemaining: -amount,
-      deltaKharcha: -amount,
-      at: paymentSortKey(p),
+      title: "Paid",
+      subtitle: [g.date, g.time].filter(Boolean).join(" · "),
+      deltaRemaining: -remCut,
+      deltaKharcha: -kharchaCut,
+      at: g.at,
     });
   }
 

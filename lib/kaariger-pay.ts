@@ -336,36 +336,14 @@ export async function payKaarigerKharcha(opts: {
     left = 0;
   }
 
-  const parts: string[] = [];
-  if (oldKharchaApplied > 0) {
-    parts.push(`old kharcha ${Math.round(oldKharchaApplied).toLocaleString("en-IN")}`);
-  }
-  if (orderApplied > 0) {
-    parts.push(`week kharcha ${Math.round(orderApplied).toLocaleString("en-IN")}`);
-  }
-  if (openingApplied > 0) {
-    parts.push(`opening ${Math.round(openingApplied).toLocaleString("en-IN")}`);
-  }
-  if (creditAdded > 0) {
-    parts.push(`credit ${Math.round(creditAdded).toLocaleString("en-IN")}`);
-  }
-
-  let weekLeft = 0;
-  for (const order of active) {
-    const paidAfter = paidByOrder.get(order.id) || 0;
-    weekLeft += orderKharchaUnpaid(order, paidAfter);
-  }
-
   const totalPaid = oldKharchaApplied + orderApplied + openingApplied + creditAdded;
-  let message =
-    parts.length > 1
-      ? `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} once → ${parts.join(" + ")}.`
-      : parts.length === 1
-        ? `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} → ${parts[0]}.`
-        : "Kharcha recorded.";
-  if (orderApplied > 0 || oldKharchaApplied > 0) {
-    message += ` Week kharcha left ₹${Math.round(weekLeft).toLocaleString("en-IN")}.`;
-  }
+  const remCut = oldKharchaApplied + orderApplied + openingApplied;
+  const message =
+    remCut > 0
+      ? `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} — Total Remaining −₹${Math.round(remCut).toLocaleString("en-IN")}.`
+      : creditAdded > 0
+        ? `Paid ₹${Math.round(creditAdded).toLocaleString("en-IN")} saved as credit.`
+        : "Payment recorded.";
 
   return { message, oldKharchaApplied, openingApplied, orderApplied, creditAdded };
 }
