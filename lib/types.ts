@@ -18,10 +18,15 @@ export interface Employee {
   /** Overpaid kharcha carried forward from a previous (kaariger) order — auto-applied to their next bill. */
   creditBalance?: number;
   /**
-   * Opening balance owed TO this kaariger (editable on profile).
-   * Hisaab remaining = openingBalance + unpaid bill balances − creditBalance.
+   * Opening / running closing balance owed TO this kaariger (editable on profile).
+   * On each Saturday bill: opening := opening + ADD BALANCE (maal − deductions − week kharcha).
    */
   openingBalance?: number;
+  /**
+   * Unpaid weekly kharcha carried from previous weeks (sheet "OLD KHARCHA").
+   * Pay clears this first, then the current week's kharcha.
+   */
+  oldKharcha?: number;
   /**
    * Optional per-staff shift. When set, late/early/pay use these instead of
    * the global Attendance settings. Empty/missing → company default.
@@ -114,8 +119,23 @@ export interface KaarigerOrder {
   materialDeductions?: RepairLineItem[];
   /** Sum of materialDeductions line totals. */
   materialDeductionsTotal?: number;
-  /** Kharcha (advance) given to the kaariger at the time this order was created. */
+  /**
+   * This week's kharcha budget (set on Saturday bill create).
+   * Paid down through the week via transfers; unpaid amount carries as oldKharcha.
+   * Not recorded as a payment at creation.
+   */
   kharchaGiven?: number;
+  /**
+   * Portion of kharchaGiven already rolled into employees.oldKharcha when the
+   * next Saturday bill was created — so it is not double-counted.
+   */
+  kharchaCarriedForward?: number;
+  /** Opening balance snapshot when this week bill was created (before ADD). */
+  openingAtCreation?: number;
+  /** ADD BALANCE = MAAL − deductions − week kharcha at creation. */
+  addBalance?: number;
+  /** Closing = openingAtCreation + addBalance at creation. */
+  closingAtCreation?: number;
 }
 
 export interface OrderApprovalRecord {
@@ -283,6 +303,7 @@ export const MARKETPLACE_COMPANIES = [
   "Other",
 ] as const;
 
+/** Built-in courier suggestions (same set as Android Dispatch). */
 export const DELIVERY_PARTNERS = [
   "Amazon Delivery",
   "eKart",
@@ -296,6 +317,13 @@ export const DELIVERY_PARTNERS = [
   "India Post",
   "Valmo",
 ] as const;
+
+/** Custom courier in Firestore `delivery_partners` — shared with staff Dispatch. */
+export interface DeliveryPartner {
+  id: string;
+  name: string;
+  createdAt: number;
+}
 
 /** Client's business entity that buys from suppliers (Bill Report). */
 export type BillOwner = "CLARIS" | "BLISS";

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type {
+  DeliveryPartner,
   KaarigerOrder,
   OrderProductLine,
   PickupRecord,
@@ -47,6 +48,41 @@ import { useSelection } from "@/lib/use-selection";
 import { useAuth } from "@/lib/auth-context";
 
 type OwnerFilter = "ALL" | "CLARIS" | "BLISS";
+
+/** Row in the merged partner list (defaults + Firestore custom). */
+type PartnerOption = {
+  id: string;
+  name: string;
+  /** True when stored in `delivery_partners` and not a built-in default. */
+  canDelete: boolean;
+};
+
+function partnerNameEquals(a: string, b: string) {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function mergePartnerOptions(fromDb: DeliveryPartner[]): PartnerOption[] {
+  const names = new Set<string>();
+  const merged: PartnerOption[] = [];
+  for (const def of DELIVERY_PARTNERS) {
+    const key = def.toLowerCase();
+    if (names.has(key)) continue;
+    names.add(key);
+    const existing = fromDb.find((p) => partnerNameEquals(p.name, def));
+    merged.push({
+      id: existing?.id || `default_${key}`,
+      name: def,
+      canDelete: false,
+    });
+  }
+  for (const p of fromDb) {
+    const key = p.name.trim().toLowerCase();
+    if (!key || names.has(key)) continue;
+    names.add(key);
+    merged.push({ id: p.id, name: p.name.trim(), canDelete: true });
+  }
+  return merged.sort((a, b) => a.name.localeCompare(b.name));
+}
 
 function ownerQtys(r: { clarisQuantity?: number; blissQuantity?: number; quantity: number }) {
   const c = Number(r.clarisQuantity) || 0;
@@ -232,6 +268,11 @@ export default function RecordsPage() {
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
+  const [dbPartners, setDbPartners] = useState<DeliveryPartner[]>([]);
+  const [partnerModal, setPartnerModal] = useState(false);
+  const [newPartnerName, setNewPartnerName] = useState("");
+  const [partnerSaving, setPartnerSaving] = useState(false);
+  const [partnerMsg, setPartnerMsg] = useState("");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("ALL");
   /** null = closed; "add" = create; record = edit */
@@ -278,12 +319,27 @@ export default function RecordsPage() {
   useEffect(() => {
     async function load() {
       const db = getDb();
-      const [oSnap, pSnap, rSnap, matSnap] = await Promise.all([
+      const [oSnap, pSnap, rSnap, matSnap, partnerSnap] = await Promise.all([
         getDocs(collection(db, "kaariger_orders")),
         getDocs(collection(db, "pickup_records")),
         getDocs(collection(db, "return_records")),
         getDocs(collection(db, "raw_materials")),
+        getDocs(collection(db, "delivery_partners")),
       ]);
+
+      setDbPartners(
+        partnerSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              name: ((data.name as string) || "").trim(),
+              createdAt: (data.createdAt as number) || 0,
+            } satisfies DeliveryPartner;
+          })
+          .filter((p) => p.name)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
 
       setRawMaterials(
         matSnap.docs
@@ -428,6 +484,12 @@ export default function RecordsPage() {
       );
     });
   }, [pickups, q, ownerFilter]);
+
+  const partnerOptions = useMemo(() => mergePartnerOptions(dbPartners), [dbPartners]);
+  const partnerNames = useMemo(
+    () => partnerOptions.map((p) => p.name),
+    [partnerOptions]
+  );
 
   const filteredReturns = useMemo(() => {
     return returns.filter((r) => {
@@ -813,6 +875,51 @@ export default function RecordsPage() {
     if (typeof returnModal === "object" && returnModal?.id === rec.id) setReturnModal(null);
   }
 
+  async function addDeliveryPartner(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newPartnerName.trim();
+    if (!name) {
+      setPartnerMsg("Enter a partner name.");
+      return;
+    }
+    if (partnerNames.some((n) => partnerNameEquals(n, name))) {
+      setPartnerMsg("That partner is already in the list.");
+      return;
+    }
+    setPartnerSaving(true);
+    setPartnerMsg("");
+    try {
+      const id = uuid();
+      const partner: DeliveryPartner = {
+        id,
+        name,
+        createdAt: Date.now(),
+      };
+      await setDoc(doc(getDb(), "delivery_partners", id), partner);
+      setDbPartners((prev) =>
+        [...prev, partner].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setNewPartnerName("");
+      setPartnerMsg("Added — staff will see this in Pickup & Return.");
+    } catch (err) {
+      setPartnerMsg(err instanceof Error ? err.message : "Failed to add partner.");
+    } finally {
+      setPartnerSaving(false);
+    }
+  }
+
+  async function deleteDeliveryPartner(partner: PartnerOption) {
+    if (!partner.canDelete) return;
+    if (!confirm(`Remove delivery partner "${partner.name}"? Staff will no longer see it.`)) return;
+    try {
+      await deleteDoc(doc(getDb(), "delivery_partners", partner.id));
+      setDbPartners((prev) => prev.filter((p) => p.id !== partner.id));
+      setPartnerMsg(`Removed "${partner.name}".`);
+    } catch (err) {
+      setPartnerMsg(err instanceof Error ? err.message : "Failed to delete partner.");
+    }
+  }
+
   async function deleteSelectedRecords() {
     const ids = selection.selectedIds;
     if (ids.length === 0) return;
@@ -861,6 +968,20 @@ export default function RecordsPage() {
         title="Records"
         actions={
           <div className="flex flex-wrap gap-2">
+            {(tab === "pickups" || tab === "returns") && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setPartnerMsg("");
+                  setNewPartnerName("");
+                  setPartnerModal(true);
+                }}
+              >
+                <Truck className="h-4 w-4" />
+                Delivery partners
+              </button>
+            )}
             {tab === "pickups" && (
               <button type="button" className="btn btn-primary" onClick={openPickupAdd}>
                 <Plus className="h-4 w-4" />
@@ -1494,6 +1615,84 @@ export default function RecordsPage() {
         </>
       )}
 
+      {partnerModal && (
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            onClick={() => setPartnerModal(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Delivery partners</h3>
+                  <p className="mt-0.5 text-sm text-[var(--text-muted)]">
+                    Partners you add here show up for staff in Pickup &amp; Return.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost shrink-0 p-2"
+                  onClick={() => setPartnerModal(false)}
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form onSubmit={addDeliveryPartner} className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder="New partner name"
+                  value={newPartnerName}
+                  onChange={(e) => setNewPartnerName(e.target.value)}
+                  disabled={partnerSaving}
+                />
+                <button type="submit" className="btn btn-primary shrink-0" disabled={partnerSaving}>
+                  <Plus className="h-4 w-4" />
+                  {partnerSaving ? "Adding…" : "Add"}
+                </button>
+              </form>
+
+              {partnerMsg && (
+                <p className="text-sm text-[var(--text-muted)]">{partnerMsg}</p>
+              )}
+
+              <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
+                {partnerOptions.map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{p.name}</p>
+                      <p className="text-[11px] text-[var(--text-muted)]">
+                        {p.canDelete ? "Custom — visible to staff" : "Built-in"}
+                      </p>
+                    </div>
+                    {p.canDelete ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost shrink-0 p-2 text-red-600"
+                        onClick={() => deleteDeliveryPartner(p)}
+                        aria-label={`Delete ${p.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <span className="shrink-0 text-[11px] text-[var(--text-muted)]">—</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </>
+      )}
+
       {pickupModal && (
         <>
           <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setPickupModal(null)} />
@@ -1550,11 +1749,11 @@ export default function RecordsPage() {
                   onChange={(e) => setPickupForm({ ...pickupForm, deliveryPartner: e.target.value })}
                 >
                   <option value="">Select delivery partner</option>
-                  {DELIVERY_PARTNERS.map((d) => (
+                  {partnerNames.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                   {pickupForm.deliveryPartner &&
-                    !(DELIVERY_PARTNERS as readonly string[]).includes(pickupForm.deliveryPartner) && (
+                    !partnerNames.some((n) => partnerNameEquals(n, pickupForm.deliveryPartner)) && (
                       <option value={pickupForm.deliveryPartner}>{pickupForm.deliveryPartner}</option>
                     )}
                 </select>
@@ -1639,11 +1838,11 @@ export default function RecordsPage() {
                   onChange={(e) => setReturnForm({ ...returnForm, deliveryPartner: e.target.value })}
                 >
                   <option value="">Select delivery partner</option>
-                  {DELIVERY_PARTNERS.map((d) => (
+                  {partnerNames.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                   {returnForm.deliveryPartner &&
-                    !(DELIVERY_PARTNERS as readonly string[]).includes(returnForm.deliveryPartner) && (
+                    !partnerNames.some((n) => partnerNameEquals(n, returnForm.deliveryPartner)) && (
                       <option value={returnForm.deliveryPartner}>{returnForm.deliveryPartner}</option>
                     )}
                 </select>

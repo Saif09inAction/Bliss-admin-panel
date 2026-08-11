@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, setDoc, updateDoc } from "firebase/firestore";
+import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import {
   Calculator,
   CheckCircle2,
@@ -23,7 +23,13 @@ import type {
   RepairItemType,
   RepairLineItem,
 } from "@/lib/types";
-import { formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
+import { formatRupee, uuid } from "@/lib/csv";
+import { orderAddBalance, orderKharchaUnpaid } from "@/lib/kaariger-hisaab";
+import {
+  isCreditPayment,
+  isOldKharchaPayment,
+  isOpeningPayment,
+} from "@/lib/kaariger-pay";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
@@ -116,6 +122,8 @@ export default function OrdersPage() {
           attendancePercentage: 0,
           role: "KAARIGER" as const,
           creditBalance: (d.data().creditBalance as number) || 0,
+          openingBalance: (d.data().openingBalance as number) || 0,
+          oldKharcha: (d.data().oldKharcha as number) || 0,
         }))
     );
     setCatalogProducts(
@@ -152,10 +160,12 @@ export default function OrdersPage() {
     loadMeta();
   }, []);
 
-  const availableCredit = useMemo(
-    () => kaarigers.find((k) => k.phone === kaarigerId)?.creditBalance || 0,
+  const selectedKaariger = useMemo(
+    () => kaarigers.find((k) => k.phone === kaarigerId),
     [kaarigers, kaarigerId]
   );
+  const currentOpening = Math.max(0, selectedKaariger?.openingBalance || 0);
+  const currentOldKharcha = Math.max(0, selectedKaariger?.oldKharcha || 0);
 
   const calc = useMemo(() => {
     const lines = productLines.map((l) => {
@@ -190,10 +200,9 @@ export default function OrdersPage() {
 
     const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
     const kharchaAmount = Number(kharcha) || 0;
-    // Any earlier overpaid kharcha (credit) is auto-applied here, on top of kharcha given now.
-    const remainingAfterKharcha = Math.max(0, afterDeductions - kharchaAmount);
-    const creditApplied = Math.min(availableCredit, remainingAfterKharcha);
-    const finalTotal = Math.max(0, remainingAfterKharcha - creditApplied);
+    // Sheet: ADD BALANCE = MAAL − deductions − week's kharcha
+    const addBalance = productsTotal - deductionsTotal - kharchaAmount;
+    const closing = currentOpening + addBalance;
 
     return {
       lines,
@@ -204,11 +213,10 @@ export default function OrdersPage() {
       deductionsTotal,
       afterDeductions,
       kharchaAmount,
-      remainingAfterKharcha,
-      creditApplied,
-      finalTotal,
+      addBalance,
+      closing,
     };
-  }, [productLines, deductions, materialLines, kharcha, availableCredit]);
+  }, [productLines, deductions, materialLines, kharcha, currentOpening]);
 
   function addMaterialLine() {
     setMaterialLines((prev) => [...prev, emptyMaterialLine()]);
@@ -296,6 +304,7 @@ export default function OrdersPage() {
 
     setSending(true);
     try {
+      const db = getDb();
       const id = uuid();
       const targetQuantity = validLines.reduce((s, l) => s + l.quantity, 0);
       const productName = validLines.map((l) => l.productName).join(", ");
@@ -306,12 +315,58 @@ export default function OrdersPage() {
         lineTotal: l.lineTotal,
       }));
 
-      // Overpaid kharcha from an earlier bill is carried forward and auto-applied here.
-      const { creditApplied, finalTotal } = calc;
-      const isFullyPaidAtCreation = finalTotal <= 0;
-      // If kharcha given now exceeds this bill's own total, the extra becomes fresh credit too.
-      const overpayAtCreation = Math.max(0, calc.kharchaAmount - calc.afterDeductions);
-      const newCreditBalance = Math.max(0, availableCredit - creditApplied) + overpayAtCreation;
+      // Prior unpaid week kharcha rolls into oldKharcha (sheet carry).
+      const [orderSnap, paySnap] = await Promise.all([
+        getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaariger.phone))),
+        getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaariger.phone))),
+      ]);
+
+      const paidByOrder = new Map<string, number>();
+      paySnap.docs.forEach((d) => {
+        const data = d.data();
+        const p = {
+          orderId: (data.orderId as string) || "",
+          remarks: data.remarks as string | undefined,
+        };
+        if (isCreditPayment(p) || isOpeningPayment(p) || isOldKharchaPayment(p)) return;
+        paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + ((data.amount as number) || 0));
+      });
+
+      let oldKharcha = Math.max(0, kaariger.oldKharcha || 0);
+      for (const d of orderSnap.docs) {
+        const data = d.data();
+        const status = (data.status as string) || "ASSIGNED";
+        if (status === "COMPLETED" || status === "CANCELLED" || status === "REJECTED") continue;
+        const prev: KaarigerOrder = {
+          id: (data.id as string) || d.id,
+          kaarigerId: kaariger.phone,
+          kaarigerName: kaariger.name,
+          productName: (data.productName as string) || "",
+          targetQuantity: (data.targetQuantity as number) || 0,
+          color: "",
+          rawMaterials: [],
+          totalDealAmount: (data.totalDealAmount as number) || 0,
+          pricingType: "PER_PIECE",
+          status,
+          approvedQuantity: 0,
+          createdBy: "",
+          createdAt: (data.createdAt as number) || 0,
+          kharchaGiven: (data.kharchaGiven as number) || 0,
+          kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
+        };
+        const unpaid = orderKharchaUnpaid(prev, paidByOrder.get(prev.id) || 0);
+        if (unpaid <= 0) {
+          if (status !== "COMPLETED") {
+            await updateDoc(doc(db, "kaariger_orders", prev.id), { status: "COMPLETED" });
+          }
+          continue;
+        }
+        oldKharcha += unpaid;
+        await updateDoc(doc(db, "kaariger_orders", prev.id), {
+          kharchaCarriedForward: Math.max(0, prev.kharchaCarriedForward || 0) + unpaid,
+          status: "COMPLETED",
+        });
+      }
 
       const order: KaarigerOrder = {
         id,
@@ -324,7 +379,7 @@ export default function OrdersPage() {
         totalDealAmount: calc.afterDeductions,
         pricePerPiece: targetQuantity > 0 ? calc.productsTotal / targetQuantity : 0,
         pricingType: "PER_PIECE",
-        status: isFullyPaidAtCreation ? "COMPLETED" : "ASSIGNED",
+        status: calc.kharchaAmount > 0 ? "ASSIGNED" : "COMPLETED",
         approvedQuantity: 0,
         createdBy: session?.name || "Admin",
         createdAt: Date.now(),
@@ -334,46 +389,29 @@ export default function OrdersPage() {
         materialDeductions: calc.deductionLines,
         materialDeductionsTotal: calc.deductionsTotal,
         kharchaGiven: calc.kharchaAmount,
+        kharchaCarriedForward: 0,
       };
 
-      await setDoc(doc(getDb(), "kaariger_orders", id), order);
+      // Sheet: Closing = Opening + ADD BALANCE
+      const openingAtCreation = Math.max(0, kaariger.openingBalance || 0);
+      const addBalance = orderAddBalance(order);
+      const closingAtCreation = openingAtCreation + addBalance;
+      order.openingAtCreation = openingAtCreation;
+      order.addBalance = addBalance;
+      order.closingAtCreation = closingAtCreation;
 
-      if (calc.kharchaAmount > 0) {
-        const paymentId = uuid();
-        await setDoc(doc(getDb(), "kaariger_payments", paymentId), {
-          id: paymentId,
-          orderId: id,
-          kaarigerId: kaariger.phone,
-          amount: calc.kharchaAmount,
-          date: todayStr(),
-          time: nowTimeStr(),
-          remarks: "Kharcha given at order creation",
-          createdBy: session?.name || "Admin",
-        });
-      }
-
-      if (creditApplied > 0) {
-        const creditPaymentId = uuid();
-        await setDoc(doc(getDb(), "kaariger_payments", creditPaymentId), {
-          id: creditPaymentId,
-          orderId: id,
-          kaarigerId: kaariger.phone,
-          amount: creditApplied,
-          date: todayStr(),
-          time: nowTimeStr(),
-          remarks: "Credit carried from previous overpaid bill",
-          createdBy: session?.name || "Admin",
-        });
-      }
-
-      if (newCreditBalance !== availableCredit) {
-        await updateDoc(doc(getDb(), "employees", kaariger.phone), {
-          creditBalance: newCreditBalance,
-        });
-      }
+      await setDoc(doc(db, "kaariger_orders", id), order);
+      await updateDoc(doc(db, "employees", kaariger.phone), {
+        openingBalance: Math.max(0, closingAtCreation),
+        oldKharcha,
+      });
 
       setSuccessMsg(
-        `Bill sent to ${kaariger.name}! Find it in Records or the Hisaab section.`
+        `Week bill for ${kaariger.name} saved. Closing ${money(closingAtCreation)}` +
+          (oldKharcha > 0 ? ` · Old kharcha ${money(oldKharcha)}` : "") +
+          (calc.kharchaAmount > 0
+            ? ` · Pay this week's kharcha ${money(calc.kharchaAmount)} through the week.`
+            : ".")
       );
       resetForm();
       loadMeta();
@@ -385,13 +423,6 @@ export default function OrdersPage() {
   }
 
   const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
-  const productOptions = catalogProducts.map((p) => ({
-    id: p.id,
-    label:
-      p.price && p.price > 0
-        ? `${p.name} · ₹${p.price.toLocaleString("en-IN")}/pc`
-        : p.name,
-  }));
   const materialOptions = rawMaterials.map((m) => ({
     id: m.id,
     label:
@@ -432,7 +463,7 @@ export default function OrdersPage() {
           <div className="mb-2 flex items-center justify-between gap-2">
             <label className="label mb-0 flex items-center gap-1.5">
               <ShoppingBag className="h-3.5 w-3.5" />
-              Products *
+              Products
             </label>
             <button type="button" className="btn btn-ghost btn-sm" onClick={addProductLine}>
               <Plus className="h-3.5 w-3.5" />
@@ -440,7 +471,7 @@ export default function OrdersPage() {
             </button>
           </div>
           <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Price is per piece. Catalog price fills automatically when set — you can still edit it.
+            Type any product name (catalog suggestions appear if available). Price is per piece.
           </p>
           <div className="space-y-2.5">
             {productLines.map((line, i) => {
@@ -448,23 +479,31 @@ export default function OrdersPage() {
               return (
                 <div key={i} className="rounded-xl border border-[var(--border)] p-2.5">
                   <div className="space-y-2 sm:grid sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_2.75rem] sm:items-start sm:gap-2 sm:space-y-0">
-                    <SearchSelect
-                      value={line.productId}
-                      onSelect={(id) => {
-                        const product = catalogProducts.find((p) => p.id === id);
-                        const catalogPrice =
-                          product?.price && product.price > 0 ? String(product.price) : "";
+                    <input
+                      className="input"
+                      type="text"
+                      value={line.productName}
+                      list={`bill-product-catalog-${i}`}
+                      placeholder="Product name"
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const match = catalogProducts.find(
+                          (p) => p.name.trim().toLowerCase() === name.trim().toLowerCase()
+                        );
                         updateProductLine(i, {
-                          productId: id,
-                          productName: product?.name || "",
-                          // Auto-fill when catalog has a price; leave blank so admin can type it.
-                          pricePerPiece: catalogPrice,
+                          productId: match?.id || "",
+                          productName: name,
+                          ...(match?.price && match.price > 0
+                            ? { pricePerPiece: String(match.price) }
+                            : {}),
                         });
                       }}
-                      options={productOptions}
-                      placeholder="Search catalog product…"
-                      emptyText="No products in catalog"
                     />
+                    <datalist id={`bill-product-catalog-${i}`}>
+                      {catalogProducts.map((p) => (
+                        <option key={p.id} value={p.name} />
+                      ))}
+                    </datalist>
                     <div className="grid grid-cols-[1fr_1fr_2.75rem] gap-2 sm:contents">
                       <input
                         className="input-qty"
@@ -675,7 +714,7 @@ export default function OrdersPage() {
           <label className="label">
             <span className="inline-flex items-center gap-1.5">
               <Wallet className="h-3.5 w-3.5" />
-              Kharcha given now (optional)
+              This week&apos;s kharcha
             </span>
           </label>
           <input
@@ -687,8 +726,14 @@ export default function OrdersPage() {
             placeholder="0"
           />
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Advance cash given to the kaariger — also subtracted from the total.
+            Saturday budget (e.g. 60,000). Pay it partially through the week — leftover carries as old
+            kharcha next Saturday.
           </p>
+          {currentOldKharcha > 0 && (
+            <p className="mt-1 text-xs text-amber-700">
+              Old kharcha still pending: {money(currentOldKharcha)}
+            </p>
+          )}
         </div>
 
         <div>
@@ -704,28 +749,20 @@ export default function OrdersPage() {
         <div className="rounded-2xl border border-jade/20 bg-jade-soft/40 p-4">
           <div className="mb-2 flex items-center gap-2 text-jade-deep">
             <Calculator size={16} />
-            <p className="text-xs font-bold uppercase tracking-wider">Detailed Total</p>
+            <p className="text-xs font-bold uppercase tracking-wider">Week total (sheet style)</p>
           </div>
           <div className="space-y-1 text-sm">
-            <Row label="Products total" value={money(calc.productsTotal)} />
-            <Row label="Less: Runner/Fitting/Astar/Material" value={`−${money(calc.deductionsTotal)}`} />
+            <Row label="Opening balance" value={money(currentOpening)} />
+            <Row label="MAAL (products)" value={money(calc.productsTotal)} />
+            <Row label="Less: Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} />
+            <Row label="Less: This week's kharcha" value={`−${money(calc.kharchaAmount)}`} />
             <div className="my-2 border-t border-jade/20" />
-            <Row label="Subtotal" value={money(calc.afterDeductions)} bold />
-            <Row label="Less: Kharcha" value={`−${money(calc.kharchaAmount)}`} />
-            {availableCredit > 0 && (
-              <Row
-                label={`Less: Credit carried (${money(availableCredit)} available)`}
-                value={`−${money(calc.creditApplied)}`}
-              />
-            )}
-            <div className="my-2 border-t border-jade/20" />
-            <Row label="Final balance to pay" value={money(calc.finalTotal)} bold accent />
+            <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
+            <Row label="Closing balance" value={money(calc.closing)} bold accent />
           </div>
-          {availableCredit > 0 && (
-            <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-              This kaariger has {money(availableCredit)} credit from an earlier overpaid bill — it&apos;s auto-applied above.
-            </p>
-          )}
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+            Closing becomes next week&apos;s opening. Kharcha is paid separately through the week.
+          </p>
         </div>
 
         {formMsg && (

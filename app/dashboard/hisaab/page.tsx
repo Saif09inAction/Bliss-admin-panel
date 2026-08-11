@@ -27,12 +27,15 @@ import {
 } from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import {
+  isCreditPayment,
+  isOldKharchaPayment,
   isOpeningPayment,
   orderNetDeal,
   payKaarigerKharcha,
   paymentKind,
   paymentLabel,
 } from "@/lib/kaariger-pay";
+import { orderKharchaUnpaid } from "@/lib/kaariger-hisaab";
 import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -112,6 +115,7 @@ export default function HisaabPage() {
           role: "KAARIGER" as const,
           creditBalance: (d.data().creditBalance as number) || 0,
           openingBalance: (d.data().openingBalance as number) || 0,
+          oldKharcha: (d.data().oldKharcha as number) || 0,
         }))
         .sort((a, b) => a.name.localeCompare(b.name))
     );
@@ -163,6 +167,10 @@ export default function HisaabPage() {
             materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
             materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
             kharchaGiven: data.kharchaGiven as number | undefined,
+            kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
+            openingAtCreation: data.openingAtCreation as number | undefined,
+            addBalance: data.addBalance as number | undefined,
+            closingAtCreation: data.closingAtCreation as number | undefined,
           } satisfies KaarigerOrder;
         })
         .sort((a, b) => b.createdAt - a.createdAt);
@@ -272,8 +280,7 @@ export default function HisaabPage() {
       const k = kaarigers.find((x) => x.phone === kaarigerId);
       if (!k) throw new Error("Kaariger not found.");
 
-      // Always allocate: old remaining → active bills → credit/advance.
-      // Works even when the kaariger has no orders.
+      // Always allocate: old kharcha → week kharcha → opening → credit.
       const standaloneRepairs = repairs
         .filter((r) => isStandaloneRepair(r.orderId) && (!r.status || r.status === "APPROVED"))
         .reduce((s, r) => s + (r.totalRepairCost || 0), 0);
@@ -284,6 +291,7 @@ export default function HisaabPage() {
         createdBy: session.name,
         openingBalance: k.openingBalance || 0,
         creditBalance: k.creditBalance || 0,
+        oldKharcha: k.oldKharcha || 0,
         orders,
         payments,
         standaloneRepairTotal: standaloneRepairs,
@@ -305,7 +313,10 @@ export default function HisaabPage() {
 
   const orderPaidMap = useMemo(() => {
     const map = new Map<string, number>();
-    payments.forEach((p) => map.set(p.orderId, (map.get(p.orderId) || 0) + p.amount));
+    payments.forEach((p) => {
+      if (isCreditPayment(p) || isOpeningPayment(p) || isOldKharchaPayment(p)) return;
+      map.set(p.orderId, (map.get(p.orderId) || 0) + p.amount);
+    });
     return map;
   }, [payments]);
 
@@ -317,14 +328,19 @@ export default function HisaabPage() {
   const completedOrders = useMemo(() => orders.filter((o) => o.status === "COMPLETED"), [orders]);
 
   const activeTotals = useMemo(() => {
-    const deal = activeOrders.reduce((s, o) => s + orderNetDeal(o), 0);
+    const weekKharcha = activeOrders.reduce((s, o) => s + Math.max(0, o.kharchaGiven || 0), 0);
     const paid = activeOrders.reduce((s, o) => s + (orderPaidMap.get(o.id) || 0), 0);
-    const balance = Math.max(0, deal - paid);
-    return { deal, paid, balance };
+    const balance = activeOrders.reduce(
+      (s, o) => s + orderKharchaUnpaid(o, orderPaidMap.get(o.id) || 0),
+      0
+    );
+    return { deal: weekKharcha, paid, balance };
   }, [activeOrders, orderPaidMap]);
 
-  // Remaining = opening + unpaid bills − credit − approved no-bill repairing.
+  // Closing (openingBal) is the running maal ledger from Saturday bills.
+  // Kharcha remaining = old carry + this week's unpaid kharcha (what Pay clears first).
   const openingBal = Math.max(0, selectedKaariger?.openingBalance || 0);
+  const oldKharchaBal = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
   const standaloneRepairTotal = useMemo(
     () =>
@@ -337,7 +353,8 @@ export default function HisaabPage() {
         .reduce((s, r) => s + (r.totalRepairCost || 0), 0),
     [repairs]
   );
-  const grossOwed = openingBal + activeTotals.balance;
+  const kharchaRemaining = Math.max(0, oldKharchaBal + activeTotals.balance);
+  const grossOwed = openingBal + kharchaRemaining;
   const totalRemaining = Math.max(0, grossOwed - creditBal - standaloneRepairTotal);
   const surplusCredit = Math.max(0, creditBal - Math.max(0, grossOwed - standaloneRepairTotal));
   const creditAppliedToRemaining = Math.min(creditBal, Math.max(0, grossOwed - standaloneRepairTotal));
@@ -422,16 +439,16 @@ export default function HisaabPage() {
     let allDeal = 0;
     let allPaid = 0;
     orders.forEach((o) => {
-      const net = orderNetDeal(o);
+      const weekKharcha = Math.max(0, o.kharchaGiven || 0);
       const paid = orderPaidMap.get(o.id) || 0;
-      const balance = Math.max(0, net - paid);
-      allDeal += net;
+      const balance = orderKharchaUnpaid(o, paid);
+      allDeal += weekKharcha;
       allPaid += paid;
       rows.push([
         o.productName,
         o.status.replace(/_/g, " "),
         formatDate(o.createdAt),
-        String(Math.round(net)),
+        String(Math.round(weekKharcha)),
         String(Math.round(paid)),
         String(Math.round(balance)),
       ]);
@@ -709,16 +726,20 @@ export default function HisaabPage() {
                             className={
                               kind === "opening"
                                 ? "badge badge-warn"
-                                : kind === "credit"
-                                  ? "badge badge-success"
-                                  : "badge badge-neutral"
+                                : kind === "old_kharcha"
+                                  ? "badge badge-warn"
+                                  : kind === "credit"
+                                    ? "badge badge-success"
+                                    : "badge badge-neutral"
                             }
                           >
                             {kind === "opening"
                               ? "Opening"
-                              : kind === "credit"
-                                ? "Credit"
-                                : "Bill"}
+                              : kind === "old_kharcha"
+                                ? "Old kharcha"
+                                : kind === "credit"
+                                  ? "Credit"
+                                  : "Week"}
                           </span>
                         </div>
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
@@ -753,6 +774,7 @@ export default function HisaabPage() {
           )}
 
           {(openingBal > 0 ||
+            oldKharchaBal > 0 ||
             activeTotals.balance > 0 ||
             creditBal > 0 ||
             openingPaidTotal > 0 ||
@@ -763,36 +785,30 @@ export default function HisaabPage() {
                   How remaining is calculated
                 </p>
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  Opening balance is old pending money from before this system. New bills add on top.
-                  Repairing without a bill also reduces remaining. Pay clears opening first, then bills;
-                  leftover becomes credit.
+                  Every Saturday bill updates Closing = Opening + ADD BALANCE (MAAL − deductions − week
+                  kharcha). Through the week, Pay clears old kharcha first, then this week&apos;s kharcha.
+                  Leftover unpaid kharcha carries to next Saturday.
                 </p>
               </div>
               <div className="overflow-hidden rounded-xl border border-[var(--border)]">
                 <CalcRow
-                  label="Opening balance (purana baaki)"
-                  hint={
-                    openingPaidTotal > 0
-                      ? openingBal > 0
-                        ? `Original ${money(originalOpening)} − paid ${money(openingPaidTotal)} = still pending`
-                        : `Original ${money(originalOpening)} − paid ${money(openingPaidTotal)} = cleared`
-                      : openingBal > 0
-                        ? "Still pending from before this app"
-                        : "None set on profile"
-                  }
-                  value={
-                    openingPaidTotal > 0
-                      ? `${money(originalOpening)} − ${money(openingPaidTotal)} = ${money(openingBal)}`
-                      : money(openingBal)
-                  }
-                  emphasize={openingBal > 0 || openingPaidTotal > 0}
+                  label="Closing balance (running)"
+                  hint="Updated each Saturday from ADD BALANCE"
+                  value={money(openingBal)}
+                  emphasize={openingBal > 0}
                 />
                 <CalcRow
-                  label="Unpaid bills"
+                  label="Old kharcha (carry)"
+                  hint="Unpaid from previous weeks"
+                  value={money(oldKharchaBal)}
+                  emphasize={oldKharchaBal > 0}
+                />
+                <CalcRow
+                  label="This week's unpaid kharcha"
                   hint={
                     activeOrders.length > 0
-                      ? `${activeOrders.length} active bill${activeOrders.length === 1 ? "" : "s"}`
-                      : "No active bills"
+                      ? `${activeOrders.length} active week bill${activeOrders.length === 1 ? "" : "s"}`
+                      : "No active week bill"
                   }
                   value={money(activeTotals.balance)}
                 />
@@ -814,15 +830,21 @@ export default function HisaabPage() {
                 )}
                 <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
                   <div>
-                    <p className="font-bold text-amber-900">Remaining to pay</p>
+                    <p className="font-bold text-amber-900">Remaining</p>
                     <p className="text-xs text-amber-800/80">
-                      Opening + unpaid bills
+                      Closing + kharcha remaining
                       {standaloneRepairTotal > 0 ? " − repairing" : ""}
                       {creditAppliedToRemaining > 0 ? " − credit" : ""}
                     </p>
                   </div>
                   <p className="font-display text-lg font-bold text-amber-900">{money(totalRemaining)}</p>
                 </div>
+                {kharchaRemaining > 0 && (
+                  <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] bg-jade-soft/40 px-3 py-2.5 text-sm">
+                    <p className="font-semibold text-jade-deep">Kharcha to pay this week</p>
+                    <p className="font-display font-bold text-jade-deep">{money(kharchaRemaining)}</p>
+                  </div>
+                )}
               </div>
               {openingPaidTotal > 0 && (
                 <div>
@@ -916,6 +938,7 @@ export default function HisaabPage() {
                     payments={payments}
                     repairs={repairs}
                     openingBalance={openingBal}
+                    oldKharcha={oldKharchaBal}
                     onPay={() => {
                       setShowUnifiedPay(true);
                       setPayOrderId(o.id);
@@ -1082,13 +1105,16 @@ function OrderDetailCard({
   payments,
   repairs,
   openingBalance = 0,
+  oldKharcha = 0,
   onPay,
 }: {
   order: KaarigerOrder;
   payments: KaarigerPayment[];
   repairs: OrderRepair[];
-  /** Kaariger opening still pending — shown in Grand Total for clarity. */
+  /** Running closing / opening from Saturday bills. */
   openingBalance?: number;
+  /** Unpaid weekly kharcha carried from previous weeks. */
+  oldKharcha?: number;
   onPay?: () => void;
 }) {
   const [showWhatsApp, setShowWhatsApp] = useState(false);
@@ -1099,8 +1125,9 @@ function OrderDetailCard({
 
   const net = orderNetDeal(order);
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
-  const balance = Math.max(0, net - paid);
-  const isCompleted = order.status === "COMPLETED" || balance <= 0;
+  const weekKharchaUnpaid = orderKharchaUnpaid(order, paid);
+  const balance = weekKharchaUnpaid;
+  const isCompleted = order.status === "COMPLETED" || weekKharchaUnpaid <= 0;
 
   return (
     <div className="surface space-y-4 p-4">
@@ -1297,53 +1324,61 @@ function OrderDetailCard({
       <GrandTotalBox
         order={order}
         paid={paid}
-        net={net}
         openingBalance={openingBalance}
+        oldKharcha={oldKharcha}
       />
     </div>
   );
 }
 
 /**
- * Clear step-by-step hisaab:
- * Opening → product cost → runner/fitting/material/repair → bill total
- * → kharcha paid → bill remaining → (+ opening) → overall remaining.
+ * Sheet-style Grand Total:
+ * Opening → MAAL → deductions → week kharcha → ADD BALANCE → Closing
+ * then Old kharcha + week kharcha − paid = kharcha remaining (carries next week).
  */
 function GrandTotalBox({
   order,
   paid,
-  net,
   openingBalance = 0,
+  oldKharcha = 0,
 }: {
   order: KaarigerOrder;
   paid: number;
-  net: number;
   openingBalance?: number;
+  oldKharcha?: number;
 }) {
-  const opening = Math.max(0, openingBalance || 0);
   const productsTotal = order.productsTotal ?? 0;
   const deductionLines = order.materialDeductions || [];
   const deductionsTotal =
     order.materialDeductionsTotal ??
     deductionLines.reduce((s, it) => s + (it.lineTotal || 0), 0);
   const repairTotal = order.repairDeductionTotal || 0;
-  const billRemaining = Math.max(0, net - paid);
-  const extraPaid = Math.max(0, paid - net);
-  const overallRemaining = opening + billRemaining;
-  const kharchaAtCreation = Math.max(0, order.kharchaGiven || 0);
+  const weekKharcha = Math.max(0, order.kharchaGiven || 0);
+  const addBalance =
+    order.addBalance != null
+      ? order.addBalance
+      : productsTotal - deductionsTotal - repairTotal - weekKharcha;
+  const opening =
+    order.openingAtCreation != null
+      ? Math.max(0, order.openingAtCreation)
+      : Math.max(0, (openingBalance || 0) - addBalance);
+  const closing =
+    order.closingAtCreation != null
+      ? order.closingAtCreation
+      : opening + addBalance;
+  const old = Math.max(0, oldKharcha || 0);
+  const weekDue = orderKharchaUnpaid(order, 0);
+  const weekUnpaid = orderKharchaUnpaid(order, paid);
+  const kharchaPaidTowardWeek = Math.min(paid, weekDue);
+  const totalKharchaDue = old + weekDue;
+  const totalKharchaRemaining = old + weekUnpaid;
 
   return (
     <div className="rounded-2xl border border-jade/20 bg-jade-soft/30 p-4">
       <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">Grand Total</p>
       <div className="space-y-1 text-sm">
-        {opening > 0 && (
-          <Row
-            label="Opening balance (purana baaki)"
-            value={money(opening)}
-            accent="amber"
-          />
-        )}
-        <Row label="Product cost total" value={money(productsTotal)} />
+        <Row label="Opening balance" value={money(opening)} accent="amber" />
+        <Row label="MAAL (product cost)" value={money(productsTotal)} />
         {deductionLines.length > 0
           ? deductionLines.map((it, i) => (
               <Row
@@ -1361,47 +1396,41 @@ function GrandTotalBox({
         {repairTotal > 0 && (
           <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
         )}
+        {weekKharcha > 0 && (
+          <Row label="Less: This week's kharcha" value={`−${money(weekKharcha)}`} />
+        )}
         <div className="my-1.5 border-t border-jade/20" />
-        <Row label="Bill total" value={money(net)} bold />
+        <Row label="ADD BALANCE" value={money(addBalance)} bold />
+        <Row label="Closing balance" value={money(closing)} bold accent="amber" />
+        <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
+          {money(opening)} opening + {money(addBalance)} add = {money(closing)} closing
+        </p>
+
+        <div className="my-1.5 border-t border-jade/20" />
+        <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
+          Kharcha (pay through the week)
+        </p>
+        {old > 0 && <Row label="Old kharcha (carry)" value={money(old)} accent="amber" />}
+        <Row label="This week's kharcha" value={money(weekDue)} />
         <Row
-          label={
-            kharchaAtCreation > 0 && Math.abs(kharchaAtCreation - paid) < 0.01
-              ? "Kharcha paid (on bill creation)"
-              : kharchaAtCreation > 0 && paid > kharchaAtCreation
-                ? "Kharcha paid (creation + later)"
-                : "Kharcha paid"
+          label="Kharcha paid"
+          value={kharchaPaidTowardWeek > 0 ? `−${money(kharchaPaidTowardWeek)}` : money(0)}
+          accent={kharchaPaidTowardWeek > 0 ? "green" : undefined}
+        />
+        <div className="my-1.5 border-t border-jade/20" />
+        <Row
+          label="Kharcha remaining"
+          value={
+            totalKharchaRemaining > 0
+              ? money(totalKharchaRemaining)
+              : "₹0 — cleared"
           }
-          value={paid > 0 ? `−${money(paid)}` : money(0)}
-          accent={paid > 0 ? "green" : undefined}
-        />
-        {kharchaAtCreation > 0 && paid > kharchaAtCreation && (
-          <p className="pl-0.5 text-[11px] text-[var(--text-muted)]">
-            Includes {money(kharchaAtCreation)} given when the bill was created
-          </p>
-        )}
-        <div className="my-1.5 border-t border-jade/20" />
-        <Row
-          label="This bill remaining"
-          value={billRemaining > 0 ? money(billRemaining) : "₹0 — cleared"}
-          bold={billRemaining > 0}
-          accent={billRemaining > 0 ? "amber" : "green"}
-        />
-        {opening > 0 && (
-          <Row label="Opening still pending" value={money(opening)} accent="amber" />
-        )}
-        <div className="my-1.5 border-t border-jade/20" />
-        {extraPaid > 0 ? (
-          <Row label="Extra paid (credit)" value={`+${money(extraPaid)}`} bold accent="green" />
-        ) : null}
-        <Row
-          label="Total remaining"
-          value={money(overallRemaining)}
           bold
-          accent={overallRemaining > 0 ? "amber" : "green"}
+          accent={totalKharchaRemaining > 0 ? "amber" : "green"}
         />
-        {opening > 0 && billRemaining > 0 && (
+        {totalKharchaDue > 0 && totalKharchaRemaining > 0 && (
           <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-            {money(opening)} opening + {money(billRemaining)} bill = {money(overallRemaining)}
+            Unpaid kharcha carries to next Saturday as old kharcha.
           </p>
         )}
       </div>
