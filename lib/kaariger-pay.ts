@@ -95,7 +95,7 @@ export function groupPayments(payments: KaarigerPayment[]): PaymentGroup[] {
     buckets.set(key, list);
   }
   const groups: PaymentGroup[] = [];
-  for (const [key, list] of buckets) {
+  Array.from(buckets.entries()).forEach(([key, list]) => {
     const sorted = [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     const head = sorted[0];
     groups.push({
@@ -107,7 +107,7 @@ export function groupPayments(payments: KaarigerPayment[]): PaymentGroup[] {
       time: head.time || "",
       createdBy: head.createdBy || "",
     });
-  }
+  });
   return groups.sort((a, b) => {
     if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt;
     return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
