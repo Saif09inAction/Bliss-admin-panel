@@ -61,6 +61,16 @@ export interface OrderMaterial {
   remainingQuantity?: number;
 }
 
+/** Product name list for Kaarigar bills. Optional price auto-fills on the bill page. */
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  /** Optional ₹ per piece. When set, bill page fills price automatically. */
+  price?: number;
+  createdAt?: number;
+  createdBy?: string;
+}
+
 /** One product line in a Kaarigar order — price is always per piece. */
 export interface OrderProductLine {
   productName: string;

@@ -27,7 +27,7 @@ import { formatRupee, nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
-type CatalogProduct = { id: string; name: string };
+type CatalogProduct = { id: string; name: string; price?: number };
 
 const DEDUCTION_ITEMS: { type: Exclude<RepairItemType, "MATERIAL">; label: string }[] = [
   { type: "RUNNER", label: "Runner" },
@@ -120,7 +120,15 @@ export default function OrdersPage() {
     );
     setCatalogProducts(
       catSnap.docs
-        .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
+        .map((d) => {
+          const data = d.data();
+          const price = Number(data.price);
+          return {
+            id: (data.id as string) || d.id,
+            name: (data.name as string) || "",
+            price: Number.isFinite(price) && price > 0 ? price : undefined,
+          };
+        })
         .filter((p) => p.name.trim())
         .sort((a, b) => a.name.localeCompare(b.name))
     );
@@ -365,7 +373,13 @@ export default function OrdersPage() {
   }
 
   const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
-  const productOptions = catalogProducts.map((p) => ({ id: p.id, label: p.name }));
+  const productOptions = catalogProducts.map((p) => ({
+    id: p.id,
+    label:
+      p.price && p.price > 0
+        ? `${p.name} · ₹${p.price.toLocaleString("en-IN")}/pc`
+        : p.name,
+  }));
   const materialOptions = rawMaterials.map((m) => ({ id: m.id, label: m.name }));
 
   return (
@@ -408,7 +422,7 @@ export default function OrdersPage() {
             </button>
           </div>
           <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Price is always per piece — quantity × price is calculated automatically.
+            Price is per piece. Catalog price fills automatically when set — you can still edit it.
           </p>
           <div className="space-y-2.5">
             {productLines.map((line, i) => {
@@ -420,7 +434,14 @@ export default function OrdersPage() {
                       value={line.productId}
                       onSelect={(id) => {
                         const product = catalogProducts.find((p) => p.id === id);
-                        updateProductLine(i, { productId: id, productName: product?.name || "" });
+                        const catalogPrice =
+                          product?.price && product.price > 0 ? String(product.price) : "";
+                        updateProductLine(i, {
+                          productId: id,
+                          productName: product?.name || "",
+                          // Auto-fill when catalog has a price; leave blank so admin can type it.
+                          pricePerPiece: catalogPrice,
+                        });
                       }}
                       options={productOptions}
                       placeholder="Search catalog product…"
