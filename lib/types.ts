@@ -39,6 +39,8 @@ export interface RawMaterial {
   supplier: string;
   lastUpdatedBy: string;
   lastUpdatedTime: number;
+  /** Optional ₹ per piece. When set, bill page fills material price automatically. */
+  price?: number;
 }
 
 export interface FinishedProduct {

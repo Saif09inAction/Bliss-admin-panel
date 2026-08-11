@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, deleteDoc, doc, getDocs, setDoc } from "firebase/firestore";
+import { collection, deleteDoc, deleteField, doc, getDocs, setDoc } from "firebase/firestore";
 import { Package, Plus, Trash2, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type { RawMaterial } from "@/lib/types";
-import { uuid } from "@/lib/csv";
+import { formatRupee, uuid } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
@@ -18,6 +18,7 @@ export default function MaterialsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<RawMaterial | null>(null);
   const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -29,6 +30,7 @@ export default function MaterialsPage() {
       snap.docs
         .map((d) => {
           const data = d.data();
+          const priceNum = Number(data.price);
           return {
             id: (data.id as string) || d.id,
             name: (data.name as string) || "",
@@ -38,6 +40,7 @@ export default function MaterialsPage() {
             supplier: (data.supplier as string) || "",
             lastUpdatedBy: (data.lastUpdatedBy as string) || "",
             lastUpdatedTime: (data.lastUpdatedTime as number) || 0,
+            price: Number.isFinite(priceNum) && priceNum > 0 ? priceNum : undefined,
           };
         })
         .filter((m) => m.name.trim())
@@ -52,6 +55,7 @@ export default function MaterialsPage() {
   function openEdit(m: RawMaterial) {
     setEditing(m);
     setName(m.name);
+    setPrice(m.price && m.price > 0 ? String(m.price) : "");
     setShowForm(true);
     setMessage("");
   }
@@ -59,6 +63,7 @@ export default function MaterialsPage() {
   function openAdd() {
     setEditing(null);
     setName("");
+    setPrice("");
     setShowForm(true);
     setMessage("");
   }
@@ -67,6 +72,7 @@ export default function MaterialsPage() {
     setShowForm(false);
     setEditing(null);
     setName("");
+    setPrice("");
   }
 
   async function saveMaterial(e: React.FormEvent) {
@@ -84,11 +90,17 @@ export default function MaterialsPage() {
       return;
     }
 
+    const priceNum = Number(price);
+    const parsedPrice =
+      price.trim() && Number.isFinite(priceNum) && priceNum > 0
+        ? Math.round(priceNum * 100) / 100
+        : undefined;
+
     setSaving(true);
     setMessage("");
     try {
       const id = editing?.id || uuid();
-      const data = {
+      const data: Record<string, unknown> = {
         id,
         name: trimmed,
         // Keep inventory fields for older records / overview — not edited here anymore.
@@ -99,6 +111,7 @@ export default function MaterialsPage() {
         lastUpdatedBy: session?.name || "Admin",
         lastUpdatedTime: Date.now(),
         imagePath: "",
+        price: parsedPrice !== undefined ? parsedPrice : deleteField(),
       };
       await setDoc(doc(getDb(), "raw_materials", id), data, { merge: true });
       await load();
@@ -175,7 +188,7 @@ export default function MaterialsPage() {
         }
       >
         <p className="section-sub">
-          {materials.length} material{materials.length === 1 ? "" : "s"} — used in Kaarigar bill deductions
+          {materials.length} material{materials.length === 1 ? "" : "s"} · optional price fills on bill
         </p>
       </PageToolbar>
 
@@ -208,7 +221,9 @@ export default function MaterialsPage() {
                 <h3 className="font-display text-base font-bold">
                   {editing ? "Edit Material" : "New Material"}
                 </h3>
-                <p className="text-xs text-[var(--text-muted)]">Only the name is needed</p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  Price is optional — auto-fills on the bill when set
+                </p>
               </div>
             </div>
             <div>
@@ -220,6 +235,19 @@ export default function MaterialsPage() {
                 placeholder="e.g. Vinit, Badal, Board"
                 autoFocus
                 required
+              />
+            </div>
+            <div>
+              <label className="label">Price / pc (₹) — optional</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="Leave blank to enter price on bill"
               />
             </div>
             <button type="submit" className="btn btn-primary w-full" disabled={saving}>
@@ -241,6 +269,7 @@ export default function MaterialsPage() {
                     />
                   </th>
                   <th>Name</th>
+                  <th className="text-right">Price / pc</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
@@ -255,6 +284,13 @@ export default function MaterialsPage() {
                       />
                     </td>
                     <td className="font-medium">{m.name}</td>
+                    <td className="text-right tabular-nums">
+                      {m.price && m.price > 0 ? (
+                        <span className="font-semibold text-jade-deep">{formatRupee(m.price)}</span>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                    </td>
                     <td className="text-right">
                       <div className="inline-flex items-center gap-1">
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(m)}>
@@ -292,7 +328,12 @@ export default function MaterialsPage() {
                 onChange={() => selection.toggle(m.id)}
                 label={`Select ${m.name}`}
               />
-              <p className="min-w-0 flex-1 font-semibold">{m.name}</p>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">{m.name}</p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {m.price && m.price > 0 ? `${formatRupee(m.price)} / pc` : "No price set"}
+                </p>
+              </div>
               <div className="flex gap-1">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(m)}>
                   Edit

@@ -134,7 +134,15 @@ export default function OrdersPage() {
     );
     setRawMaterials(
       matSnap.docs
-        .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
+        .map((d) => {
+          const data = d.data();
+          const price = Number(data.price);
+          return {
+            id: (data.id as string) || d.id,
+            name: (data.name as string) || "",
+            price: Number.isFinite(price) && price > 0 ? price : undefined,
+          };
+        })
         .filter((m) => m.name.trim())
         .sort((a, b) => a.name.localeCompare(b.name))
     );
@@ -236,11 +244,15 @@ export default function OrdersPage() {
         lastUpdatedTime: Date.now(),
         imagePath: "",
       });
-      setRawMaterials((prev) => [...prev, { id, name }].sort((a, b) => a.name.localeCompare(b.name)));
+      setRawMaterials((prev) =>
+        [...prev, { id, name }].sort((a, b) => a.name.localeCompare(b.name))
+      );
       setMaterialLines((prev) => {
         const emptyIdx = prev.findIndex((l) => !l.materialId && !l.name);
         if (emptyIdx >= 0) {
-          return prev.map((l, i) => (i === emptyIdx ? { ...l, materialId: id, name } : l));
+          return prev.map((l, i) =>
+            i === emptyIdx ? { ...l, materialId: id, name, price: "" } : l
+          );
         }
         return [...prev, { materialId: id, name, qty: "", price: "" }];
       });
@@ -380,7 +392,13 @@ export default function OrdersPage() {
         ? `${p.name} · ₹${p.price.toLocaleString("en-IN")}/pc`
         : p.name,
   }));
-  const materialOptions = rawMaterials.map((m) => ({ id: m.id, label: m.name }));
+  const materialOptions = rawMaterials.map((m) => ({
+    id: m.id,
+    label:
+      m.price && m.price > 0
+        ? `${m.name} · ₹${m.price.toLocaleString("en-IN")}/pc`
+        : m.name,
+  }));
 
   return (
     <div className="stagger space-y-5">
@@ -565,7 +583,8 @@ export default function OrdersPage() {
             </div>
           </div>
           <p className="mb-2 mt-1 text-[11px] text-[var(--text-muted)]">
-            Pick from Materials list, then enter qty and ₹/pc. Missing one? Tap &ldquo;New material&rdquo;.
+            Pick from Materials — catalog price fills automatically when set. Missing one? Tap
+            &ldquo;New material&rdquo;.
           </p>
           {showNewMaterial && (
             <div className="mb-2 flex gap-2 rounded-xl border border-dashed border-[var(--border-strong)] p-2.5">
@@ -598,7 +617,13 @@ export default function OrdersPage() {
                     value={m.materialId}
                     onSelect={(id) => {
                       const mat = rawMaterials.find((x) => x.id === id);
-                      updateMaterialLine(index, { materialId: id, name: mat?.name || "" });
+                      const catalogPrice =
+                        mat?.price && mat.price > 0 ? String(mat.price) : "";
+                      updateMaterialLine(index, {
+                        materialId: id,
+                        name: mat?.name || "",
+                        price: catalogPrice,
+                      });
                     }}
                     options={materialOptions}
                     placeholder="Search material…"
