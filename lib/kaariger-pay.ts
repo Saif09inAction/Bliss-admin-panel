@@ -69,7 +69,49 @@ export function paymentLabel(
   if (kind === "opening") return "Opening balance (purana baaki)";
   if (kind === "old_kharcha") return "Old kharcha (carry)";
   if (kind === "credit") return "Credit / advance";
-  return orderNameById.get(p.orderId) || "Week kharcha payment";
+  return orderNameById.get(p.orderId) || "Week kharcha";
+}
+
+export type PaymentGroup = {
+  id: string;
+  payments: KaarigerPayment[];
+  total: number;
+  createdAt: number;
+  date: string;
+  time: string;
+  createdBy: string;
+};
+
+/** Group rows from one Pay click (payBatchId) or same date/time/by for older data. */
+export function groupPayments(payments: KaarigerPayment[]): PaymentGroup[] {
+  const buckets = new Map<string, KaarigerPayment[]>();
+  for (const p of payments) {
+    const batch = (p.payBatchId || "").trim();
+    const key = batch
+      ? `b:${batch}`
+      : `t:${p.date}|${p.time}|${p.createdBy || ""}|${Math.floor((p.createdAt || 0) / 2000)}`;
+    const list = buckets.get(key) || [];
+    list.push(p);
+    buckets.set(key, list);
+  }
+  const groups: PaymentGroup[] = [];
+  for (const [key, list] of buckets) {
+    const sorted = [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const head = sorted[0];
+    groups.push({
+      id: key,
+      payments: sorted,
+      total: sorted.reduce((s, p) => s + Math.max(0, p.amount || 0), 0),
+      createdAt: head.createdAt || 0,
+      date: head.date || "",
+      time: head.time || "",
+      createdBy: head.createdBy || "",
+    });
+  }
+  return groups.sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt;
+    return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+  });
 }
 
 /**
@@ -171,6 +213,10 @@ export async function payKaarigerKharcha(opts: {
   let orderApplied = 0;
   let creditAdded = 0;
   const note = opts.remarks?.trim() || "";
+  const payBatchId = uuid();
+  const batchCreatedAt = Date.now();
+  const batchDate = todayStr();
+  const batchTime = nowTimeStr();
 
   function paymentPayload(fields: {
     id: string;
@@ -183,10 +229,11 @@ export async function payKaarigerKharcha(opts: {
       orderId: fields.orderId,
       kaarigerId: opts.kaarigerId,
       amount: fields.amount,
-      date: todayStr(),
-      time: nowTimeStr(),
-      createdAt: Date.now(),
+      date: batchDate,
+      time: batchTime,
+      createdAt: batchCreatedAt,
       createdBy: opts.createdBy,
+      payBatchId,
     };
     if (fields.remarks) payload.remarks = fields.remarks;
     return payload;
@@ -291,27 +338,33 @@ export async function payKaarigerKharcha(opts: {
 
   const parts: string[] = [];
   if (oldKharchaApplied > 0) {
-    parts.push(`₹${Math.round(oldKharchaApplied).toLocaleString("en-IN")} against old kharcha`);
+    parts.push(`old kharcha ${Math.round(oldKharchaApplied).toLocaleString("en-IN")}`);
   }
   if (orderApplied > 0) {
-    parts.push(`₹${Math.round(orderApplied).toLocaleString("en-IN")} week transfer`);
+    parts.push(`week kharcha ${Math.round(orderApplied).toLocaleString("en-IN")}`);
   }
   if (openingApplied > 0) {
-    parts.push(`₹${Math.round(openingApplied).toLocaleString("en-IN")} against opening`);
+    parts.push(`opening ${Math.round(openingApplied).toLocaleString("en-IN")}`);
   }
   if (creditAdded > 0) {
-    parts.push(`₹${Math.round(creditAdded).toLocaleString("en-IN")} as credit`);
+    parts.push(`credit ${Math.round(creditAdded).toLocaleString("en-IN")}`);
   }
 
-  // Remaining week kharcha budget after this pay (for installment clarity).
   let weekLeft = 0;
   for (const order of active) {
     const paidAfter = paidByOrder.get(order.id) || 0;
     weekLeft += orderKharchaUnpaid(order, paidAfter);
   }
-  let message = parts.length ? `Paid: ${parts.join(" · ")}.` : "Kharcha recorded.";
-  if (orderApplied > 0) {
-    message += ` Week kharcha left ${Math.round(weekLeft).toLocaleString("en-IN")}. Total Remaining drops by each transfer.`;
+
+  const totalPaid = oldKharchaApplied + orderApplied + openingApplied + creditAdded;
+  let message =
+    parts.length > 1
+      ? `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} once → ${parts.join(" + ")}.`
+      : parts.length === 1
+        ? `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} → ${parts[0]}.`
+        : "Kharcha recorded.";
+  if (orderApplied > 0 || oldKharchaApplied > 0) {
+    message += ` Week kharcha left ₹${Math.round(weekLeft).toLocaleString("en-IN")}.`;
   }
 
   return { message, oldKharchaApplied, openingApplied, orderApplied, creditAdded };

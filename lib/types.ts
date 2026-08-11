@@ -173,6 +173,11 @@ export interface KaarigerPayment {
   createdBy: string;
   /** Epoch ms when payment was written — preferred for newest-first sorting. */
   createdAt?: number;
+  /**
+   * Same id on every Firestore row written from one Pay click
+   * (e.g. ₹20k split into week kharcha + opening).
+   */
+  payBatchId?: string;
 }
 
 export type RepairItemType = "RUNNER" | "FITTING" | "ASTAR" | "MATERIAL";
