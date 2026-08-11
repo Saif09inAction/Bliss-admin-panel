@@ -294,7 +294,7 @@ export async function payKaarigerKharcha(opts: {
     parts.push(`₹${Math.round(oldKharchaApplied).toLocaleString("en-IN")} against old kharcha`);
   }
   if (orderApplied > 0) {
-    parts.push(`₹${Math.round(orderApplied).toLocaleString("en-IN")} against week kharcha`);
+    parts.push(`₹${Math.round(orderApplied).toLocaleString("en-IN")} week transfer`);
   }
   if (openingApplied > 0) {
     parts.push(`₹${Math.round(openingApplied).toLocaleString("en-IN")} against opening`);
@@ -302,7 +302,17 @@ export async function payKaarigerKharcha(opts: {
   if (creditAdded > 0) {
     parts.push(`₹${Math.round(creditAdded).toLocaleString("en-IN")} as credit`);
   }
-  const message = parts.length ? `Paid: ${parts.join(" · ")}.` : "Kharcha recorded.";
+
+  // Remaining week kharcha budget after this pay (for installment clarity).
+  let weekLeft = 0;
+  for (const order of active) {
+    const paidAfter = paidByOrder.get(order.id) || 0;
+    weekLeft += orderKharchaUnpaid(order, paidAfter);
+  }
+  let message = parts.length ? `Paid: ${parts.join(" · ")}.` : "Kharcha recorded.";
+  if (orderApplied > 0) {
+    message += ` Week kharcha left ${Math.round(weekLeft).toLocaleString("en-IN")}. Total Remaining drops by each transfer.`;
+  }
 
   return { message, oldKharchaApplied, openingApplied, orderApplied, creditAdded };
 }

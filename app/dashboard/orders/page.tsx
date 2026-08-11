@@ -219,13 +219,47 @@ export default function OrdersPage() {
     (async () => {
       try {
         const db = getDb();
-        const [orderSnap, repairSnap] = await Promise.all([
+        const [orderSnap, paySnap, repairSnap] = await Promise.all([
           getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaarigerId))),
+          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaarigerId))),
           getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", kaarigerId))),
         ]);
-        // orderSnap kept so we still hit Firestore; unused unpaid kharcha is already
-        // reflected in openingBalance for new-style bills.
-        void orderSnap;
+
+        const paidByOrder = new Map<string, number>();
+        paySnap.docs.forEach((d) => {
+          const data = d.data();
+          const p = {
+            orderId: (data.orderId as string) || "",
+            remarks: data.remarks as string | undefined,
+          };
+          if (isCreditPayment(p) || isOpeningPayment(p) || isOldKharchaPayment(p)) return;
+          paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + ((data.amount as number) || 0));
+        });
+
+        let weekKharchaUnpaid = 0;
+        orderSnap.docs.forEach((d) => {
+          const data = d.data();
+          const status = (data.status as string) || "ASSIGNED";
+          if (status === "COMPLETED" || status === "CANCELLED" || status === "REJECTED") return;
+          const order: KaarigerOrder = {
+            id: (data.id as string) || d.id,
+            kaarigerId: kaarigerId,
+            kaarigerName: "",
+            productName: "",
+            targetQuantity: 0,
+            color: "",
+            rawMaterials: [],
+            totalDealAmount: 0,
+            pricingType: "PER_PIECE",
+            status,
+            approvedQuantity: 0,
+            createdBy: "",
+            createdAt: (data.createdAt as number) || 0,
+            kharchaGiven: (data.kharchaGiven as number) || 0,
+            kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
+          };
+          weekKharchaUnpaid += orderKharchaUnpaid(order, paidByOrder.get(order.id) || 0);
+        });
 
         const standaloneRepairTotal = repairSnap.docs.reduce((s, d) => {
           const data = d.data();
@@ -239,9 +273,9 @@ export default function OrdersPage() {
         const openingBalance = Math.max(0, selectedKaariger.openingBalance || 0);
         const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
         const creditBalance = Math.max(0, selectedKaariger.creditBalance || 0);
-        // openingBalance already net of week kharcha given on bill create.
         const total = totalRemainingAmount({
           openingBalance: openingBalance + oldKharcha,
+          weekKharchaUnpaid,
           creditBalance,
           standaloneRepairTotal,
         });
@@ -297,7 +331,7 @@ export default function OrdersPage() {
 
     const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
     const kharchaAmount = Number(kharcha) || 0;
-    // ADD = MAAL − deductions (kharcha cash given is subtracted after).
+    // ADD = MAAL − deductions (kharcha budget is stored separately).
     const addBalance = productsTotal - deductionsTotal;
     const grossOpening = currentOpening + currentOldKharcha;
     const netOpening = totalRemainingAmount({
@@ -306,8 +340,10 @@ export default function OrdersPage() {
     });
     const runningAfterAdd = grossOpening + addBalance;
     const closing = Math.max(0, runningAfterAdd - kharchaAmount);
+    // Live preview: unpaid budget = full kharchaAmount (no pays yet on this new bill).
     const totalRemainingPreview = totalRemainingAmount({
       openingBalance: closing,
+      weekKharchaUnpaid: kharchaAmount,
       creditBalance: currentCredit,
     });
 
@@ -547,12 +583,13 @@ export default function OrdersPage() {
 
       const totalAfterCreate = totalRemainingAmount({
         openingBalance: closingAtCreation,
+        weekKharchaUnpaid: calc.kharchaAmount,
         creditBalance: liveCredit,
       });
       setSuccessMsg(
         `${weekMeta.label} bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
           (calc.kharchaAmount > 0
-            ? ` · Kharcha given ${money(calc.kharchaAmount)} (deducted; Pay is breakup only).`
+            ? ` · Kharcha budget ${money(calc.kharchaAmount)} (Pay transfers reduce remaining; leftover returns next Saturday).`
             : ".") +
           (liveCredit > 0 ? ` Credit ${money(liveCredit)} already applied.` : "")
       );
@@ -880,7 +917,7 @@ export default function OrdersPage() {
           <label className="label">
             <span className="inline-flex items-center gap-1.5">
               <Wallet className="h-3.5 w-3.5" />
-              This week&apos;s kharcha
+              Week kharcha budget
             </span>
           </label>
           <input
@@ -889,11 +926,11 @@ export default function OrdersPage() {
             inputMode="decimal"
             value={kharcha}
             onChange={(e) => setKharcha(e.target.value)}
-            placeholder="0"
+            placeholder="e.g. 40000"
           />
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Saturday budget (e.g. 60,000). Pay it partially through the week — leftover carries as old
-            kharcha next Saturday.
+            Saturday budget (e.g. 40,000). Pay thoda thoda through the week (10k, 20k, 5k…) — leftover
+            returns to Total Remaining next Saturday.
           </p>
           {currentOldKharcha > 0 && (
             <p className="mt-1 text-xs text-amber-700">
@@ -930,14 +967,13 @@ export default function OrdersPage() {
             <div className="my-2 border-t border-jade/20" />
             <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
             <Row label="Running balance after ADD" value={money(calc.runningAfterAdd)} bold />
-            <Row label="Kharcha given (cash to kaariger)" value={`−${money(calc.kharchaAmount)}`} accent />
+            <Row label="Kharcha budget (this week)" value={money(calc.kharchaAmount)} accent />
             <div className="my-2 border-t border-jade/20" />
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Opening is the current Total Remaining after any Pay (not the old admin-set amount).
-            Kharcha given reduces Total Remaining; Pay against kharcha is breakup only. Unused
-            leftover on next Saturday adds back to remaining.
+            Opening is current remaining after any Pay. Budget alone does not drop live Total
+            Remaining — each Pay transfer does. Unused leftover returns next Saturday.
           </p>
         </div>
 

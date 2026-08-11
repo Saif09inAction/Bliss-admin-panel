@@ -1,14 +1,15 @@
 import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
 
 /**
- * Weekly Hisaab:
+ * Weekly Hisaab (sheet installment model):
  *
  *   Running / opening += ADD (MAAL − deductions − repair)
- *   Week kharcha on bill create = cash GIVEN → subtracts from Total Remaining
- *     (stored in employees.openingBalance at create: closing = opening + ADD − kharcha)
- *   Kharcha box = week budget still open (given − paid − carried) — for breakdown only
- *   Paying week kharcha does NOT reduce Total Remaining again (already deducted at create)
- *   Next Saturday: unused (given − paid) folds back into opening (+unused)
+ *   Week kharcha on bill = BUDGET (stored: closing = opening + ADD − budget)
+ *   Live Total Remaining = openingBalance + weekKharchaUnpaid − credit − repairs
+ *     → budget alone does not drop live remaining; each Pay transfer does
+ *   Kharcha box = budget − paid − carried (installment tracking)
+ *   Paying week kharcha does NOT write openingBalance (unpaid term drives live drop)
+ *   Next Saturday: unused (budget − paid) folds back into opening (+unused)
  *
  * Opening payments reduce openingBalance and appear line-by-line on the ledger.
  */
@@ -59,19 +60,22 @@ export function orderClosingAfterKharcha(openingBalance: number, order: Kaariger
 }
 
 /**
- * Total remaining from stored running balance (already net of week kharcha given at create).
- * Credit and standalone repairs reduce what is still owed.
+ * Live Total Remaining (sheet installment rule):
+ *   stored opening (net of full week budget at create)
+ *   + unpaid week kharcha still in the box (so only paid transfers reduce live remaining)
+ *   − credit − standalone repairs
  */
 export function totalRemainingAmount(opts: {
   openingBalance: number;
-  /** @deprecated Ignored — kharcha is deducted at bill create, not added here. */
+  /** Unpaid week kharcha budget (budget − carried − paid). Added back for live display. */
   weekKharchaUnpaid?: number;
   creditBalance?: number;
   standaloneRepairTotal?: number;
 }): number {
   return Math.max(
     0,
-    Math.max(0, opts.openingBalance) -
+    Math.max(0, opts.openingBalance) +
+      Math.max(0, opts.weekKharchaUnpaid || 0) -
       Math.max(0, opts.creditBalance || 0) -
       Math.max(0, opts.standaloneRepairTotal || 0)
   );
