@@ -424,7 +424,7 @@ export function buildHisaabLedger(opts: {
     const subtitleParts = [g.date, g.time].filter(Boolean);
     if (creditAmt > 0) {
       subtitleParts.push(
-        `Paid ${Math.round(paidTotal).toLocaleString("en-IN")} · ${Math.round(remCut).toLocaleString("en-IN")} cleared remaining · ${Math.round(creditAmt).toLocaleString("en-IN")} credit`
+        `Paid ₹${Math.round(paidTotal).toLocaleString("en-IN")} · Remaining ₹0 · Credit ₹${Math.round(creditAmt).toLocaleString("en-IN")}`
       );
     }
 
@@ -433,7 +433,7 @@ export function buildHisaabLedger(opts: {
       kind: "payment",
       title: "Paid",
       subtitle: subtitleParts.join(" · "),
-      // Only what was owed — overpay is credit, must not rewrite older Remaining lines.
+      // Math only clears what was owed; display uses paidTotal (full 10k) so admin finds the Pay.
       deltaRemaining: -remCut,
       deltaKharcha: -kharchaCut,
       at: g.at,

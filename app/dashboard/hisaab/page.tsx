@@ -797,25 +797,35 @@ export default function HisaabPage() {
                 </p>
               ) : (
                 <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                  {paymentGroups.map((g) => (
-                    <div key={g.id} className="flex items-center justify-between gap-3 p-3 text-sm">
-                      <div className="min-w-0">
-                        <p className="font-semibold">Paid</p>
-                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                          {formatDisplayDate(g.date)} · {formatDisplayTime(g.time)}
-                          {g.createdBy ? ` · by ${g.createdBy}` : ""}
-                        </p>
+                  {paymentGroups.map((g) => {
+                    const creditPart = g.payments
+                      .filter((p) => paymentKind(p) === "credit")
+                      .reduce((s, p) => s + p.amount, 0);
+                    return (
+                      <div key={g.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                        <div className="min-w-0">
+                          <p className="font-semibold">Paid {money(g.total)}</p>
+                          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            {formatDisplayDate(g.date)} · {formatDisplayTime(g.time)}
+                            {g.createdBy ? ` · by ${g.createdBy}` : ""}
+                          </p>
+                          {creditPart > 0 && (
+                            <p className="mt-1 text-xs font-medium text-jade-deep">
+                              Includes credit {money(creditPart)} for next bill
+                            </p>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-display text-lg font-bold text-danger">
+                            −{money(g.total)}
+                          </p>
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                            {creditPart > 0 ? "Pay + credit" : "Total Remaining"}
+                          </p>
+                        </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="font-display text-lg font-bold text-danger">
-                          −{money(g.total)}
-                        </p>
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                          Total Remaining
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
                     <span className="font-bold text-jade-deep">
                       All pays ({paymentGroups.length})
@@ -938,7 +948,7 @@ export default function HisaabPage() {
                                   line.creditAdded > 0 &&
                                   line.kind === "payment" && (
                                     <p className="mt-0.5 text-[11px] font-medium text-jade-deep">
-                                      Extra {money(line.creditAdded)} → Credit (next bill)
+                                      Credit {money(line.creditAdded)} for next bill
                                     </p>
                                   )}
                               </div>

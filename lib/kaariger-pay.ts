@@ -339,12 +339,12 @@ export async function payKaarigerKharcha(opts: {
   const totalPaid = oldKharchaApplied + orderApplied + openingApplied + creditAdded;
   const remCut = oldKharchaApplied + orderApplied + openingApplied;
   let message = "";
-  if (remCut > 0 && creditAdded > 0) {
-    message = `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} — cleared ₹${Math.round(remCut).toLocaleString("en-IN")} remaining, ₹${Math.round(creditAdded).toLocaleString("en-IN")} credit for next bill.`;
+  if (totalPaid > 0 && creditAdded > 0) {
+    message = `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")}. Total Remaining ₹0 · Credit ₹${Math.round(creditAdded).toLocaleString("en-IN")} for next bill.`;
   } else if (remCut > 0) {
     message = `Paid ₹${Math.round(totalPaid).toLocaleString("en-IN")} — Total Remaining −₹${Math.round(remCut).toLocaleString("en-IN")}.`;
   } else if (creditAdded > 0) {
-    message = `Paid ₹${Math.round(creditAdded).toLocaleString("en-IN")} saved as credit for next bill.`;
+    message = `Paid ₹${Math.round(creditAdded).toLocaleString("en-IN")} — all as credit for next bill.`;
   } else {
     message = "Payment recorded.";
   }
