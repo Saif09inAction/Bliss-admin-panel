@@ -172,6 +172,15 @@ function CompanyTotalsBar({
   );
 }
 
+/** Prefer the products[] lines so multi-product bills show every name, not only productName. */
+function orderProductsLabel(o: KaarigerOrder): string {
+  const names = (o.products || [])
+    .map((p) => (p.productName || "").trim())
+    .filter(Boolean);
+  if (names.length > 0) return Array.from(new Set(names)).join(", ");
+  return (o.productName || "").trim() || "—";
+}
+
 function parsePickupDoc(id: string, data: Record<string, unknown>): PickupRecord {
   const claris = Number(data.clarisQuantity) || 0;
   const bliss = Number(data.blissQuantity) || 0;
@@ -310,6 +319,8 @@ export default function RecordsPage() {
   const [billNotes, setBillNotes] = useState("");
   const [billStatus, setBillStatus] = useState("ASSIGNED");
   const [billKaarigerName, setBillKaarigerName] = useState("");
+  /** This week's kharcha on the bill — empty string clears / removes. */
+  const [billKharcha, setBillKharcha] = useState("");
   const [billSaving, setBillSaving] = useState(false);
   const [billMsg, setBillMsg] = useState("");
   const [rawMaterials, setRawMaterials] = useState<{ id: string; name: string }[]>([]);
@@ -417,7 +428,7 @@ export default function RecordsPage() {
         "kaariger_orders.csv",
         ["Product", "Kaariger", "Status", "Deal"],
         orders.map((o) => [
-          o.productName,
+          orderProductsLabel(o),
           o.kaarigerName,
           o.status,
           String(o.totalDealAmount),
@@ -463,7 +474,9 @@ export default function RecordsPage() {
     if (!q) return orders;
     return orders.filter(
       (o) =>
+        orderProductsLabel(o).toLowerCase().includes(q) ||
         o.productName.toLowerCase().includes(q) ||
+        (o.products || []).some((p) => (p.productName || "").toLowerCase().includes(q)) ||
         o.kaarigerName.toLowerCase().includes(q) ||
         o.status.toLowerCase().includes(q) ||
         dateMatchesSearch(o.createdAt, q) ||
@@ -725,6 +738,9 @@ export default function RecordsPage() {
     setBillKaarigerName(o.kaarigerName);
     setBillNotes(o.notes || "");
     setBillStatus(o.status || "ASSIGNED");
+    setBillKharcha(
+      o.kharchaGiven != null && o.kharchaGiven > 0 ? String(o.kharchaGiven) : ""
+    );
 
     if (o.products && o.products.length > 0) {
       setBillProducts(
@@ -784,11 +800,6 @@ export default function RecordsPage() {
       })
       .filter((p) => p.productName && p.quantity > 0 && p.pricePerPiece > 0);
 
-    if (products.length === 0) {
-      setBillMsg("Add at least one product with name, qty and price.");
-      return;
-    }
-
     const chargeLines: RepairLineItem[] = CHARGE_ITEMS.map(({ type, label }) => {
       const qty = Number(billCharges[type].qty) || 0;
       const price = Number(billCharges[type].price) || 0;
@@ -814,8 +825,18 @@ export default function RecordsPage() {
     const materialDeductionsTotal = materialDeductions.reduce((s, it) => s + it.lineTotal, 0);
     const totalDealAmount = Math.max(0, productsTotal - materialDeductionsTotal);
     const targetQuantity = products.reduce((s, p) => s + p.quantity, 0);
-    const productName = products.map((p) => p.productName).join(", ");
+    const kharchaGiven = Math.max(0, Number(billKharcha) || 0);
     const notes = billNotes.trim();
+
+    if (products.length === 0 && materialDeductions.length === 0 && kharchaGiven <= 0) {
+      setBillMsg("Add a product, a deduction, or this week's kharcha.");
+      return;
+    }
+
+    const productName =
+      products.map((p) => p.productName).join(", ") ||
+      editOrder.productName ||
+      (kharchaGiven > 0 ? "Week bill" : "Deductions / week bill");
 
     setBillSaving(true);
     try {
@@ -830,6 +851,7 @@ export default function RecordsPage() {
         materialDeductions,
         materialDeductionsTotal,
         totalDealAmount,
+        kharchaGiven,
         // Keep originalDealAmount in sync when no repairing has been applied yet.
         ...(editOrder.repairDeductionTotal
           ? {}
@@ -871,7 +893,7 @@ export default function RecordsPage() {
   }
 
   async function deleteOrderRecord(o: KaarigerOrder) {
-    if (!confirm(`Delete order "${o.productName}" for ${o.kaarigerName}? Related payments/repairs will also be removed.`)) return;
+    if (!confirm(`Delete order "${orderProductsLabel(o)}" for ${o.kaarigerName}? Related payments/repairs will also be removed.`)) return;
     await cascadeDeleteOrder(o.id);
     setOrders((prev) => prev.filter((x) => x.id !== o.id));
     if (editOrder?.id === o.id) setEditOrder(null);
@@ -1157,11 +1179,16 @@ export default function RecordsPage() {
                         <SelectCheckbox
                           checked={selection.isSelected(o.id)}
                           onChange={() => selection.toggle(o.id)}
-                          label={`Select ${o.productName}`}
+                          label={`Select ${orderProductsLabel(o)}`}
                         />
                       </td>
                       <td>
-                        <p className="font-semibold">{o.productName}</p>
+                        <p className="font-semibold">{orderProductsLabel(o)}</p>
+                        {o.products && o.products.length > 1 && (
+                          <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                            {o.products.length} products
+                          </p>
+                        )}
                         {o.color && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{o.color}</p>}
                       </td>
                       <td className="text-[var(--text-muted)]">{o.kaarigerName}</td>
@@ -1196,7 +1223,7 @@ export default function RecordsPage() {
                     <SelectCheckbox
                       checked={selection.isSelected(o.id)}
                       onChange={() => selection.toggle(o.id)}
-                      label={`Select ${o.productName}`}
+                      label={`Select ${orderProductsLabel(o)}`}
                     />
                   </div>
                   <button
@@ -1206,7 +1233,10 @@ export default function RecordsPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <p className="font-display font-bold">{o.productName}</p>
+                        <p className="font-display font-bold">{orderProductsLabel(o)}</p>
+                        {o.products && o.products.length > 1 && (
+                          <p className="text-xs text-[var(--text-muted)]">{o.products.length} products</p>
+                        )}
                         <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
                       </div>
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -1478,7 +1508,7 @@ export default function RecordsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-display text-lg font-bold">{viewOrder.productName}</h3>
+                    <h3 className="font-display text-lg font-bold">{orderProductsLabel(viewOrder)}</h3>
                     <span className={recordStatusBadge(viewOrder.status)}>{statusLabel(viewOrder.status)}</span>
                   </div>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
@@ -1589,15 +1619,17 @@ export default function RecordsPage() {
                 </div>
               )}
 
-              {(viewOrder.kharchaGiven || 0) > 0 && (
-                <div className="flex items-center justify-between rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm">
+              <div className="flex items-center justify-between rounded-xl border border-[var(--border)] px-3 py-2.5 text-sm">
                   <span className="flex items-center gap-1.5 font-medium text-[var(--text-muted)]">
                     <Package className="h-3.5 w-3.5" />
-                    Kharcha given at creation
+                    This week&apos;s kharcha
                   </span>
-                  <span className="font-bold">{money(viewOrder.kharchaGiven || 0)}</span>
+                  <span className="font-bold">
+                    {(viewOrder.kharchaGiven || 0) > 0
+                      ? money(viewOrder.kharchaGiven || 0)
+                      : "—"}
+                  </span>
                 </div>
-              )}
 
               {viewOrder.notes && (
                 <div>
@@ -1927,7 +1959,7 @@ export default function RecordsPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold">Edit Bill</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Same fields as the Kaarigar bill form — products, deductions & notes.
+                    Same fields as the Kaarigar bill form — products, deductions, kharcha & notes.
                   </p>
                 </div>
                 <button type="button" className="btn-icon" onClick={() => setEditOrder(null)} aria-label="Close">
@@ -1964,7 +1996,7 @@ export default function RecordsPage() {
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <label className="label mb-0 flex items-center gap-1.5">
                     <ShoppingBag className="h-3.5 w-3.5" />
-                    Products *
+                    Products
                   </label>
                   <button
                     type="button"
@@ -2228,6 +2260,35 @@ export default function RecordsPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="label mb-0 flex items-center gap-1.5">
+                    <Package className="h-3.5 w-3.5" />
+                    This week&apos;s kharcha
+                  </label>
+                  {(Number(billKharcha) || 0) > 0 && (
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm !text-danger"
+                      onClick={() => setBillKharcha("")}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  className="input"
+                  type="text"
+                  inputMode="decimal"
+                  value={billKharcha}
+                  onChange={(e) => setBillKharcha(e.target.value)}
+                  placeholder="0 — leave empty or Remove to clear"
+                />
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                  Add, change, or remove week kharcha. Empty / Remove sets it to ₹0.
+                </p>
               </div>
 
               <div>

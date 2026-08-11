@@ -97,6 +97,8 @@ export default function HisaabPage() {
   const [showTransactions, setShowTransactions] = useState(false);
   /** Click Total Remaining → opening / rolled kharcha / week kharcha breakdown. */
   const [showRemainingBreakdown, setShowRemainingBreakdown] = useState(false);
+  /** Click Kharcha → payment lines with date & amount. */
+  const [showKharchaBreakdown, setShowKharchaBreakdown] = useState(false);
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
@@ -359,6 +361,29 @@ export default function HisaabPage() {
   const runningBalance = openingBal + oldKharchaBal;
   const weekKharchaUnpaid = activeTotals.balance;
   const kharchaRemaining = weekKharchaUnpaid;
+  const weekKharchaBudget = activeTotals.deal;
+  const weekKharchaPaid = activeTotals.paid;
+  /** This week's transfer payments (line-wise for Kharcha breakdown). Oldest first like the sheet. */
+  const weekKharchaPayments = useMemo(() => {
+    const activeIds = new Set(activeOrders.map((o) => o.id));
+    return payments
+      .filter((p) => {
+        if (isCreditPayment(p) || isOpeningPayment(p) || isOldKharchaPayment(p)) return false;
+        return activeIds.has(p.orderId);
+      })
+      .sort((a, b) =>
+        `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
+      );
+  }, [payments, activeOrders]);
+  const oldKharchaPayments = useMemo(
+    () =>
+      payments
+        .filter(isOldKharchaPayment)
+        .sort((a, b) =>
+          `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
+        ),
+    [payments]
+  );
   const grossOwed = runningBalance + weekKharchaUnpaid;
   const totalRemaining = Math.max(0, grossOwed - creditBal - standaloneRepairTotal);
   const surplusCredit = Math.max(0, creditBal - Math.max(0, grossOwed - standaloneRepairTotal));
@@ -616,17 +641,20 @@ export default function HisaabPage() {
                 </p>
                 <p className="text-[10px] text-amber-800/80">Tap for calculation</p>
               </button>
-              <div className="rounded-xl bg-jade-soft px-3 py-2 text-left sm:text-right">
+              <button
+                type="button"
+                onClick={() => setShowKharchaBreakdown(true)}
+                className="rounded-xl bg-jade-soft px-3 py-2 text-left transition hover:bg-jade-soft/80 sm:text-right"
+                title="See kharcha payments line by line"
+              >
                 <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
                   Kharcha
                 </p>
                 <p className="font-display text-base font-bold text-jade-deep">
                   {money(kharchaRemaining)}
                 </p>
-                <p className="text-[10px] text-jade-deep/80">
-                  {kharchaRemaining > 0 ? "This week — pay in parts" : "Cleared"}
-                </p>
-              </div>
+                <p className="text-[10px] text-jade-deep/80">Tap for payment breakup</p>
+              </button>
               {totalRemaining <= 0 && surplusCredit > 0 && (
                 <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
@@ -909,6 +937,131 @@ export default function HisaabPage() {
                     <p className="mt-1 text-[11px] text-[var(--text-muted)]">
                       Pay this in parts. Each payment reduces Kharcha and Total remaining. Leftover
                       on next Saturday goes into running balance.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {showKharchaBreakdown && (
+            <>
+              <div
+                className="fixed inset-0 z-50 bg-black/40"
+                onClick={() => setShowKharchaBreakdown(false)}
+              />
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div
+                  className="surface !overflow-y-auto max-h-[90vh] w-full max-w-md space-y-4 p-5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-display text-lg font-bold">Kharcha breakup</h3>
+                      <p className="mt-0.5 text-sm text-[var(--text-muted)]">
+                        This week&apos;s kharcha and every payment with date
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost shrink-0 p-2"
+                      onClick={() => setShowKharchaBreakdown(false)}
+                      aria-label="Close"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+                    <CalcRow
+                      label="This week's kharcha"
+                      hint="Saturday budget"
+                      value={money(weekKharchaBudget)}
+                      emphasize
+                    />
+                    {activeOrders.map((o) => {
+                      const budget = Math.max(0, o.kharchaGiven || 0);
+                      if (budget <= 0) return null;
+                      return (
+                        <CalcRow
+                          key={o.id}
+                          label={`Bill · ${formatDisplayDate(o.createdAt)}`}
+                          hint={o.productName || "Week bill"}
+                          value={money(budget)}
+                          muted
+                        />
+                      );
+                    })}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
+                      Payments (line by line)
+                    </p>
+                    {weekKharchaPayments.length === 0 && oldKharchaPayments.length === 0 ? (
+                      <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-4 text-center text-sm text-[var(--text-muted)]">
+                        No payments yet. When you Pay 20k, then 20k — each line shows here with date.
+                      </p>
+                    ) : (
+                      <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+                        {oldKharchaPayments.map((p) => (
+                          <div
+                            key={p.id}
+                            className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm last:border-b-0"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium">
+                                {formatDisplayDate(p.date)}
+                                {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
+                              </p>
+                              <p className="text-[11px] text-[var(--text-muted)]">
+                                {p.remarks || "Old kharcha payment"}
+                              </p>
+                            </div>
+                            <span className="shrink-0 font-bold text-jade-deep">
+                              −{money(p.amount)}
+                            </span>
+                          </div>
+                        ))}
+                        {weekKharchaPayments.map((p) => (
+                          <div
+                            key={p.id}
+                            className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm last:border-b-0"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium">
+                                {formatDisplayDate(p.date)}
+                                {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
+                              </p>
+                              <p className="text-[11px] text-[var(--text-muted)]">
+                                {p.remarks ||
+                                  orderNameById.get(p.orderId) ||
+                                  "Week kharcha payment"}
+                                {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                              </p>
+                            </div>
+                            <span className="shrink-0 font-bold text-jade-deep">
+                              −{money(p.amount)}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
+                          <span className="font-bold text-jade-deep">Total paid</span>
+                          <span className="font-bold text-jade-deep">{money(weekKharchaPaid)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-3 text-sm">
+                    <div>
+                      <p className="font-bold text-amber-900">Kharcha remaining</p>
+                      <p className="text-[11px] text-amber-800/80">
+                        {money(weekKharchaBudget)} − {money(weekKharchaPaid)} paid
+                      </p>
+                    </div>
+                    <p className="font-display text-lg font-bold text-amber-900">
+                      {money(kharchaRemaining)}
                     </p>
                   </div>
                 </div>
