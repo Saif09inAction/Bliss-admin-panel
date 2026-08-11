@@ -17,7 +17,14 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
-import { downloadCsvRows, formatClockTime, formatDisplayTime, formatRupee, timeSortKey } from "@/lib/csv";
+import {
+  downloadCsvRows,
+  formatClockTime,
+  formatDisplayDate,
+  formatDisplayTime,
+  formatRupee,
+  timeSortKey,
+} from "@/lib/csv";
 import { exportBillExcel } from "@/lib/bill-export";
 import {
   isOpeningPayment,
@@ -342,6 +349,8 @@ export default function HisaabPage() {
     [payments]
   );
   const openingPaidTotal = openingPayments.reduce((s, p) => s + p.amount, 0);
+  /** Original opening before payments (stored remaining + what was already paid). */
+  const originalOpening = openingBal + openingPaidTotal;
 
   const orderNameById = useMemo(
     () => new Map(orders.map((o) => [o.id, o.productName || "Bill"])),
@@ -391,7 +400,15 @@ export default function HisaabPage() {
       rows.push([
         `Remaining balance (opening + bills − credit): ${money(totalRemaining)}`,
       ]);
-      if (openingBal > 0) rows.push([`  Opening balance: ${money(openingBal)}`]);
+      if (originalOpening > 0) {
+        rows.push(
+          openingPaidTotal > 0
+            ? [
+                `  Opening balance: ${money(originalOpening)} − ${money(openingPaidTotal)} = ${money(openingBal)}`,
+              ]
+            : [`  Opening balance: ${money(openingBal)}`]
+        );
+      }
       if (activeTotals.balance > 0) rows.push([`  Unpaid bills: ${money(activeTotals.balance)}`]);
       if (creditBal > 0) rows.push([`  Credit applied to remaining: ${money(Math.min(creditBal, grossOwed))}`]);
       if (surplusCredit > 0) {
@@ -705,7 +722,7 @@ export default function HisaabPage() {
                           </span>
                         </div>
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                          {p.date} · {formatDisplayTime(p.time)}
+                          {formatDisplayDate(p.date)} · {formatDisplayTime(p.time)}
                           {p.createdBy ? ` · by ${p.createdBy}` : ""}
                         </p>
                         {p.remarks && (
@@ -755,14 +772,20 @@ export default function HisaabPage() {
                 <CalcRow
                   label="Opening balance (purana baaki)"
                   hint={
-                    openingBal > 0
-                      ? "Still pending from before this app"
-                      : openingPaidTotal > 0
-                        ? "Fully cleared by payments"
+                    openingPaidTotal > 0
+                      ? openingBal > 0
+                        ? `Original ${money(originalOpening)} − paid ${money(openingPaidTotal)} = still pending`
+                        : `Original ${money(originalOpening)} − paid ${money(openingPaidTotal)} = cleared`
+                      : openingBal > 0
+                        ? "Still pending from before this app"
                         : "None set on profile"
                   }
-                  value={money(openingBal)}
-                  emphasize={openingBal > 0}
+                  value={
+                    openingPaidTotal > 0
+                      ? `${money(originalOpening)} − ${money(openingPaidTotal)} = ${money(openingBal)}`
+                      : money(openingBal)
+                  }
+                  emphasize={openingBal > 0 || openingPaidTotal > 0}
                 />
                 <CalcRow
                   label="Unpaid bills"
@@ -804,25 +827,37 @@ export default function HisaabPage() {
               {openingPaidTotal > 0 && (
                 <div>
                   <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                    Payments against opening balance
+                    Opening payments (with date &amp; time)
+                  </p>
+                  <p className="mb-2 text-xs text-[var(--text-muted)]">
+                    {money(originalOpening)} was the opening · {money(openingPaidTotal)} paid ·{" "}
+                    {money(openingBal)} still pending
                   </p>
                   <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
                     {openingPayments.map((p) => (
                       <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
                         <div className="min-w-0">
                           <p className="font-medium">
-                            {p.date} · {formatDisplayTime(p.time)} · by {p.createdBy}
+                            {formatDisplayDate(p.date)} · {formatDisplayTime(p.time)}
+                            {p.createdBy ? ` · by ${p.createdBy}` : ""}
                           </p>
                           <p className="text-xs text-[var(--text-muted)]">
-                            {p.remarks || "Old remaining payment"}
+                            {p.remarks || "Opening balance payment"}
                           </p>
                         </div>
-                        <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
+                        <div className="shrink-0 text-right">
+                          <p className="font-bold text-jade-deep">−{money(p.amount)}</p>
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
+                            Paid
+                          </p>
+                        </div>
                       </div>
                     ))}
                     <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
-                      <span className="font-bold text-jade-deep">Opening paid so far</span>
-                      <span className="font-bold text-jade-deep">{money(openingPaidTotal)}</span>
+                      <span className="font-bold text-jade-deep">
+                        {money(originalOpening)} − {money(openingPaidTotal)} = {money(openingBal)}
+                      </span>
+                      <span className="font-bold text-jade-deep">Pending {money(openingBal)}</span>
                     </div>
                   </div>
                 </div>
@@ -1240,7 +1275,7 @@ function OrderDetailCard({
               <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
                 <div className="min-w-0">
                   <p className="font-medium">
-                    {p.date} · {formatDisplayTime(p.time)} · by {p.createdBy}
+                    {formatDisplayDate(p.date)} · {formatDisplayTime(p.time)} · by {p.createdBy}
                   </p>
                   {p.remarks && <p className="text-xs text-[var(--text-muted)]">{p.remarks}</p>}
                 </div>
