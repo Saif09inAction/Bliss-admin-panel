@@ -23,8 +23,13 @@ import type {
   RepairItemType,
   RepairLineItem,
 } from "@/lib/types";
+import { isStandaloneRepair } from "@/lib/types";
 import { formatRupee, uuid } from "@/lib/csv";
-import { orderAddBalance, orderKharchaUnpaid } from "@/lib/kaariger-hisaab";
+import {
+  orderAddBalance,
+  orderKharchaUnpaid,
+  totalRemainingAmount,
+} from "@/lib/kaariger-hisaab";
 import {
   isCreditPayment,
   isOldKharchaPayment,
@@ -93,6 +98,9 @@ export default function OrdersPage() {
   const [sending, setSending] = useState(false);
   const [formMsg, setFormMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  /** Outstanding Total Remaining for the selected kaariger (same as Hisaab). */
+  const [outstanding, setOutstanding] = useState<number | null>(null);
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
 
   function resetForm() {
     setKaarigerId("");
@@ -102,6 +110,7 @@ export default function OrdersPage() {
     setKharcha("");
     setNotes("");
     setFormMsg("");
+    setOutstanding(null);
   }
 
   async function loadMeta() {
@@ -166,6 +175,88 @@ export default function OrdersPage() {
   );
   const currentOpening = Math.max(0, selectedKaariger?.openingBalance || 0);
   const currentOldKharcha = Math.max(0, selectedKaariger?.oldKharcha || 0);
+  const currentCredit = Math.max(0, selectedKaariger?.creditBalance || 0);
+
+  useEffect(() => {
+    if (!kaarigerId || !selectedKaariger) {
+      setOutstanding(null);
+      setOutstandingLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setOutstandingLoading(true);
+    (async () => {
+      try {
+        const db = getDb();
+        const [orderSnap, paySnap, repairSnap] = await Promise.all([
+          getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaarigerId))),
+          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaarigerId))),
+          getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", kaarigerId))),
+        ]);
+
+        const paidByOrder = new Map<string, number>();
+        paySnap.docs.forEach((d) => {
+          const data = d.data();
+          const orderId = (data.orderId as string) || "";
+          const amount = (data.amount as number) || 0;
+          const remarks = data.remarks as string | undefined;
+          if (isCreditPayment({ orderId, remarks }) || isOpeningPayment({ orderId, remarks }) || isOldKharchaPayment({ orderId, remarks })) {
+            return;
+          }
+          paidByOrder.set(orderId, (paidByOrder.get(orderId) || 0) + amount);
+        });
+
+        let weekKharchaUnpaid = 0;
+        orderSnap.docs.forEach((d) => {
+          const data = d.data();
+          const status = (data.status as string) || "";
+          if (status === "COMPLETED" || status === "REJECTED" || status === "CANCELLED") return;
+          const order = {
+            id: (data.id as string) || d.id,
+            kharchaGiven: (data.kharchaGiven as number) || 0,
+            kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
+          } as KaarigerOrder;
+          weekKharchaUnpaid += orderKharchaUnpaid(order, paidByOrder.get(order.id) || 0);
+        });
+
+        const standaloneRepairTotal = repairSnap.docs.reduce((s, d) => {
+          const data = d.data();
+          const orderId = (data.orderId as string) || "";
+          const status = (data.status as string) || "APPROVED";
+          if (!isStandaloneRepair(orderId)) return s;
+          if (status && status !== "APPROVED") return s;
+          return s + ((data.totalRepairCost as number) || 0);
+        }, 0);
+
+        const openingBalance = Math.max(0, selectedKaariger.openingBalance || 0);
+        const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
+        const creditBalance = Math.max(0, selectedKaariger.creditBalance || 0);
+        const total = totalRemainingAmount({
+          openingBalance: openingBalance + oldKharcha,
+          weekKharchaUnpaid,
+          creditBalance,
+          standaloneRepairTotal,
+        });
+        if (!cancelled) setOutstanding(total);
+      } catch {
+        if (!cancelled) {
+          // Fallback: profile balances only if live fetch fails.
+          setOutstanding(
+            totalRemainingAmount({
+              openingBalance: currentOpening + currentOldKharcha,
+              weekKharchaUnpaid: 0,
+              creditBalance: currentCredit,
+            })
+          );
+        }
+      } finally {
+        if (!cancelled) setOutstandingLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kaarigerId, selectedKaariger, currentOpening, currentOldKharcha, currentCredit]);
 
   const calc = useMemo(() => {
     const lines = productLines.map((l) => {
@@ -474,6 +565,24 @@ export default function OrdersPage() {
             placeholder="Search or select a kaariger…"
             emptyText="No kaarigers found"
           />
+          {kaarigerId && (
+            <div className="mt-2.5 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <Wallet className="h-4 w-4 shrink-0 text-amber-800" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800/80">
+                    Outstanding · Total Remaining
+                  </p>
+                  <p className="truncate text-xs text-amber-900/70">
+                    {selectedKaariger?.name || "Kaariger"} — same as Hisaab
+                  </p>
+                </div>
+              </div>
+              <p className="shrink-0 font-display text-lg font-bold text-amber-950">
+                {outstandingLoading || outstanding == null ? "…" : money(outstanding)}
+              </p>
+            </div>
+          )}
         </div>
 
         <div>
