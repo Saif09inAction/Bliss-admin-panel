@@ -1145,7 +1145,10 @@ export default function HisaabPage() {
               </p>
               <p className="mb-2 text-xs text-[var(--text-muted)]">
                 {orders.length > 0
-                  ? `${money(openingPaidTotal)} paid against opening / running · current remaining ${money(openingBal)}`
+                  ? `${money(openingPaidTotal)} paid against opening · live Total Remaining ${money(totalRemaining)}` +
+                    (openingBal !== totalRemaining
+                      ? ` (stored opening ${money(openingBal)}${weekKharchaUnpaid > 0 ? ` + unpaid kharcha ${money(weekKharchaUnpaid)}` : ""})`
+                      : "")
                   : `${money(originalOpening)} was the opening · ${money(openingPaidTotal)} paid · ${money(openingBal)} still pending`}
               </p>
               <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
@@ -1175,7 +1178,7 @@ export default function HisaabPage() {
                       : `${money(originalOpening)} − ${money(openingPaidTotal)} = ${money(openingBal)}`}
                   </span>
                   <span className="font-bold text-jade-deep">
-                    Remaining {money(openingBal)}
+                    Live remaining {money(totalRemaining)}
                   </span>
                 </div>
               </div>

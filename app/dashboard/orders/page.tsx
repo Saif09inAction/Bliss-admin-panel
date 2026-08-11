@@ -102,6 +102,8 @@ export default function OrdersPage() {
   /** Outstanding Total Remaining for the selected kaariger (same as Hisaab). */
   const [outstanding, setOutstanding] = useState<number | null>(null);
   const [outstandingLoading, setOutstandingLoading] = useState(false);
+  /** Unpaid week kharcha still in the box (folds into opening on next bill). */
+  const [pendingUnpaidKharcha, setPendingUnpaidKharcha] = useState(0);
 
   function resetForm() {
     setKaarigerId("");
@@ -112,6 +114,7 @@ export default function OrdersPage() {
     setNotes("");
     setFormMsg("");
     setOutstanding(null);
+    setPendingUnpaidKharcha(0);
   }
 
   async function loadMeta() {
@@ -211,6 +214,7 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!kaarigerId || !selectedKaariger) {
       setOutstanding(null);
+      setPendingUnpaidKharcha(0);
       setOutstandingLoading(false);
       return;
     }
@@ -279,9 +283,13 @@ export default function OrdersPage() {
           creditBalance,
           standaloneRepairTotal,
         });
-        if (!cancelled) setOutstanding(total);
+        if (!cancelled) {
+          setPendingUnpaidKharcha(weekKharchaUnpaid);
+          setOutstanding(total);
+        }
       } catch {
         if (!cancelled) {
+          setPendingUnpaidKharcha(0);
           setOutstanding(
             totalRemainingAmount({
               openingBalance: currentOpening + currentOldKharcha,
@@ -333,7 +341,9 @@ export default function OrdersPage() {
     const kharchaAmount = Number(kharcha) || 0;
     // ADD = MAAL − deductions (kharcha budget is stored separately).
     const addBalance = productsTotal - deductionsTotal;
-    const grossOpening = currentOpening + currentOldKharcha;
+    // Live opening = stored opening + unpaid week kharcha that will fold on send
+    // (same as Hisaab Total Remaining before credit — matches outstanding box).
+    const grossOpening = currentOpening + currentOldKharcha + pendingUnpaidKharcha;
     const netOpening = totalRemainingAmount({
       openingBalance: grossOpening,
       creditBalance: currentCredit,
@@ -362,8 +372,18 @@ export default function OrdersPage() {
       runningAfterAdd,
       closing,
       totalRemainingPreview,
+      pendingUnpaidKharcha,
     };
-  }, [productLines, deductions, materialLines, kharcha, currentOpening, currentOldKharcha, currentCredit]);
+  }, [
+    productLines,
+    deductions,
+    materialLines,
+    kharcha,
+    currentOpening,
+    currentOldKharcha,
+    currentCredit,
+    pendingUnpaidKharcha,
+  ]);
 
   function addMaterialLine() {
     setMaterialLines((prev) => [...prev, emptyMaterialLine()]);
@@ -956,6 +976,12 @@ export default function OrdersPage() {
           </div>
           <div className="space-y-1 text-sm">
             <Row label="Opening (current remaining)" value={money(calc.grossOpening)} />
+            {calc.pendingUnpaidKharcha > 0 && (
+              <Row
+                label="Incl. unpaid week kharcha (folds on send)"
+                value={money(calc.pendingUnpaidKharcha)}
+              />
+            )}
             {currentCredit > 0 && (
               <Row label="Credit applied" value={`−${money(currentCredit)}`} />
             )}
@@ -972,8 +998,9 @@ export default function OrdersPage() {
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Opening is current remaining after any Pay. Budget alone does not drop live Total
-            Remaining — each Pay transfer does. Unused leftover returns next Saturday.
+            Opening matches Hisaab Total Remaining (stored opening + unpaid kharcha still in the
+            box). Budget alone does not drop live remaining — each Pay transfer does. Unused
+            leftover returns next Saturday.
           </p>
         </div>
 
