@@ -6,6 +6,7 @@ import {
   Calculator,
   CheckCircle2,
   ClipboardList,
+  Eraser,
   Package,
   Plus,
   ShoppingBag,
@@ -79,6 +80,65 @@ function emptyMaterialLine(): MaterialLineForm {
   return { materialId: "", name: "", qty: "", price: "" };
 }
 
+const BILL_DRAFT_KEY = "bliss-kaariger-bill-draft";
+
+type BillDraft = {
+  kaarigerId: string;
+  productLines: ProductLineForm[];
+  deductions: DeductionDraft;
+  materialLines: MaterialLineForm[];
+  kharcha: string;
+  notes: string;
+};
+
+function loadBillDraft(): BillDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(BILL_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as BillDraft;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveBillDraft(draft: BillDraft) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(BILL_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearBillDraft() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(BILL_DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function draftHasContent(draft: BillDraft): boolean {
+  if (draft.kaarigerId.trim()) return true;
+  if (draft.kharcha.trim()) return true;
+  if (draft.notes.trim()) return true;
+  if (draft.productLines.some((l) => l.productName || l.quantity || l.pricePerPiece || l.productId)) {
+    return true;
+  }
+  if (
+    Object.values(draft.deductions).some((d) => (d.qty && d.qty !== "0") || (d.price && d.price !== "0"))
+  ) {
+    // defaults have prices 1.5/2.5/30 — only count if qty filled
+    if (Object.values(draft.deductions).some((d) => d.qty.trim() && Number(d.qty) > 0)) return true;
+  }
+  if (draft.materialLines.some((m) => m.name || m.qty || m.price || m.materialId)) return true;
+  return false;
+}
+
 const money = formatRupee;
 
 export default function OrdersPage() {
@@ -99,6 +159,7 @@ export default function OrdersPage() {
   const [sending, setSending] = useState(false);
   const [formMsg, setFormMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [draftReady, setDraftReady] = useState(false);
   /** Outstanding Total Remaining for the selected kaariger (same as Hisaab). */
   const [outstanding, setOutstanding] = useState<number | null>(null);
   const [outstandingLoading, setOutstandingLoading] = useState(false);
@@ -115,7 +176,60 @@ export default function OrdersPage() {
     setFormMsg("");
     setOutstanding(null);
     setPendingUnpaidKharcha(0);
+    clearBillDraft();
   }
+
+  function clearForm() {
+    if (
+      draftHasContent({
+        kaarigerId,
+        productLines,
+        deductions,
+        materialLines,
+        kharcha,
+        notes,
+      }) &&
+      !confirm("Clear this bill draft? Entered data will be removed.")
+    ) {
+      return;
+    }
+    resetForm();
+    setSuccessMsg("");
+    setFormMsg("");
+  }
+
+  // Restore draft once on mount (survives switching sections).
+  useEffect(() => {
+    const draft = loadBillDraft();
+    if (draft) {
+      if (draft.kaarigerId) setKaarigerId(draft.kaarigerId);
+      if (Array.isArray(draft.productLines) && draft.productLines.length > 0) {
+        setProductLines(draft.productLines);
+      }
+      if (draft.deductions) setDeductions({ ...emptyDeductions(), ...draft.deductions });
+      if (Array.isArray(draft.materialLines) && draft.materialLines.length > 0) {
+        setMaterialLines(draft.materialLines);
+      }
+      if (typeof draft.kharcha === "string") setKharcha(draft.kharcha);
+      if (typeof draft.notes === "string") setNotes(draft.notes);
+    }
+    setDraftReady(true);
+  }, []);
+
+  // Persist draft while editing (until Send or Clear).
+  useEffect(() => {
+    if (!draftReady) return;
+    const draft: BillDraft = {
+      kaarigerId,
+      productLines,
+      deductions,
+      materialLines,
+      kharcha,
+      notes,
+    };
+    if (draftHasContent(draft)) saveBillDraft(draft);
+    else clearBillDraft();
+  }, [draftReady, kaarigerId, productLines, deductions, materialLines, kharcha, notes]);
 
   async function loadMeta() {
     const [empSnap, catSnap, matSnap] = await Promise.all([
@@ -640,19 +754,35 @@ export default function OrdersPage() {
 
   return (
     <div className="stagger space-y-5">
-      <PageToolbar title="Kaarigar">
+      <PageToolbar
+        title="Kaarigar"
+        actions={
+          <button type="button" className="btn btn-secondary btn-sm" onClick={clearForm}>
+            <Eraser className="h-4 w-4" />
+            Clear form
+          </button>
+        }
+      >
         <p className="section-sub">Create a new bill for a kaariger</p>
       </PageToolbar>
 
       <form onSubmit={sendOrder} className="card mx-auto max-w-4xl space-y-5">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--jade-soft)]">
-            <ClipboardList className="h-4 w-4 text-[var(--jade-deep)]" />
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--jade-soft)]">
+              <ClipboardList className="h-4 w-4 text-[var(--jade-deep)]" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-display text-base font-bold">New Kaarigar Bill</h2>
+              <p className="text-xs text-[var(--text-muted)]">
+                Draft stays if you switch sections — until Send or Clear
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-display text-base font-bold">New Kaarigar Bill</h2>
-            <p className="text-xs text-[var(--text-muted)]">Assign work & settle amounts</p>
-          </div>
+          <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={clearForm}>
+            <Eraser className="h-4 w-4" />
+            Clear
+          </button>
         </div>
 
         <div>
