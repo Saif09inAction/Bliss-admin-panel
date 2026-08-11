@@ -275,6 +275,8 @@ export default function RecordsPage() {
   const [partnerMsg, setPartnerMsg] = useState("");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("ALL");
+  /** YYYY-MM-DD calendar filter for pickups/returns; empty = all dates. */
+  const [dispatchDate, setDispatchDate] = useState("");
   /** null = closed; "add" = create; record = edit */
   const [pickupModal, setPickupModal] = useState<"add" | PickupRecord | null>(null);
   const [returnModal, setReturnModal] = useState<"add" | ReturnRecord | null>(null);
@@ -474,6 +476,15 @@ export default function RecordsPage() {
       const oq = ownerQtys(p);
       if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
       if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
+      if (dispatchDate) {
+        const raw = (p.date || "").trim();
+        // Stored as YYYY-MM-DD (or legacy display forms) — match calendar day.
+        if (raw !== dispatchDate && !raw.startsWith(dispatchDate)) {
+          const display = formatDisplayDate(raw);
+          const wanted = formatDisplayDate(dispatchDate);
+          if (display !== wanted) return false;
+        }
+      }
       if (!q) return true;
       return (
         p.partner.toLowerCase().includes(q) ||
@@ -483,7 +494,7 @@ export default function RecordsPage() {
         formatDisplayDate(p.date).toLowerCase().includes(q)
       );
     });
-  }, [pickups, q, ownerFilter]);
+  }, [pickups, q, ownerFilter, dispatchDate]);
 
   const partnerOptions = useMemo(() => mergePartnerOptions(dbPartners), [dbPartners]);
   const partnerNames = useMemo(
@@ -496,6 +507,14 @@ export default function RecordsPage() {
       const oq = ownerQtys(r);
       if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
       if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
+      if (dispatchDate) {
+        const raw = (r.date || "").trim();
+        if (raw !== dispatchDate && !raw.startsWith(dispatchDate)) {
+          const display = formatDisplayDate(raw);
+          const wanted = formatDisplayDate(dispatchDate);
+          if (display !== wanted) return false;
+        }
+      }
       if (!q) return true;
       return (
         r.partner.toLowerCase().includes(q) ||
@@ -506,7 +525,7 @@ export default function RecordsPage() {
         formatDisplayDate(r.date).toLowerCase().includes(q)
       );
     });
-  }, [returns, q, ownerFilter]);
+  }, [returns, q, ownerFilter, dispatchDate]);
 
   const pickupCompanyTotals = useMemo(
     () => companyTotals(filteredPickups, ownerFilter),
@@ -535,7 +554,7 @@ export default function RecordsPage() {
   useEffect(() => {
     selection.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset selection when switching tabs / filters
-  }, [tab, search, ownerFilter]);
+  }, [tab, search, ownerFilter, dispatchDate]);
 
   function emptyPickupForm() {
     return {
@@ -1025,23 +1044,47 @@ export default function RecordsPage() {
       </div>
 
       {(tab === "pickups" || tab === "returns") && (
-        <div className="mobile-chip-scroll flex flex-wrap gap-2">
-          {(
-            [
-              { id: "ALL" as const, label: "All" },
-              { id: "CLARIS" as const, label: "Claris" },
-              { id: "BLISS" as const, label: "Bliss" },
-            ] as const
-          ).map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setOwnerFilter(f.id)}
-              className={`filter-pill ${ownerFilter === f.id ? "active" : ""}`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="mobile-chip-scroll flex flex-wrap gap-2">
+            {(
+              [
+                { id: "ALL" as const, label: "All" },
+                { id: "CLARIS" as const, label: "Claris" },
+                { id: "BLISS" as const, label: "Bliss" },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setOwnerFilter(f.id)}
+                className={`filter-pill ${ownerFilter === f.id ? "active" : ""}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className="label !mb-1 !text-[10px]">
+                {tab === "pickups" ? "Pickup date" : "Return date"}
+              </label>
+              <input
+                type="date"
+                className="input !w-auto !py-2"
+                value={dispatchDate}
+                onChange={(e) => setDispatchDate(e.target.value)}
+              />
+            </div>
+            {dispatchDate && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setDispatchDate("")}
+              >
+                All dates
+              </button>
+            )}
+          </div>
         </div>
       )}
 

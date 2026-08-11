@@ -200,9 +200,10 @@ export default function OrdersPage() {
 
     const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
     const kharchaAmount = Number(kharcha) || 0;
-    // Sheet: ADD BALANCE = MAAL − deductions − week's kharcha
-    const addBalance = productsTotal - deductionsTotal - kharchaAmount;
-    const closing = currentOpening + addBalance;
+    // ADD = MAAL − deductions (kharcha is separate — adds to Total Remaining via Kharcha box).
+    const addBalance = productsTotal - deductionsTotal;
+    const closing = currentOpening + currentOldKharcha + addBalance;
+    const totalRemainingPreview = closing + kharchaAmount;
 
     return {
       lines,
@@ -215,8 +216,9 @@ export default function OrdersPage() {
       kharchaAmount,
       addBalance,
       closing,
+      totalRemainingPreview,
     };
-  }, [productLines, deductions, materialLines, kharcha, currentOpening]);
+  }, [productLines, deductions, materialLines, kharcha, currentOpening, currentOldKharcha]);
 
   function addMaterialLine() {
     setMaterialLines((prev) => [...prev, emptyMaterialLine()]);
@@ -297,8 +299,9 @@ export default function OrdersPage() {
     const validLines = calc.lines.filter(
       (l) => l.productName.trim() && l.quantity > 0 && l.pricePerPiece > 0
     );
-    if (validLines.length === 0) {
-      setFormMsg("Add at least one product with quantity and price per piece.");
+    // Products are optional — a week bill can be deductions / kharcha only (like the sheet).
+    if (validLines.length === 0 && calc.deductionsTotal <= 0 && calc.kharchaAmount <= 0) {
+      setFormMsg("Add a product, a deduction, or this week's kharcha.");
       return;
     }
 
@@ -307,7 +310,9 @@ export default function OrdersPage() {
       const db = getDb();
       const id = uuid();
       const targetQuantity = validLines.reduce((s, l) => s + l.quantity, 0);
-      const productName = validLines.map((l) => l.productName).join(", ");
+      const productName =
+        validLines.map((l) => l.productName).join(", ") ||
+        (calc.deductionsTotal > 0 ? "Deductions / week bill" : "Week bill");
       const products: OrderProductLine[] = validLines.map((l) => ({
         productName: l.productName,
         quantity: l.quantity,
@@ -332,7 +337,11 @@ export default function OrdersPage() {
         paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + ((data.amount as number) || 0));
       });
 
-      let oldKharcha = Math.max(0, kaariger.oldKharcha || 0);
+      let openingBase = Math.max(0, kaariger.openingBalance || 0);
+      // Any previously carried oldKharcha folds into running remaining (no longer a separate bucket).
+      const priorOldKharcha = Math.max(0, kaariger.oldKharcha || 0);
+      openingBase += priorOldKharcha;
+
       for (const d of orderSnap.docs) {
         const data = d.data();
         const status = (data.status as string) || "ASSIGNED";
@@ -361,7 +370,8 @@ export default function OrdersPage() {
           }
           continue;
         }
-        oldKharcha += unpaid;
+        // Unpaid week kharcha → total remaining (running balance).
+        openingBase += unpaid;
         await updateDoc(doc(db, "kaariger_orders", prev.id), {
           kharchaCarriedForward: Math.max(0, prev.kharchaCarriedForward || 0) + unpaid,
           status: "COMPLETED",
@@ -392,8 +402,8 @@ export default function OrdersPage() {
         kharchaCarriedForward: 0,
       };
 
-      // Sheet: Closing = Opening + ADD BALANCE
-      const openingAtCreation = Math.max(0, kaariger.openingBalance || 0);
+      // Running balance += ADD (MAAL − deductions). Week kharcha stays in Kharcha box.
+      const openingAtCreation = openingBase;
       const addBalance = orderAddBalance(order);
       const closingAtCreation = openingAtCreation + addBalance;
       order.openingAtCreation = openingAtCreation;
@@ -403,14 +413,14 @@ export default function OrdersPage() {
       await setDoc(doc(db, "kaariger_orders", id), order);
       await updateDoc(doc(db, "employees", kaariger.phone), {
         openingBalance: Math.max(0, closingAtCreation),
-        oldKharcha,
+        oldKharcha: 0,
       });
 
+      const totalAfterCreate = Math.max(0, closingAtCreation) + Math.max(0, calc.kharchaAmount);
       setSuccessMsg(
-        `Week bill for ${kaariger.name} saved. Closing ${money(closingAtCreation)}` +
-          (oldKharcha > 0 ? ` · Old kharcha ${money(oldKharcha)}` : "") +
+        `Week bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
           (calc.kharchaAmount > 0
-            ? ` · Pay this week's kharcha ${money(calc.kharchaAmount)} through the week.`
+            ? ` · Kharcha ${money(calc.kharchaAmount)} (pay through the week).`
             : ".")
       );
       resetForm();
@@ -423,6 +433,13 @@ export default function OrdersPage() {
   }
 
   const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
+  const productOptions = catalogProducts.map((p) => ({
+    id: p.id,
+    label:
+      p.price && p.price > 0
+        ? `${p.name} · ₹${p.price.toLocaleString("en-IN")}/pc`
+        : p.name,
+  }));
   const materialOptions = rawMaterials.map((m) => ({
     id: m.id,
     label:
@@ -471,7 +488,7 @@ export default function OrdersPage() {
             </button>
           </div>
           <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Type any product name (catalog suggestions appear if available). Price is per piece.
+            Optional — pick from catalog when you have products. Price is per piece and editable.
           </p>
           <div className="space-y-2.5">
             {productLines.map((line, i) => {
@@ -479,31 +496,29 @@ export default function OrdersPage() {
               return (
                 <div key={i} className="rounded-xl border border-[var(--border)] p-2.5">
                   <div className="space-y-2 sm:grid sm:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_2.75rem] sm:items-start sm:gap-2 sm:space-y-0">
-                    <input
-                      className="input"
-                      type="text"
-                      value={line.productName}
-                      list={`bill-product-catalog-${i}`}
-                      placeholder="Product name"
-                      onChange={(e) => {
-                        const name = e.target.value;
-                        const match = catalogProducts.find(
-                          (p) => p.name.trim().toLowerCase() === name.trim().toLowerCase()
-                        );
+                    <SearchSelect
+                      value={line.productId}
+                      onSelect={(id) => {
+                        if (!id) {
+                          updateProductLine(i, {
+                            productId: "",
+                            productName: "",
+                          });
+                          return;
+                        }
+                        const product = catalogProducts.find((p) => p.id === id);
+                        const catalogPrice =
+                          product?.price && product.price > 0 ? String(product.price) : "";
                         updateProductLine(i, {
-                          productId: match?.id || "",
-                          productName: name,
-                          ...(match?.price && match.price > 0
-                            ? { pricePerPiece: String(match.price) }
-                            : {}),
+                          productId: id,
+                          productName: product?.name || "",
+                          pricePerPiece: catalogPrice,
                         });
                       }}
+                      options={productOptions}
+                      placeholder="Search catalog product (optional)…"
+                      emptyText="No products in catalog"
                     />
-                    <datalist id={`bill-product-catalog-${i}`}>
-                      {catalogProducts.map((p) => (
-                        <option key={p.id} value={p.name} />
-                      ))}
-                    </datalist>
                     <div className="grid grid-cols-[1fr_1fr_2.75rem] gap-2 sm:contents">
                       <input
                         className="input-qty"
@@ -543,7 +558,7 @@ export default function OrdersPage() {
             })}
             {productLines.length === 0 && (
               <div className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-4 text-center text-xs text-[var(--text-muted)]">
-                No products added. Tap &ldquo;Add product&rdquo; above.
+                No products — optional. You can still send deductions / week kharcha.
               </div>
             )}
           </div>
@@ -749,19 +764,22 @@ export default function OrdersPage() {
         <div className="rounded-2xl border border-jade/20 bg-jade-soft/40 p-4">
           <div className="mb-2 flex items-center gap-2 text-jade-deep">
             <Calculator size={16} />
-            <p className="text-xs font-bold uppercase tracking-wider">Week total (sheet style)</p>
+            <p className="text-xs font-bold uppercase tracking-wider">Week total</p>
           </div>
           <div className="space-y-1 text-sm">
-            <Row label="Opening balance" value={money(currentOpening)} />
+            <Row label="Running balance (opening)" value={money(currentOpening + currentOldKharcha)} />
             <Row label="MAAL (products)" value={money(calc.productsTotal)} />
             <Row label="Less: Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} />
-            <Row label="Less: This week's kharcha" value={`−${money(calc.kharchaAmount)}`} />
             <div className="my-2 border-t border-jade/20" />
             <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
-            <Row label="Closing balance" value={money(calc.closing)} bold accent />
+            <Row label="Running balance after bill" value={money(calc.closing)} bold />
+            <Row label="This week's kharcha" value={money(calc.kharchaAmount)} accent />
+            <div className="my-2 border-t border-jade/20" />
+            <Row label="Total remaining" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Closing becomes next week&apos;s opening. Kharcha is paid separately through the week.
+            Total remaining = running balance + week kharcha. Pay kharcha through the week — it reduces
+            both. Next Saturday unpaid kharcha folds into running balance.
           </p>
         </div>
 
