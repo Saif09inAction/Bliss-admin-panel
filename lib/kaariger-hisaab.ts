@@ -1,17 +1,16 @@
 import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
 
 /**
- * Weekly Hisaab (aligned with client flow):
+ * Weekly Hisaab:
  *
- *   Running balance (opening/closing) += MAAL − material/astar/runner/repair
- *   (week kharcha is NOT subtracted from running balance)
+ *   Running / opening += ADD (MAAL − deductions − repair)
+ *   Week kharcha on bill create = cash GIVEN → subtracts from Total Remaining
+ *     (stored in employees.openingBalance at create: closing = opening + ADD − kharcha)
+ *   Kharcha box = week budget still open (given − paid − carried) — for breakdown only
+ *   Paying week kharcha does NOT reduce Total Remaining again (already deducted at create)
+ *   Next Saturday: unused (given − paid) folds back into opening (+unused)
  *
- *   Kharcha box     = this week's unpaid kharcha only
- *   Total Remaining = running balance + unpaid week kharcha (− credit − repairs)
- *
- * Paying kharcha reduces both Kharcha and Total Remaining.
- * Next Saturday: unpaid week kharcha folds into running balance; new week
- * kharcha appears in the Kharcha box.
+ * Opening payments reduce openingBalance and appear line-by-line on the ledger.
  */
 
 export function orderMaal(order: KaarigerOrder): number {
@@ -28,23 +27,24 @@ export function orderRepairDeductions(order: KaarigerOrder): number {
   return Math.max(0, order.repairDeductionTotal || 0);
 }
 
-/** Full week's kharcha set on the bill (budget). */
+/** Full week's kharcha set on the bill (cash given / budget). */
 export function orderWeekKharcha(order: KaarigerOrder): number {
   return Math.max(0, order.kharchaGiven || 0);
 }
 
-/** Week kharcha still owed on this bill (budget − rolled into running balance). */
+/** Week kharcha still open on this bill (budget − rolled back as unused). */
 export function orderKharchaDue(order: KaarigerOrder): number {
   return Math.max(0, orderWeekKharcha(order) - Math.max(0, order.kharchaCarriedForward || 0));
 }
 
+/** Unpaid / unused portion still showing in the Kharcha box. */
 export function orderKharchaUnpaid(order: KaarigerOrder, paidOnOrder: number): number {
   return Math.max(0, orderKharchaDue(order) - Math.max(0, paidOnOrder));
 }
 
 /**
- * ADD to running balance (closing − opening for the week).
- * Week kharcha is tracked separately — not part of ADD.
+ * ADD to running balance (before kharcha cash given).
+ * Week kharcha is subtracted separately at bill create.
  */
 export function orderAddBalance(order: KaarigerOrder): number {
   if (order.addBalance != null && Number.isFinite(order.addBalance)) {
@@ -53,25 +53,27 @@ export function orderAddBalance(order: KaarigerOrder): number {
   return orderMaal(order) - orderMaterialDeductions(order) - orderRepairDeductions(order);
 }
 
-export function orderClosing(openingBalance: number, order: KaarigerOrder): number {
-  return Math.max(0, openingBalance) + orderAddBalance(order);
+/** Closing snapshot before storing: opening + ADD − week kharcha given. */
+export function orderClosingAfterKharcha(openingBalance: number, order: KaarigerOrder): number {
+  return Math.max(0, openingBalance) + orderAddBalance(order) - orderWeekKharcha(order);
 }
 
 /**
- * Total remaining = running balance + unpaid week kharcha − credit − standalone repairs.
- * Credit is shown as its own ledger line; it still nets into this total.
+ * Total remaining from stored running balance (already net of week kharcha given at create).
+ * Credit and standalone repairs reduce what is still owed.
  */
 export function totalRemainingAmount(opts: {
   openingBalance: number;
-  weekKharchaUnpaid: number;
+  /** @deprecated Ignored — kharcha is deducted at bill create, not added here. */
+  weekKharchaUnpaid?: number;
   creditBalance?: number;
   standaloneRepairTotal?: number;
 }): number {
-  const gross =
-    Math.max(0, opts.openingBalance) + Math.max(0, opts.weekKharchaUnpaid);
   return Math.max(
     0,
-    gross - Math.max(0, opts.creditBalance || 0) - Math.max(0, opts.standaloneRepairTotal || 0)
+    Math.max(0, opts.openingBalance) -
+      Math.max(0, opts.creditBalance || 0) -
+      Math.max(0, opts.standaloneRepairTotal || 0)
   );
 }
 
@@ -115,13 +117,11 @@ export function weekLabelFromDate(ms: number): { label: string; key: string } {
     return { label: "Week bill", key: "unknown" };
   }
   const year = d.getFullYear();
-  const month = d.getMonth(); // 0-based
+  const month = d.getMonth();
   const day = d.getDate();
-  // Day of week: 0=Sun … 6=Sat. Days since last Saturday (inclusive of today if Sat).
   const dow = d.getDay();
   const daysSinceSaturday = (dow + 1) % 7;
   const saturdayDate = day - daysSinceSaturday;
-  // Week index in month: Saturday falling on day 1–7 → W1, 8–14 → W2, …
   const weekNum = Math.max(1, Math.ceil(Math.max(1, saturdayDate) / 7));
   const monthName = MONTHS[month];
   return {
@@ -130,7 +130,6 @@ export function weekLabelFromDate(ms: number): { label: string; key: string } {
   };
 }
 
-/** Prefer stored weekLabel/weekKey; otherwise derive from createdAt. */
 export function orderWeekMeta(order: Pick<KaarigerOrder, "weekLabel" | "weekKey" | "createdAt">): {
   label: string;
   key: string;
@@ -157,9 +156,7 @@ export type HisaabLedgerLine = {
   kind: HisaabLedgerKind;
   title: string;
   subtitle?: string;
-  /** Signed change to Total Remaining (+ up, − down). */
   deltaRemaining: number;
-  /** Signed change to Kharcha box. */
   deltaKharcha: number;
   remainingAfter: number;
   kharchaAfter: number;
@@ -168,14 +165,12 @@ export type HisaabLedgerLine = {
 
 function paymentSortKey(p: KaarigerPayment): number {
   if (p.createdAt && p.createdAt > 0) return p.createdAt;
-  // Fallback: date + time as rough ms (YYYY-MM-DD + HH:MM)
   const date = (p.date || "").trim();
   const time = (p.time || "00:00").trim();
   const parsed = Date.parse(`${date}T${time.length === 5 ? time : "00:00"}:00`);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Local copies to avoid circular import with kaariger-pay. */
 function payIsCredit(p: { orderId: string; remarks?: string }) {
   const remarks = (p.remarks || "").toLowerCase();
   return (
@@ -219,51 +214,55 @@ type RawEvent = {
 };
 
 /**
- * Build an oldest-first ledger with running Total Remaining and Kharcha after each line.
- * Does not merge payments — each payment is its own row.
+ * Oldest-first ledger with running Total Remaining after each line.
+ * Opening starts at GROSS (current opening + opening payments) so pays are not double-counted.
+ * Week kharcha given reduces remaining; week kharcha pays only reduce the Kharcha box.
  */
 export function buildHisaabLedger(opts: {
   orders: KaarigerOrder[];
   payments: KaarigerPayment[];
-  /** Current employee opening (used when no bill snapshots exist). */
   openingBalance: number;
   oldKharcha?: number;
   creditBalance?: number;
   standaloneRepairTotal?: number;
 }): HisaabLedgerLine[] {
   const orders = [...opts.orders].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const payments = [...opts.payments].sort((a, b) => paymentSortKey(a) - paymentSortKey(b));
   const events: RawEvent[] = [];
 
-  const firstOpening =
-    orders.find((o) => o.openingAtCreation != null && (o.openingAtCreation as number) >= 0)
-      ?.openingAtCreation ?? null;
+  const openingPays = payments.filter(payIsOpening);
+  const openingPaidTotal = openingPays.reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
 
+  const firstSnap = orders.find((o) => o.openingAtCreation != null);
+  // Gross opening before opening payments (and before bills when no snapshot).
   const startOpening =
-    firstOpening != null
-      ? Math.max(0, firstOpening)
-      : Math.max(0, opts.openingBalance || 0);
+    firstSnap?.openingAtCreation != null
+      ? Math.max(0, firstSnap.openingAtCreation)
+      : Math.max(0, opts.openingBalance || 0) + openingPaidTotal;
 
-  const startAt = orders[0]?.createdAt ? orders[0].createdAt - 1 : Date.now() - 1;
+  const startAt =
+    openingPays[0] != null
+      ? paymentSortKey(openingPays[0]) - 1
+      : orders[0]?.createdAt
+        ? orders[0].createdAt - 1
+        : Date.now() - 1;
+
   events.push({
     id: "opening",
     kind: "opening",
     title: "Opening balance",
-    subtitle: "Purana baaki / running balance before this history",
+    subtitle: "Starting balance (before payments below)",
     deltaRemaining: startOpening,
     deltaKharcha: 0,
     at: startAt,
   });
 
-  // Legacy oldKharcha still on profile (not yet folded into a bill opening).
   const oldK = Math.max(0, opts.oldKharcha || 0);
-  if (oldK > 0 && firstOpening == null) {
-    // Already included in openingBalance when firstOpening is null and UI uses running = opening+old.
-    // If openingBalance is stored without oldKharcha, add it.
-  } else if (oldK > 0 && firstOpening != null) {
+  if (oldK > 0) {
     events.push({
       id: "old_kharcha_balance",
       kind: "old_kharcha",
-      title: "Old kharcha (still on profile)",
+      title: "Old kharcha (on profile)",
       subtitle: "Folds into running balance on next Saturday bill",
       deltaRemaining: oldK,
       deltaKharcha: 0,
@@ -301,7 +300,7 @@ export function buildHisaabLedger(opts: {
     const order = orders[i];
     const week = orderWeekMeta(order);
     const add = orderAddBalance(order);
-    const t = order.createdAt || startAt + 10 + i * 10;
+    const t = order.createdAt || startAt + 100 + i * 10;
 
     if (add !== 0) {
       events.push({
@@ -320,9 +319,9 @@ export function buildHisaabLedger(opts: {
       events.push({
         id: `kharcha-${order.id}`,
         kind: "week_kharcha",
-        title: `${week.label} kharcha`,
-        subtitle: "Added to Kharcha box (also in Total Remaining until paid or folded)",
-        deltaRemaining: kharcha,
+        title: `${week.label} kharcha given`,
+        subtitle: "Cash given to kaariger — deducted from Total Remaining; tracked in Kharcha box",
+        deltaRemaining: -kharcha,
         deltaKharcha: kharcha,
         at: t + 1,
       });
@@ -330,24 +329,22 @@ export function buildHisaabLedger(opts: {
 
     const carried = Math.max(0, order.kharchaCarriedForward || 0);
     if (carried > 0) {
-      // Fold time ≈ next bill create, else shortly after this bill.
       const nextT = orders[i + 1]?.createdAt;
       const foldAt = nextT && nextT > t ? nextT - 1 : t + 2;
       events.push({
         id: `fold-${order.id}`,
         kind: "kharcha_fold",
-        title: `${week.label} kharcha carried forward`,
-        subtitle: "Unpaid week kharcha folded into running balance (Kharcha box clears)",
-        deltaRemaining: 0,
+        title: `${week.label} unused kharcha returned`,
+        subtitle: "Not paid out of the kharcha budget — added back to Total Remaining",
+        deltaRemaining: carried,
         deltaKharcha: -carried,
         at: foldAt,
       });
     }
   }
 
-  for (const p of opts.payments) {
+  for (const p of payments) {
     if (payIsCredit(p)) {
-      // Surplus parked as credit — already reflected in creditBalance line.
       events.push({
         id: `pay-${p.id}`,
         kind: "payment",
@@ -361,27 +358,44 @@ export function buildHisaabLedger(opts: {
     }
 
     const amount = Math.max(0, p.amount || 0);
-    let title = "Paid";
-    let deltaKharcha = 0;
     if (payIsOpening(p)) {
-      title = "Paid · opening / purana baaki";
-    } else if (payIsOldKharcha(p)) {
-      title = "Paid · old kharcha";
-      deltaKharcha = -amount;
-    } else {
-      const order = orders.find((o) => o.id === p.orderId);
-      const week = order ? orderWeekMeta(order) : null;
-      title = week ? `Paid · ${week.label} kharcha` : "Paid · week kharcha";
-      deltaKharcha = -amount;
+      events.push({
+        id: `pay-${p.id}`,
+        kind: "payment",
+        title: "Paid · opening / purana baaki",
+        subtitle: [p.date, p.time, p.remarks].filter(Boolean).join(" · "),
+        deltaRemaining: -amount,
+        deltaKharcha: 0,
+        at: paymentSortKey(p),
+      });
+      continue;
     }
 
+    if (payIsOldKharcha(p)) {
+      events.push({
+        id: `pay-${p.id}`,
+        kind: "payment",
+        title: "Paid · old kharcha",
+        subtitle: [p.date, p.time, p.remarks].filter(Boolean).join(" · "),
+        deltaRemaining: 0,
+        deltaKharcha: -amount,
+        at: paymentSortKey(p),
+      });
+      continue;
+    }
+
+    const order = orders.find((o) => o.id === p.orderId);
+    const week = order ? orderWeekMeta(order) : null;
     events.push({
       id: `pay-${p.id}`,
       kind: "payment",
-      title,
-      subtitle: [p.date, p.time, p.remarks].filter(Boolean).join(" · "),
-      deltaRemaining: -amount,
-      deltaKharcha,
+      title: week ? `Paid · ${week.label} kharcha` : "Paid · week kharcha",
+      subtitle:
+        [p.date, p.time, p.remarks].filter(Boolean).join(" · ") ||
+        "Breakdown only — Total Remaining already reduced when kharcha was given on the bill",
+      // Already deducted at bill create — do not reduce remaining again.
+      deltaRemaining: 0,
+      deltaKharcha: -amount,
       at: paymentSortKey(p),
     });
   }

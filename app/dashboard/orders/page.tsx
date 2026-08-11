@@ -189,36 +189,13 @@ export default function OrdersPage() {
     (async () => {
       try {
         const db = getDb();
-        const [orderSnap, paySnap, repairSnap] = await Promise.all([
+        const [orderSnap, repairSnap] = await Promise.all([
           getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaarigerId))),
-          getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaarigerId))),
           getDocs(query(collection(db, "order_repairs"), where("kaarigerId", "==", kaarigerId))),
         ]);
-
-        const paidByOrder = new Map<string, number>();
-        paySnap.docs.forEach((d) => {
-          const data = d.data();
-          const orderId = (data.orderId as string) || "";
-          const amount = (data.amount as number) || 0;
-          const remarks = data.remarks as string | undefined;
-          if (isCreditPayment({ orderId, remarks }) || isOpeningPayment({ orderId, remarks }) || isOldKharchaPayment({ orderId, remarks })) {
-            return;
-          }
-          paidByOrder.set(orderId, (paidByOrder.get(orderId) || 0) + amount);
-        });
-
-        let weekKharchaUnpaid = 0;
-        orderSnap.docs.forEach((d) => {
-          const data = d.data();
-          const status = (data.status as string) || "";
-          if (status === "COMPLETED" || status === "REJECTED" || status === "CANCELLED") return;
-          const order = {
-            id: (data.id as string) || d.id,
-            kharchaGiven: (data.kharchaGiven as number) || 0,
-            kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
-          } as KaarigerOrder;
-          weekKharchaUnpaid += orderKharchaUnpaid(order, paidByOrder.get(order.id) || 0);
-        });
+        // orderSnap kept so we still hit Firestore; unused unpaid kharcha is already
+        // reflected in openingBalance for new-style bills.
+        void orderSnap;
 
         const standaloneRepairTotal = repairSnap.docs.reduce((s, d) => {
           const data = d.data();
@@ -232,20 +209,18 @@ export default function OrdersPage() {
         const openingBalance = Math.max(0, selectedKaariger.openingBalance || 0);
         const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
         const creditBalance = Math.max(0, selectedKaariger.creditBalance || 0);
+        // openingBalance already net of week kharcha given on bill create.
         const total = totalRemainingAmount({
           openingBalance: openingBalance + oldKharcha,
-          weekKharchaUnpaid,
           creditBalance,
           standaloneRepairTotal,
         });
         if (!cancelled) setOutstanding(total);
       } catch {
         if (!cancelled) {
-          // Fallback: profile balances only if live fetch fails.
           setOutstanding(
             totalRemainingAmount({
               openingBalance: currentOpening + currentOldKharcha,
-              weekKharchaUnpaid: 0,
               creditBalance: currentCredit,
             })
           );
@@ -292,18 +267,17 @@ export default function OrdersPage() {
 
     const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
     const kharchaAmount = Number(kharcha) || 0;
-    // ADD = MAAL − deductions (kharcha is separate — adds to Total Remaining via Kharcha box).
+    // ADD = MAAL − deductions (kharcha cash given is subtracted after).
     const addBalance = productsTotal - deductionsTotal;
     const grossOpening = currentOpening + currentOldKharcha;
     const netOpening = totalRemainingAmount({
       openingBalance: grossOpening,
-      weekKharchaUnpaid: 0,
       creditBalance: currentCredit,
     });
-    const closing = grossOpening + addBalance;
+    const runningAfterAdd = grossOpening + addBalance;
+    const closing = Math.max(0, runningAfterAdd - kharchaAmount);
     const totalRemainingPreview = totalRemainingAmount({
       openingBalance: closing,
-      weekKharchaUnpaid: kharchaAmount,
       creditBalance: currentCredit,
     });
 
@@ -319,6 +293,7 @@ export default function OrdersPage() {
       addBalance,
       grossOpening,
       netOpening,
+      runningAfterAdd,
       closing,
       totalRemainingPreview,
     };
@@ -474,7 +449,7 @@ export default function OrdersPage() {
           }
           continue;
         }
-        // Unpaid week kharcha → total remaining (running balance).
+        // Unused week kharcha (given − paid) returns to Total Remaining.
         openingBase += unpaid;
         await updateDoc(doc(db, "kaariger_orders", prev.id), {
           kharchaCarriedForward: Math.max(0, prev.kharchaCarriedForward || 0) + unpaid,
@@ -510,10 +485,10 @@ export default function OrdersPage() {
         weekKey: weekMeta.key,
       };
 
-      // Running balance += ADD (MAAL − deductions). Week kharcha stays in Kharcha box.
+      // Running balance += ADD − week kharcha given (cash to kaariger).
       const openingAtCreation = openingBase;
       const addBalance = orderAddBalance(order);
-      const closingAtCreation = openingAtCreation + addBalance;
+      const closingAtCreation = Math.max(0, openingAtCreation + addBalance - calc.kharchaAmount);
       order.openingAtCreation = openingAtCreation;
       order.addBalance = addBalance;
       order.closingAtCreation = closingAtCreation;
@@ -527,13 +502,12 @@ export default function OrdersPage() {
       const creditBal = Math.max(0, kaariger.creditBalance || 0);
       const totalAfterCreate = totalRemainingAmount({
         openingBalance: closingAtCreation,
-        weekKharchaUnpaid: calc.kharchaAmount,
         creditBalance: creditBal,
       });
       setSuccessMsg(
         `${weekMeta.label} bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
           (calc.kharchaAmount > 0
-            ? ` · Kharcha ${money(calc.kharchaAmount)} (pay through the week).`
+            ? ` · Kharcha given ${money(calc.kharchaAmount)} (deducted; Pay is breakup only).`
             : ".") +
           (creditBal > 0 ? ` Credit ${money(creditBal)} already applied.` : "")
       );
@@ -909,16 +883,16 @@ export default function OrdersPage() {
             <Row label="MAAL (products)" value={money(calc.productsTotal)} />
             <Row label="Less: Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} />
             <div className="my-2 border-t border-jade/20" />
-            <Row label="ADD BALANCE (goes to Total Remaining)" value={money(calc.addBalance)} bold />
-            <Row label="Running balance after bill" value={money(calc.closing)} bold />
-            <Row label="This week's kharcha (Kharcha box)" value={money(calc.kharchaAmount)} accent />
+            <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
+            <Row label="Running balance after ADD" value={money(calc.runningAfterAdd)} bold />
+            <Row label="Kharcha given (cash to kaariger)" value={`−${money(calc.kharchaAmount)}`} accent />
             <div className="my-2 border-t border-jade/20" />
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            ADD goes to Total Remaining. Week kharcha goes to the Kharcha box (and Total Remaining).
-            Credit reduces Total Remaining. Pay reduces both boxes. Next Saturday unpaid kharcha folds
-            into running balance.
+            Kharcha is money you give now — it reduces Total Remaining. Kharcha box tracks that
+            amount; Pay only shows breakup (does not deduct again). Unused leftover on next Saturday
+            adds back to remaining.
           </p>
         </div>
 

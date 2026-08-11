@@ -386,7 +386,8 @@ export default function HisaabPage() {
         ),
     [payments]
   );
-  const grossOwed = runningBalance + weekKharchaUnpaid;
+  // openingBalance already nets week kharcha given at bill create — do not add unpaid again.
+  const grossOwed = runningBalance;
   const totalRemaining = Math.max(0, grossOwed - creditBal - standaloneRepairTotal);
   const surplusCredit = Math.max(0, creditBal - Math.max(0, grossOwed - standaloneRepairTotal));
   const creditAppliedToRemaining = Math.min(creditBal, Math.max(0, grossOwed - standaloneRepairTotal));
@@ -849,9 +850,9 @@ export default function HisaabPage() {
               <p className="text-sm text-[var(--text-muted)]">
                 <span className="font-semibold text-[var(--text)]">Total remaining</span>{" "}
                 {money(totalRemaining)}
-                {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Each payment
-                is listed separately with date &amp; time — tap Total remaining for the full ledger.
-                Paying kharcha reduces both Total remaining and Kharcha.
+                {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening
+                payments show line by line. Kharcha given on the bill is already in Total Remaining;
+                Pay against kharcha is breakup only. Tap Total remaining for the full ledger.
               </p>
             </div>
           )}
@@ -970,9 +971,9 @@ export default function HisaabPage() {
                   )}
 
                   <p className="text-[11px] text-[var(--text-muted)]">
-                    Payments are never merged — each Pay is its own row with date &amp; time. When a
-                    new Saturday bill is created, unpaid week kharcha folds into running balance and
-                    keeps its week label (e.g. October 1st week).
+                    Opening starts at the full amount, then each Pay with date &amp; time. Kharcha
+                    given on a bill is deducted once; week Pay is breakup only. Unused kharcha on
+                    next Saturday adds back to remaining.
                   </p>
                 </div>
               </div>
@@ -1635,17 +1636,16 @@ function GrandTotalBox({
   const opening =
     order.openingAtCreation != null
       ? Math.max(0, order.openingAtCreation)
-      : Math.max(0, (openingBalance || 0) - addBalance);
+      : Math.max(0, (openingBalance || 0) - addBalance + weekKharcha);
   const closing =
     order.closingAtCreation != null
       ? order.closingAtCreation
-      : opening + addBalance;
+      : Math.max(0, opening + addBalance - weekKharcha);
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
-  const weekDue = orderKharchaUnpaid(order, 0);
   const weekUnpaid = orderKharchaUnpaid(order, paid);
-  /** Total remaining for this view = running closing + unpaid week kharcha (+ legacy old). */
-  const totalRemainingHere = Math.max(0, closing + old + weekUnpaid);
+  /** Closing already nets kharcha given; unused unpaid returns on next Saturday. */
+  const totalRemainingHere = Math.max(0, closing + old);
   const transferLines = [...payments].sort((a, b) =>
     `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
   );
@@ -1675,19 +1675,23 @@ function GrandTotalBox({
         )}
         <div className="my-1.5 border-t border-jade/20" />
         <Row label="ADD BALANCE" value={money(addBalance)} bold />
-        <Row label="Running balance after bill" value={money(closing)} bold accent="amber" />
+        <Row label="After ADD" value={money(opening + addBalance)} bold />
+        {weekKharcha > 0 && (
+          <Row label="Kharcha given (cash)" value={`−${money(weekKharcha)}`} accent="green" />
+        )}
+        <Row label="Total remaining (this bill)" value={money(closing)} bold accent="amber" />
         <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-          {money(opening)} + {money(addBalance)} add = {money(closing)} (kharcha is separate below)
+          {money(opening)} + {money(addBalance)} add − {money(weekKharcha)} kharcha = {money(closing)}
         </p>
 
         <div className="my-1.5 border-t border-jade/20" />
         <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
-          Kharcha (this week)
+          Kharcha breakup (does not change Total Remaining again)
         </p>
         {old > 0 && (
           <Row label="Old kharcha (folds next Saturday)" value={money(old)} accent="amber" />
         )}
-        <Row label="Week kharcha" value={money(weekDue)} bold />
+        <Row label="Week kharcha given" value={money(weekKharcha)} bold />
         {transferLines.length > 0 ? (
           <div className="mt-1 overflow-hidden rounded-xl border border-jade/15 bg-white/60">
             {transferLines.map((p) => (
@@ -1708,17 +1712,17 @@ function GrandTotalBox({
               </div>
             ))}
             <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
-              <span className="font-bold text-jade-deep">Paid so far</span>
+              <span className="font-bold text-jade-deep">Paid so far (breakup)</span>
               <span className="font-bold text-jade-deep">{money(paid)}</span>
             </div>
           </div>
         ) : (
           <p className="pt-1 text-[11px] text-[var(--text-muted)]">
-            No transfers yet — pay in parts (e.g. 20k, then 20k…).
+            No kharcha pays yet — Pay only records breakup (Total Remaining already reduced on bill).
           </p>
         )}
         <Row
-          label="Kharcha remaining"
+          label="Kharcha still open"
           value={weekUnpaid > 0 ? money(weekUnpaid) : "₹0 — cleared"}
           bold
           accent={weekUnpaid > 0 ? "amber" : "green"}
@@ -1731,13 +1735,13 @@ function GrandTotalBox({
           accent={totalRemainingHere > 0 ? "amber" : "green"}
         />
         <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-          {money(closing)} running
-          {old > 0 ? ` + ${money(old)} old` : ""}
-          {weekUnpaid > 0 ? ` + ${money(weekUnpaid)} kharcha` : ""} = {money(totalRemainingHere)}
+          Closing {money(closing)}
+          {old > 0 ? ` + ${money(old)} old` : ""} = {money(totalRemainingHere)}. Unused open kharcha
+          adds back on next Saturday.
         </p>
         {weekKharcha > 0 && weekUnpaid > 0 && (
           <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-            Next Saturday unpaid kharcha folds into running balance; new week kharcha shows in Kharcha.
+            Next Saturday unused {money(weekUnpaid)} returns to Total Remaining.
           </p>
         )}
       </div>
