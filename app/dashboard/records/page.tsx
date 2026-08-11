@@ -235,7 +235,11 @@ function emptyProductLine(): ProductLineForm {
   return { productName: "", quantity: "", pricePerPiece: "" };
 }
 function emptyCharges(): ChargeDraft {
-  return { RUNNER: { qty: "", price: "" }, FITTING: { qty: "", price: "" }, ASTAR: { qty: "", price: "" } };
+  return {
+    RUNNER: { qty: "", price: "1.5" },
+    FITTING: { qty: "", price: "2.5" },
+    ASTAR: { qty: "", price: "30" },
+  };
 }
 function emptyMaterialLine(): MaterialLineForm {
   return { materialId: "", name: "", qty: "", price: "" };

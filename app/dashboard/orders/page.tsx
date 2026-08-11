@@ -68,9 +68,9 @@ function emptyProductLine(): ProductLineForm {
 
 function emptyDeductions(): DeductionDraft {
   return {
-    RUNNER: { qty: "", price: "" },
-    FITTING: { qty: "", price: "" },
-    ASTAR: { qty: "", price: "" },
+    RUNNER: { qty: "", price: "1.5" },
+    FITTING: { qty: "", price: "2.5" },
+    ASTAR: { qty: "", price: "30" },
   };
 }
 
