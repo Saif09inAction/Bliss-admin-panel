@@ -915,6 +915,7 @@ export default function HisaabPage() {
                     order={o}
                     payments={payments}
                     repairs={repairs}
+                    openingBalance={openingBal}
                     onPay={() => {
                       setShowUnifiedPay(true);
                       setPayOrderId(o.id);
@@ -1080,11 +1081,14 @@ function OrderDetailCard({
   order,
   payments,
   repairs,
+  openingBalance = 0,
   onPay,
 }: {
   order: KaarigerOrder;
   payments: KaarigerPayment[];
   repairs: OrderRepair[];
+  /** Kaariger opening still pending — shown in Grand Total for clarity. */
+  openingBalance?: number;
   onPay?: () => void;
 }) {
   const [showWhatsApp, setShowWhatsApp] = useState(false);
@@ -1290,39 +1294,115 @@ function OrderDetailCard({
         </div>
       )}
 
-      <GrandTotalBox order={order} paid={paid} net={net} />
+      <GrandTotalBox
+        order={order}
+        paid={paid}
+        net={net}
+        openingBalance={openingBalance}
+      />
     </div>
   );
 }
 
-/** Products − Runner/Fitting/Astar/Material − Repairing = Total, compared
- * against total kharcha paid: shows exactly how much extra was paid, how
- * much is still remaining, or that it's fully cleared. */
-function GrandTotalBox({ order, paid, net }: { order: KaarigerOrder; paid: number; net: number }) {
+/**
+ * Clear step-by-step hisaab:
+ * Opening → product cost → runner/fitting/material/repair → bill total
+ * → kharcha paid → bill remaining → (+ opening) → overall remaining.
+ */
+function GrandTotalBox({
+  order,
+  paid,
+  net,
+  openingBalance = 0,
+}: {
+  order: KaarigerOrder;
+  paid: number;
+  net: number;
+  openingBalance?: number;
+}) {
+  const opening = Math.max(0, openingBalance || 0);
   const productsTotal = order.productsTotal ?? 0;
-  const deductionsTotal = order.materialDeductionsTotal ?? 0;
+  const deductionLines = order.materialDeductions || [];
+  const deductionsTotal =
+    order.materialDeductionsTotal ??
+    deductionLines.reduce((s, it) => s + (it.lineTotal || 0), 0);
   const repairTotal = order.repairDeductionTotal || 0;
-  const diff = paid - net;
+  const billRemaining = Math.max(0, net - paid);
+  const extraPaid = Math.max(0, paid - net);
+  const overallRemaining = opening + billRemaining;
+  const kharchaAtCreation = Math.max(0, order.kharchaGiven || 0);
 
   return (
     <div className="rounded-2xl border border-jade/20 bg-jade-soft/30 p-4">
       <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">Grand Total</p>
       <div className="space-y-1 text-sm">
-        <Row label="Product cost total" value={money(productsTotal)} />
-        {deductionsTotal > 0 && (
-          <Row label="Less: Runner/Fitting/Astar/Material" value={`−${money(deductionsTotal)}`} />
+        {opening > 0 && (
+          <Row
+            label="Opening balance (purana baaki)"
+            value={money(opening)}
+            accent="amber"
+          />
         )}
-        {repairTotal > 0 && <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />}
+        <Row label="Product cost total" value={money(productsTotal)} />
+        {deductionLines.length > 0
+          ? deductionLines.map((it, i) => (
+              <Row
+                key={`${it.type}-${it.label}-${i}`}
+                label={`Less: ${it.label || it.type}`}
+                value={`−${money(it.lineTotal)}`}
+              />
+            ))
+          : deductionsTotal > 0 && (
+              <Row
+                label="Less: Runner / Fitting / Astar / Material"
+                value={`−${money(deductionsTotal)}`}
+              />
+            )}
+        {repairTotal > 0 && (
+          <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
+        )}
         <div className="my-1.5 border-t border-jade/20" />
-        <Row label="Total" value={money(net)} bold />
-        <Row label="Total Kharcha Paid" value={money(paid)} />
+        <Row label="Bill total" value={money(net)} bold />
+        <Row
+          label={
+            kharchaAtCreation > 0 && Math.abs(kharchaAtCreation - paid) < 0.01
+              ? "Kharcha paid (on bill creation)"
+              : kharchaAtCreation > 0 && paid > kharchaAtCreation
+                ? "Kharcha paid (creation + later)"
+                : "Kharcha paid"
+          }
+          value={paid > 0 ? `−${money(paid)}` : money(0)}
+          accent={paid > 0 ? "green" : undefined}
+        />
+        {kharchaAtCreation > 0 && paid > kharchaAtCreation && (
+          <p className="pl-0.5 text-[11px] text-[var(--text-muted)]">
+            Includes {money(kharchaAtCreation)} given when the bill was created
+          </p>
+        )}
         <div className="my-1.5 border-t border-jade/20" />
-        {diff > 0 ? (
-          <Row label="Extra paid" value={`+${money(diff)}`} bold accent="green" />
-        ) : diff < 0 ? (
-          <Row label="Total remaining" value={money(-diff)} bold accent="amber" />
-        ) : (
-          <Row label="Fully cleared" value="₹0" bold accent="green" />
+        <Row
+          label="This bill remaining"
+          value={billRemaining > 0 ? money(billRemaining) : "₹0 — cleared"}
+          bold={billRemaining > 0}
+          accent={billRemaining > 0 ? "amber" : "green"}
+        />
+        {opening > 0 && (
+          <Row label="Opening still pending" value={money(opening)} accent="amber" />
+        )}
+        <div className="my-1.5 border-t border-jade/20" />
+        {extraPaid > 0 ? (
+          <Row label="Extra paid (credit)" value={`+${money(extraPaid)}`} bold accent="green" />
+        ) : null}
+        <Row
+          label="Total remaining"
+          value={money(overallRemaining)}
+          bold
+          accent={overallRemaining > 0 ? "amber" : "green"}
+        />
+        {opening > 0 && billRemaining > 0 && (
+          <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
+            {money(opening)} opening + {money(billRemaining)} bill = {money(overallRemaining)}
+          </p>
         )}
       </div>
     </div>
