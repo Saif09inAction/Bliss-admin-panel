@@ -332,9 +332,10 @@ export function buildHisaabLedger(opts: {
       events.push({
         id: `kharcha-${order.id}`,
         kind: "week_kharcha",
-        title: `${week.label} kharcha given`,
-        subtitle: "Cash given to kaariger — deducted from Total Remaining; tracked in Kharcha box",
-        deltaRemaining: -kharcha,
+        title: `${week.label} kharcha budget`,
+        subtitle: `Budget ${Math.round(kharcha).toLocaleString("en-IN")} — transfers below (thoda thoda) reduce Total Remaining`,
+        // Budget only fills the Kharcha box; live remaining drops on each Pay transfer.
+        deltaRemaining: 0,
         deltaKharcha: kharcha,
         at: t + 1,
       });
@@ -348,7 +349,7 @@ export function buildHisaabLedger(opts: {
         id: `fold-${order.id}`,
         kind: "kharcha_fold",
         title: `${week.label} unused kharcha returned`,
-        subtitle: "Not paid out of the kharcha budget — added back to Total Remaining",
+        subtitle: "Not transferred out of the budget — added back to Total Remaining",
         deltaRemaining: carried,
         deltaKharcha: -carried,
         at: foldAt,
@@ -356,7 +357,11 @@ export function buildHisaabLedger(opts: {
     }
   }
 
-  for (const p of payments) {
+  // Chronological so “₹2k of ₹3k” running totals match transfer order.
+  const paymentsChrono = [...payments].sort((a, b) => paymentSortKey(a) - paymentSortKey(b));
+  const paidOfBudget = new Map<string, number>();
+
+  for (const p of paymentsChrono) {
     if (payIsCredit(p)) {
       events.push({
         id: `pay-${p.id}`,
@@ -399,15 +404,28 @@ export function buildHisaabLedger(opts: {
 
     const order = orders.find((o) => o.id === p.orderId);
     const week = order ? orderWeekMeta(order) : null;
+    const budget = order ? orderWeekKharcha(order) : 0;
+    const carried = order ? Math.max(0, order.kharchaCarriedForward || 0) : 0;
+    const due = Math.max(0, budget - carried);
+    const paidAfter = (paidOfBudget.get(p.orderId) || 0) + amount;
+    paidOfBudget.set(p.orderId, paidAfter);
+    const leftAfter = Math.max(0, due - paidAfter);
+    const when = [p.date, p.time].filter(Boolean).join(" · ");
+    const outOf =
+      due > 0
+        ? `${Math.round(paidAfter).toLocaleString("en-IN")} of ${Math.round(due).toLocaleString("en-IN")} kharcha` +
+          (leftAfter > 0
+            ? ` · ${Math.round(leftAfter).toLocaleString("en-IN")} left`
+            : " · cleared")
+        : "";
+
     events.push({
       id: `pay-${p.id}`,
       kind: "payment",
-      title: week ? `Paid · ${week.label} kharcha` : "Paid · week kharcha",
-      subtitle:
-        [p.date, p.time, p.remarks].filter(Boolean).join(" · ") ||
-        "Breakdown only — Total Remaining already reduced when kharcha was given on the bill",
-      // Already deducted at bill create — do not reduce remaining again.
-      deltaRemaining: 0,
+      title: week ? `Transfer · ${week.label} kharcha` : "Transfer · week kharcha",
+      subtitle: [when, outOf, p.remarks].filter(Boolean).join(" · "),
+      // Each installment reduces live Total Remaining (budget line does not).
+      deltaRemaining: -amount,
       deltaKharcha: -amount,
       at: paymentSortKey(p),
     });

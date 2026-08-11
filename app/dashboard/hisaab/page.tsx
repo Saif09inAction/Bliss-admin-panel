@@ -921,8 +921,15 @@ export default function HisaabPage() {
                     <div className="overflow-hidden rounded-xl border border-[var(--border)]">
                       {ledgerLines.map((line, idx) => {
                         const delta = line.deltaRemaining;
-                        const deltaLabel =
-                          delta === 0
+                        const isBudget =
+                          line.kind === "week_kharcha" && delta === 0 && line.deltaKharcha > 0;
+                        const isTransfer =
+                          line.kind === "payment" &&
+                          line.deltaKharcha < 0 &&
+                          line.deltaRemaining < 0;
+                        const deltaLabel = isBudget
+                          ? "Budget"
+                          : delta === 0
                             ? "—"
                             : delta > 0
                               ? `+${money(delta)}`
@@ -944,20 +951,24 @@ export default function HisaabPage() {
                                 )}
                                 {line.deltaKharcha !== 0 && (
                                   <p className="mt-0.5 text-[11px] text-jade-deep">
-                                    Kharcha {line.deltaKharcha > 0 ? "+" : "−"}
-                                    {money(Math.abs(line.deltaKharcha))} → box{" "}
-                                    {money(line.kharchaAfter)}
+                                    {isBudget
+                                      ? `Kharcha box ${money(line.kharchaAfter)}`
+                                      : isTransfer
+                                        ? `Out of kharcha −${money(Math.abs(line.deltaKharcha))} → box ${money(line.kharchaAfter)}`
+                                        : `Kharcha ${line.deltaKharcha > 0 ? "+" : "−"}${money(Math.abs(line.deltaKharcha))} → box ${money(line.kharchaAfter)}`}
                                   </p>
                                 )}
                               </div>
                               <div className="shrink-0 text-right">
                                 <p
                                   className={`text-sm font-bold ${
-                                    delta < 0
-                                      ? "text-danger"
-                                      : delta > 0
-                                        ? "text-jade-deep"
-                                        : "text-[var(--text-muted)]"
+                                    isBudget
+                                      ? "text-jade-deep"
+                                      : delta < 0
+                                        ? "text-danger"
+                                        : delta > 0
+                                          ? "text-jade-deep"
+                                          : "text-[var(--text-muted)]"
                                   }`}
                                 >
                                   {deltaLabel}
