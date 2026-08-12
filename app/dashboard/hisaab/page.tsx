@@ -342,12 +342,30 @@ export default function HisaabPage() {
 
   const activeTotals = useMemo(() => {
     const weekKharcha = activeOrders.reduce((s, o) => s + Math.max(0, o.kharchaGiven || 0), 0);
-    const paid = activeOrders.reduce((s, o) => s + (orderPaidMap.get(o.id) || 0), 0);
+    const paidCash = activeOrders.reduce((s, o) => s + (orderPaidMap.get(o.id) || 0), 0);
+    /** Prior-week overpay folded into this box — show as already Paid so 10k − 1k = 9k left. */
+    const priorOverpayApplied = activeOrders.reduce(
+      (s, o) => s + Math.max(0, o.kharchaCarryIn || 0),
+      0
+    );
+    /** Prior-week underpay left — grows this week’s box (not shown as Paid). */
+    const priorLeftAdded = activeOrders.reduce(
+      (s, o) => s + Math.max(0, -(o.kharchaCarryIn || 0)),
+      0
+    );
     const balance = activeOrders.reduce(
       (s, o) => s + orderKharchaBalance(o, orderPaidMap.get(o.id) || 0),
       0
     );
-    return { deal: weekKharcha, paid, balance };
+    return {
+      deal: weekKharcha,
+      paidCash,
+      priorOverpayApplied,
+      priorLeftAdded,
+      /** Cash pays + prior overpay applied against this week’s budget. */
+      paid: paidCash + priorOverpayApplied,
+      balance,
+    };
   }, [activeOrders, orderPaidMap]);
 
   // Opening (old pending + bill closings) − credit − repairs = Total Remaining.
@@ -372,6 +390,9 @@ export default function HisaabPage() {
   const kharchaRemaining = kharchaBox;
   const weekKharchaBudget = activeTotals.deal;
   const weekKharchaPaid = activeTotals.paid;
+  const weekKharchaPaidCash = activeTotals.paidCash;
+  const priorOverpayApplied = activeTotals.priorOverpayApplied;
+  const priorLeftAdded = activeTotals.priorLeftAdded;
   /** This week's transfer payments (line-wise for Kharcha breakdown). Oldest first like the sheet. */
   const weekKharchaPayments = useMemo(() => {
     const activeIds = new Set(activeOrders.map((o) => o.id));
@@ -1100,10 +1121,14 @@ export default function HisaabPage() {
                       </div>
                     </div>
                     <p className="border-t border-jade/15 px-3 py-2 text-center text-[11px] text-[var(--text-muted)]">
-                      Box {money(kharchaRemaining)}
-                      {kharchaRemaining < 0
-                        ? " (overpay — next week’s box shrinks)"
-                        : " · Pay only hits this box; Remaining unchanged"}
+                      {money(weekKharchaBudget)} − {money(weekKharchaPaid)} paid ={" "}
+                      {money(kharchaRemaining)} left
+                      {priorOverpayApplied > 0
+                        ? ` · includes prior overpay ${money(priorOverpayApplied)}`
+                        : ""}
+                      {priorLeftAdded > 0
+                        ? ` · prior left +${money(priorLeftAdded)} in box`
+                        : ""}
                     </p>
                   </div>
 
@@ -1111,12 +1136,41 @@ export default function HisaabPage() {
                     <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
                       Payments against this kharcha
                     </p>
-                    {weekKharchaPayments.length === 0 && oldKharchaPayments.length === 0 ? (
+                    {weekKharchaPayments.length === 0 &&
+                    oldKharchaPayments.length === 0 &&
+                    priorOverpayApplied <= 0 &&
+                    priorLeftAdded <= 0 ? (
                       <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-4 text-center text-sm text-[var(--text-muted)]">
                         No kharcha pays yet. Pay 5k, then 5k — each shows as Paid ₹5,000 here.
                       </p>
                     ) : (
                       <div className="overflow-hidden rounded-xl border border-[var(--border)]">
+                        {priorOverpayApplied > 0 && (
+                          <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm">
+                            <div className="min-w-0">
+                              <p className="font-medium">Prior overpay (from last week)</p>
+                              <p className="text-[11px] text-[var(--text-muted)]">
+                                Already counted against this week’s budget
+                              </p>
+                            </div>
+                            <span className="shrink-0 font-bold text-jade-deep">
+                              Paid {money(priorOverpayApplied)}
+                            </span>
+                          </div>
+                        )}
+                        {priorLeftAdded > 0 && (
+                          <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm">
+                            <div className="min-w-0">
+                              <p className="font-medium">Prior left unpaid</p>
+                              <p className="text-[11px] text-[var(--text-muted)]">
+                                Added into this week’s Kharcha box
+                              </p>
+                            </div>
+                            <span className="shrink-0 font-bold text-amber-900">
+                              +{money(priorLeftAdded)}
+                            </span>
+                          </div>
+                        )}
                         {oldKharchaPayments.map((p) => (
                           <div
                             key={p.id}
@@ -1155,7 +1209,12 @@ export default function HisaabPage() {
                           </div>
                         ))}
                         <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
-                          <span className="font-bold text-jade-deep">Total paid on kharcha</span>
+                          <span className="font-bold text-jade-deep">
+                            Total paid on kharcha
+                            {priorOverpayApplied > 0 && weekKharchaPaidCash > 0
+                              ? ` (${money(priorOverpayApplied)} prior + ${money(weekKharchaPaidCash)} cash)`
+                              : ""}
+                          </span>
                           <span className="font-bold text-jade-deep">{money(weekKharchaPaid)}</span>
                         </div>
                       </div>
@@ -1253,6 +1312,11 @@ export default function HisaabPage() {
                 <div className="stat-card">
                   <p className="stat-card-label">Paid on kharcha</p>
                   <p className="stat-card-value text-jade-deep">{money(activeTotals.paid)}</p>
+                  {activeTotals.priorOverpayApplied > 0 && (
+                    <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+                      Includes prior overpay {money(activeTotals.priorOverpayApplied)}
+                    </p>
+                  )}
                 </div>
                 <div className="stat-card">
                   <p className="stat-card-label">Kharcha box</p>
@@ -1475,8 +1539,10 @@ function PreviousHisaabCard({
     order.closingAtCreation != null
       ? order.closingAtCreation
       : Math.max(0, opening + addBalance - weekKharcha);
-  const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
-  const box = orderKharchaBalance(order, paid);
+  const paidCash = orderPayments.reduce((s, p) => s + p.amount, 0);
+  const priorOverpay = Math.max(0, carryIn);
+  const paid = paidCash + priorOverpay;
+  const box = orderKharchaBalance(order, paidCash);
 
   return (
     <div className="surface space-y-4 p-4">
@@ -1558,16 +1624,22 @@ function PreviousHisaabCard({
             <p className="text-[11px] text-[var(--text-muted)]">
               Carry into this week:{" "}
               {carryIn > 0
-                ? `−${money(carryIn)} (prior overpay)`
+                ? `−${money(carryIn)} (prior overpay) counted in Paid`
                 : `+${money(-carryIn)} (prior left)`}
             </p>
           )}
-          {orderPayments.length === 0 ? (
+          {orderPayments.length === 0 && priorOverpay <= 0 ? (
             <p className="rounded-xl border border-dashed border-jade/30 px-3 py-4 text-center text-sm text-[var(--text-muted)]">
               No Pay recorded this week.
             </p>
           ) : (
             <div className="overflow-hidden rounded-xl border border-jade/20 bg-white/70">
+              {priorOverpay > 0 && (
+                <div className="flex items-center justify-between gap-3 border-b border-jade/10 px-3 py-2 text-sm">
+                  <p className="font-medium">Prior overpay (from last week)</p>
+                  <span className="shrink-0 font-bold text-jade-deep">{money(priorOverpay)}</span>
+                </div>
+              )}
               {orderPayments.map((p) => (
                 <div
                   key={p.id}
