@@ -100,6 +100,8 @@ export default function HisaabPage() {
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
   /** Unified Pay (opening → bills → credit). When true, ignore payOrderId for allocation. */
   const [showUnifiedPay, setShowUnifiedPay] = useState(false);
+  /** Where this Pay click should settle: week Kharcha box, or Total Remaining. */
+  const [payTarget, setPayTarget] = useState<"kharcha" | "remaining">("kharcha");
   /** Hidden by default — Transactions button reveals the full payment history. */
   const [showTransactions, setShowTransactions] = useState(false);
   /** Click Total Remaining → opening / rolled kharcha / week kharcha breakdown. */
@@ -310,6 +312,7 @@ export default function HisaabPage() {
         orders,
         payments,
         standaloneRepairTotal: standaloneRepairs,
+        preferTarget: payTarget,
       });
       setPayMsg(result.message);
       setPayForm({ amount: "", remarks: "" });
@@ -672,36 +675,73 @@ export default function HisaabPage() {
               </p>
             </div>
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setShowRemainingBreakdown(true)}
-                className="rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 text-left transition hover:bg-[rgba(232,168,56,0.25)] sm:text-right"
-                title="See how total remaining is calculated"
-              >
-                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                  Total remaining
-                </p>
-                <p className="font-display text-base font-bold text-amber-900">
-                  {money(totalRemaining)}
-                </p>
-                <p className="text-[10px] text-amber-800/80">Tap for full ledger</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowKharchaBreakdown(true)}
-                className="rounded-xl bg-jade-soft px-3 py-2 text-left transition hover:bg-jade-soft/80 sm:text-right"
-                title="See kharcha payments line by line"
-              >
-                <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
-                  Kharcha box
-                </p>
-                <p className="font-display text-base font-bold text-jade-deep">
-                  {money(kharchaRemaining)}
-                </p>
-                <p className="text-[10px] text-jade-deep/80">
-                  {kharchaRemaining < 0 ? "Extra paid · tap records" : "Tap for kharcha records"}
-                </p>
-              </button>
+              <div className="flex items-stretch gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowRemainingBreakdown(true)}
+                  className="rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 text-left transition hover:bg-[rgba(232,168,56,0.25)] sm:text-right"
+                  title="See how total remaining is calculated"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                    Total remaining
+                  </p>
+                  <p className="font-display text-base font-bold text-amber-900">
+                    {money(totalRemaining)}
+                  </p>
+                  <p className="text-[10px] text-amber-800/80">Tap for full ledger</p>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary whitespace-nowrap !px-2.5"
+                  title="Pay against Total Remaining"
+                  disabled={totalRemaining <= 0 && surplusCredit <= 0}
+                  onClick={() => {
+                    setPayTarget("remaining");
+                    setShowUnifiedPay(true);
+                    setPayOrderId(null);
+                    setPayForm({ amount: "", remarks: "" });
+                    setPayMsg("");
+                  }}
+                >
+                  <IndianRupee className="h-4 w-4" />
+                  Pay
+                </button>
+              </div>
+              <div className="flex items-stretch gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowKharchaBreakdown(true)}
+                  className="rounded-xl bg-jade-soft px-3 py-2 text-left transition hover:bg-jade-soft/80 sm:text-right"
+                  title="See kharcha payments line by line"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
+                    Kharcha box
+                  </p>
+                  <p className="font-display text-base font-bold text-jade-deep">
+                    {money(kharchaRemaining)}
+                  </p>
+                  <p className="text-[10px] text-jade-deep/80">
+                    {kharchaRemaining < 0 ? "Extra paid · tap records" : "Tap for kharcha records"}
+                  </p>
+                </button>
+                {weekKharchaBudget > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary whitespace-nowrap !px-2.5"
+                    title="Pay against Kharcha box"
+                    onClick={() => {
+                      setPayTarget("kharcha");
+                      setShowUnifiedPay(true);
+                      setPayOrderId(null);
+                      setPayForm({ amount: "", remarks: "" });
+                      setPayMsg("");
+                    }}
+                  >
+                    <IndianRupee className="h-4 w-4" />
+                    Pay
+                  </button>
+                )}
+              </div>
               {totalRemaining <= 0 && surplusCredit > 0 && (
                 <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
@@ -740,6 +780,7 @@ export default function HisaabPage() {
                 type="button"
                 className="btn btn-primary whitespace-nowrap"
                 onClick={() => {
+                  setPayTarget(weekKharchaBudget > 0 ? "kharcha" : "remaining");
                   setShowUnifiedPay(true);
                   setPayOrderId(null);
                   setPayForm({ amount: "", remarks: "" });
@@ -865,9 +906,10 @@ export default function HisaabPage() {
                 <span className="font-semibold text-[var(--text)]">Total remaining</span>{" "}
                 {money(totalRemaining)}
                 {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening =
-                old pending inside Remaining. Pay only hits the Kharcha box
-                {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}. Tap Total remaining
-                for the ledger.
+                old pending inside Remaining. Use <strong>Pay</strong> next to Total remaining to
+                cut it; week Pay hits the Kharcha box
+                {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}. If there is no
+                kharcha, the main Pay button settles Remaining.
               </p>
             </div>
           )}
@@ -1266,6 +1308,9 @@ export default function HisaabPage() {
                     openingBalance={openingBal}
                     oldKharcha={oldKharchaBal}
                     onPay={() => {
+                      setPayTarget(
+                        Math.max(0, o.kharchaGiven || 0) > 0 ? "kharcha" : "remaining"
+                      );
                       setShowUnifiedPay(true);
                       setPayOrderId(o.id);
                       setPayForm({ amount: "", remarks: "" });
@@ -1320,13 +1365,19 @@ export default function HisaabPage() {
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="font-display text-lg font-bold">Pay / transfer</h3>
+                  <h3 className="font-display text-lg font-bold">
+                    {payTarget === "remaining" ? "Pay Remaining" : "Pay Kharcha"}
+                  </h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Hits the Kharcha box only — Total Remaining stays the same. Overpay is OK (box
-                    goes negative and carries into next week).
-                    {Math.abs(kharchaRemaining) > 0 || weekKharchaBudget > 0
-                      ? ` Box now: ${money(kharchaRemaining)}.`
-                      : ""}
+                    {payTarget === "remaining"
+                      ? `Cuts Total Remaining (opening / old pending).${
+                          totalRemaining > 0 ? ` Now: ${money(totalRemaining)}.` : ""
+                        }`
+                      : `Hits the Kharcha box only — Total Remaining stays the same. Overpay is OK.${
+                          Math.abs(kharchaRemaining) > 0 || weekKharchaBudget > 0
+                            ? ` Box now: ${money(kharchaRemaining)}.`
+                            : ""
+                        }`}
                   </p>
                 </div>
                 <button
@@ -1380,7 +1431,7 @@ export default function HisaabPage() {
                 </button>
                 <button type="submit" className="btn btn-primary flex-1" disabled={paySaving}>
                   <Plus className="h-4 w-4" />
-                  {paySaving ? "Saving…" : "Add Kharcha"}
+                  {paySaving ? "Saving…" : payTarget === "remaining" ? "Pay Remaining" : "Add Kharcha"}
                 </button>
               </div>
             </form>

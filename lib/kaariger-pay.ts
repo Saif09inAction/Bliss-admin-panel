@@ -114,10 +114,19 @@ export function groupPayments(payments: KaarigerPayment[]): PaymentGroup[] {
   });
 }
 
+function hasActiveWeekKharcha(orders: KaarigerOrder[]): KaarigerOrder | null {
+  const active = orders
+    .filter((o) => o.status !== "COMPLETED" && o.status !== "CANCELLED" && o.status !== "REJECTED")
+    .filter((o) => Math.max(0, o.kharchaGiven || 0) > 0)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  return active.length > 0 ? active[active.length - 1] : null;
+}
+
 /**
- * Pay against this week’s Kharcha box only.
- * Does not change openingBalance / Total Remaining.
- * Allows overpay (box can go negative); full amount stored as one payment.
+ * Pay kharcha / remaining:
+ * - Default: if an active week has kharcha budget → hits Kharcha box only (can overpay).
+ * - If no active kharcha, or preferTarget === "remaining" → cuts Total Remaining
+ *   (openingBalance / oldKharcha). Extra beyond remaining becomes credit.
  */
 export async function payKaarigerKharcha(opts: {
   kaarigerId: string;
@@ -127,11 +136,11 @@ export async function payKaarigerKharcha(opts: {
   openingBalance: number;
   creditBalance: number;
   oldKharcha?: number;
-  /** Prefer passing loaded orders; if omitted, loads from Firestore. */
   orders?: KaarigerOrder[];
-  /** Existing payments (to compute remaining per order). If omitted, loads. */
   payments?: KaarigerPayment[];
   standaloneRepairTotal?: number;
+  /** Force settlement against Total Remaining even if a week kharcha box exists. */
+  preferTarget?: "kharcha" | "remaining";
 }): Promise<{
   message: string;
   oldKharchaApplied: number;
@@ -139,6 +148,8 @@ export async function payKaarigerKharcha(opts: {
   orderApplied: number;
   creditAdded: number;
   kharchaBoxAfter: number;
+  remainingAfter?: number;
+  target: "kharcha" | "remaining";
 }> {
   const amount = opts.amount;
   if (amount <= 0) throw new Error("Enter an amount greater than 0.");
@@ -203,49 +214,163 @@ export async function payKaarigerKharcha(opts: {
     paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + p.amount);
   });
 
-  const active = orders
-    .filter((o) => o.status !== "COMPLETED" && o.status !== "CANCELLED" && o.status !== "REJECTED")
-    .sort((a, b) => a.createdAt - b.createdAt);
+  const weekOrder = hasActiveWeekKharcha(orders);
+  // Prefer remaining when forced, or when there is no active week kharcha.
+  const payRemaining =
+    opts.preferTarget === "remaining" || (opts.preferTarget !== "kharcha" && !weekOrder);
 
-  if (active.length === 0) {
-    throw new Error("No active week kharcha box. Create a bill first.");
-  }
-
-  // Put the full Pay on the newest active week (allows overpay / negative box).
-  const order = active[active.length - 1];
-  const alreadyPaid = paidByOrder.get(order.id) || 0;
   const note = opts.remarks?.trim() || "";
   const payBatchId = uuid();
   const batchCreatedAt = Date.now();
   const batchDate = todayStr();
   const batchTime = nowTimeStr();
 
-  const paymentId = uuid();
-  await setDoc(doc(db, "kaariger_payments", paymentId), {
-    id: paymentId,
-    orderId: order.id,
-    kaarigerId: opts.kaarigerId,
-    amount,
-    date: batchDate,
-    time: batchTime,
-    createdAt: batchCreatedAt,
-    createdBy: opts.createdBy,
-    payBatchId,
-    remarks: note || "Week kharcha payment",
-  });
+  function paymentPayload(fields: {
+    id: string;
+    orderId: string;
+    amount: number;
+    remarks?: string;
+  }) {
+    const payload: Record<string, string | number> = {
+      id: fields.id,
+      orderId: fields.orderId,
+      kaarigerId: opts.kaarigerId,
+      amount: fields.amount,
+      date: batchDate,
+      time: batchTime,
+      createdAt: batchCreatedAt,
+      createdBy: opts.createdBy,
+      payBatchId,
+    };
+    if (fields.remarks) payload.remarks = fields.remarks;
+    return payload;
+  }
 
-  const kharchaBoxAfter = orderKharchaBalance(order, alreadyPaid + amount);
-  const boxLabel = Math.round(kharchaBoxAfter).toLocaleString("en-IN");
-  const message = `Paid ₹${Math.round(amount).toLocaleString("en-IN")} · Kharcha box now ₹${boxLabel}${
-    kharchaBoxAfter < 0 ? " (extra)" : ""
-  }. Total Remaining unchanged.`;
+  if (!payRemaining && weekOrder) {
+    const alreadyPaid = paidByOrder.get(weekOrder.id) || 0;
+    const paymentId = uuid();
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: weekOrder.id,
+        amount,
+        remarks: note || "Week kharcha payment",
+      })
+    );
+
+    const kharchaBoxAfter = orderKharchaBalance(weekOrder, alreadyPaid + amount);
+    const boxLabel = Math.round(kharchaBoxAfter).toLocaleString("en-IN");
+    const message = `Paid ₹${Math.round(amount).toLocaleString("en-IN")} · Kharcha box now ₹${boxLabel}${
+      kharchaBoxAfter < 0 ? " (extra)" : ""
+    }. Total Remaining unchanged.`;
+
+    return {
+      message,
+      oldKharchaApplied: 0,
+      openingApplied: 0,
+      orderApplied: amount,
+      creditAdded: 0,
+      kharchaBoxAfter,
+      target: "kharcha",
+    };
+  }
+
+  // No active kharcha (or Pay against Remaining): cut opening / old remaining.
+  let left = amount;
+  let oldKharchaApplied = 0;
+  let openingApplied = 0;
+  let creditAdded = 0;
+
+  const oldKharchaDue = Math.max(0, opts.oldKharcha || 0);
+  if (oldKharchaDue > 0 && left > 0) {
+    oldKharchaApplied = Math.min(left, oldKharchaDue);
+    const paymentId = uuid();
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: OLD_KHARCHA_ORDER_ID,
+        amount: oldKharchaApplied,
+        remarks: note || "Old kharcha payment",
+      })
+    );
+    await updateDoc(doc(db, "employees", opts.kaarigerId), {
+      oldKharcha: Math.max(0, oldKharchaDue - oldKharchaApplied),
+    });
+    left -= oldKharchaApplied;
+  }
+
+  let repairCover = Math.max(0, opts.standaloneRepairTotal || 0);
+  const opening = Math.max(0, opts.openingBalance || 0);
+  const openingCoveredByRepair = Math.min(opening, repairCover);
+  repairCover -= openingCoveredByRepair;
+  const openingDue = Math.max(0, opening - openingCoveredByRepair);
+  if (openingDue > 0 && left > 0) {
+    openingApplied = Math.min(left, openingDue);
+    const paymentId = uuid();
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: OPENING_ORDER_ID,
+        amount: openingApplied,
+        remarks: note || "Opening balance payment",
+      })
+    );
+    await updateDoc(doc(db, "employees", opts.kaarigerId), {
+      openingBalance: Math.max(0, opening - openingApplied),
+    });
+    left -= openingApplied;
+  }
+
+  if (left > 0) {
+    creditAdded = left;
+    await updateDoc(doc(db, "employees", opts.kaarigerId), {
+      creditBalance: Math.max(0, (opts.creditBalance || 0) + creditAdded),
+    });
+    const paymentId = uuid();
+    await setDoc(
+      doc(db, "kaariger_payments", paymentId),
+      paymentPayload({
+        id: paymentId,
+        orderId: OPENING_ORDER_ID,
+        amount: creditAdded,
+        remarks: note || "Extra kharcha — carried as credit",
+      })
+    );
+    left = 0;
+  }
+
+  const remCut = oldKharchaApplied + openingApplied;
+  const remainingAfter = Math.max(
+    0,
+    opening -
+      openingApplied +
+      oldKharchaDue -
+      oldKharchaApplied -
+      Math.max(0, opts.standaloneRepairTotal || 0)
+  );
+
+  let message = "";
+  if (remCut > 0 && creditAdded > 0) {
+    message = `Paid ₹${Math.round(amount).toLocaleString("en-IN")} · Remaining −₹${Math.round(remCut).toLocaleString("en-IN")} · Credit ₹${Math.round(creditAdded).toLocaleString("en-IN")}.`;
+  } else if (remCut > 0) {
+    message = `Paid ₹${Math.round(amount).toLocaleString("en-IN")} · Total Remaining now ₹${Math.round(remainingAfter).toLocaleString("en-IN")}.`;
+  } else if (creditAdded > 0) {
+    message = `Paid ₹${Math.round(creditAdded).toLocaleString("en-IN")} — all as credit for next bill.`;
+  } else {
+    message = "Nothing was owed on Remaining — recorded as credit if any.";
+  }
 
   return {
     message,
-    oldKharchaApplied: 0,
-    openingApplied: 0,
-    orderApplied: amount,
-    creditAdded: 0,
-    kharchaBoxAfter,
+    oldKharchaApplied,
+    openingApplied,
+    orderApplied: 0,
+    creditAdded,
+    kharchaBoxAfter: 0,
+    remainingAfter,
+    target: "remaining",
   };
 }
