@@ -24,9 +24,15 @@ export interface Employee {
   openingBalance?: number;
   /**
    * Unpaid weekly kharcha carried from previous weeks (sheet "OLD KHARCHA").
-   * Pay clears this first, then the current week's kharcha.
+   * Legacy — cleared into opening on next bill; new model uses kharchaCarry.
    */
   oldKharcha?: number;
+  /**
+   * Signed kharcha carry into the next week’s box: paid − budget from last closed week.
+   * Overpay → positive (next box shrinks); underpay → negative (next box grows).
+   * Does not change Total Remaining.
+   */
+  kharchaCarry?: number;
   /**
    * Optional per-staff shift. When set, late/early/pay use these instead of
    * the global Attendance settings. Empty/missing → company default.
@@ -121,13 +127,17 @@ export interface KaarigerOrder {
   materialDeductionsTotal?: number;
   /**
    * This week's kharcha budget (set on Saturday bill create).
-   * Paid down through the week via transfers; unpaid amount carries as oldKharcha.
-   * Not recorded as a payment at creation.
+   * Full amount is cut from Remaining at create; Pay only fills/empties the Kharcha box.
    */
   kharchaGiven?: number;
   /**
-   * Portion of kharchaGiven already rolled into employees.oldKharcha / opening when the
-   * next Saturday bill was created — so it is not double-counted.
+   * Signed carry from prior week folded into this bill’s Kharcha box only
+   * (paid − budget). Remaining still uses full kharchaGiven.
+   */
+  kharchaCarryIn?: number;
+  /**
+   * Legacy: portion of kharchaGiven rolled into opening under the old model.
+   * New weeks leave this at 0; carry uses kharchaCarryIn instead.
    */
   kharchaCarriedForward?: number;
   /**

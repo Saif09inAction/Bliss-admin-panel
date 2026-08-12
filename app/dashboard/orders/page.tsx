@@ -28,7 +28,7 @@ import { isStandaloneRepair } from "@/lib/types";
 import { formatRupee, uuid } from "@/lib/csv";
 import {
   orderAddBalance,
-  orderKharchaUnpaid,
+  orderKharchaCarryOut,
   totalRemainingAmount,
   weekLabelFromDate,
 } from "@/lib/kaariger-hisaab";
@@ -163,8 +163,8 @@ export default function OrdersPage() {
   /** Outstanding Total Remaining for the selected kaariger (same as Hisaab). */
   const [outstanding, setOutstanding] = useState<number | null>(null);
   const [outstandingLoading, setOutstandingLoading] = useState(false);
-  /** Unpaid week kharcha still in the box (folds into opening on next bill). */
-  const [pendingUnpaidKharcha, setPendingUnpaidKharcha] = useState(0);
+  /** Signed carry from active week(s) that will fold into next kharcha box only. */
+  const [pendingKharchaCarry, setPendingKharchaCarry] = useState(0);
 
   function resetForm() {
     setKaarigerId("");
@@ -175,7 +175,7 @@ export default function OrdersPage() {
     setNotes("");
     setFormMsg("");
     setOutstanding(null);
-    setPendingUnpaidKharcha(0);
+    setPendingKharchaCarry(0);
     clearBillDraft();
   }
 
@@ -328,7 +328,7 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!kaarigerId || !selectedKaariger) {
       setOutstanding(null);
-      setPendingUnpaidKharcha(0);
+      setPendingKharchaCarry(0);
       setOutstandingLoading(false);
       return;
     }
@@ -354,7 +354,7 @@ export default function OrdersPage() {
           paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + ((data.amount as number) || 0));
         });
 
-        let weekKharchaUnpaid = 0;
+        let carryOut = 0;
         orderSnap.docs.forEach((d) => {
           const data = d.data();
           const status = (data.status as string) || "ASSIGNED";
@@ -375,8 +375,9 @@ export default function OrdersPage() {
             createdAt: (data.createdAt as number) || 0,
             kharchaGiven: (data.kharchaGiven as number) || 0,
             kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
+            kharchaCarryIn: (data.kharchaCarryIn as number) || 0,
           };
-          weekKharchaUnpaid += orderKharchaUnpaid(order, paidByOrder.get(order.id) || 0);
+          carryOut += orderKharchaCarryOut(order, paidByOrder.get(order.id) || 0);
         });
 
         const standaloneRepairTotal = repairSnap.docs.reduce((s, d) => {
@@ -393,17 +394,16 @@ export default function OrdersPage() {
         const creditBalance = Math.max(0, selectedKaariger.creditBalance || 0);
         const total = totalRemainingAmount({
           openingBalance: openingBalance + oldKharcha,
-          weekKharchaUnpaid,
           creditBalance,
           standaloneRepairTotal,
         });
         if (!cancelled) {
-          setPendingUnpaidKharcha(weekKharchaUnpaid);
+          setPendingKharchaCarry(carryOut);
           setOutstanding(total);
         }
       } catch {
         if (!cancelled) {
-          setPendingUnpaidKharcha(0);
+          setPendingKharchaCarry(0);
           setOutstanding(
             totalRemainingAmount({
               openingBalance: currentOpening + currentOldKharcha,
@@ -455,21 +455,20 @@ export default function OrdersPage() {
     const kharchaAmount = Number(kharcha) || 0;
     // ADD = MAAL − deductions (kharcha budget is stored separately).
     const addBalance = productsTotal - deductionsTotal;
-    // Live opening = stored opening + unpaid week kharcha that will fold on send
-    // (same as Hisaab Total Remaining before credit — matches outstanding box).
-    const grossOpening = currentOpening + currentOldKharcha + pendingUnpaidKharcha;
+    // Opening = outstanding Remaining (Pay does not change it; unpaid week does not fold in).
+    const grossOpening = currentOpening + currentOldKharcha;
     const netOpening = totalRemainingAmount({
       openingBalance: grossOpening,
       creditBalance: currentCredit,
     });
     const runningAfterAdd = grossOpening + addBalance;
     const closing = Math.max(0, runningAfterAdd - kharchaAmount);
-    // Live preview: unpaid budget = full kharchaAmount (no pays yet on this new bill).
     const totalRemainingPreview = totalRemainingAmount({
       openingBalance: closing,
-      weekKharchaUnpaid: kharchaAmount,
       creditBalance: currentCredit,
     });
+    // Next box start = new budget − signed carry from prior week (overpay shrinks, underpay grows).
+    const kharchaBoxStart = kharchaAmount - pendingKharchaCarry;
 
     return {
       lines,
@@ -486,7 +485,8 @@ export default function OrdersPage() {
       runningAfterAdd,
       closing,
       totalRemainingPreview,
-      pendingUnpaidKharcha,
+      pendingKharchaCarry,
+      kharchaBoxStart,
     };
   }, [
     productLines,
@@ -496,7 +496,7 @@ export default function OrdersPage() {
     currentOpening,
     currentOldKharcha,
     currentCredit,
-    pendingUnpaidKharcha,
+    pendingKharchaCarry,
   ]);
 
   function addMaterialLine() {
@@ -615,7 +615,7 @@ export default function OrdersPage() {
         lineTotal: l.lineTotal,
       }));
 
-      // Prior unpaid week kharcha rolls into oldKharcha (sheet carry).
+      // Close prior active weeks; signed carry folds into next kharcha box only (not Remaining).
       const [orderSnap, paySnap] = await Promise.all([
         getDocs(query(collection(db, "kaariger_orders"), where("kaarigerId", "==", kaariger.phone))),
         getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaariger.phone))),
@@ -633,9 +633,10 @@ export default function OrdersPage() {
       });
 
       let openingBase = liveOpening;
-      // Any previously carried oldKharcha folds into running remaining (no longer a separate bucket).
+      // Legacy profile oldKharcha folds into Remaining once (not week unpaid).
       openingBase += liveOldKharcha;
 
+      let carryIn = 0;
       for (const d of orderSnap.docs) {
         const data = d.data();
         const status = (data.status as string) || "ASSIGNED";
@@ -656,18 +657,11 @@ export default function OrdersPage() {
           createdAt: (data.createdAt as number) || 0,
           kharchaGiven: (data.kharchaGiven as number) || 0,
           kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
+          kharchaCarryIn: (data.kharchaCarryIn as number) || 0,
         };
-        const unpaid = orderKharchaUnpaid(prev, paidByOrder.get(prev.id) || 0);
-        if (unpaid <= 0) {
-          if (status !== "COMPLETED") {
-            await updateDoc(doc(db, "kaariger_orders", prev.id), { status: "COMPLETED" });
-          }
-          continue;
-        }
-        // Unused week kharcha (given − paid) returns to Total Remaining.
-        openingBase += unpaid;
+        const paid = paidByOrder.get(prev.id) || 0;
+        carryIn += orderKharchaCarryOut(prev, paid);
         await updateDoc(doc(db, "kaariger_orders", prev.id), {
-          kharchaCarriedForward: Math.max(0, prev.kharchaCarriedForward || 0) + unpaid,
           status: "COMPLETED",
         });
       }
@@ -695,13 +689,13 @@ export default function OrdersPage() {
         materialDeductions: calc.deductionLines,
         materialDeductionsTotal: calc.deductionsTotal,
         kharchaGiven: calc.kharchaAmount,
+        kharchaCarryIn: carryIn,
         kharchaCarriedForward: 0,
         weekLabel: weekMeta.label,
         weekKey: weekMeta.key,
       };
 
-      // Running balance += ADD − week kharcha given (cash to kaariger).
-      // openingBase is CURRENT remaining after pays — not the original admin opening.
+      // Remaining += ADD − week kharcha. Carry only adjusts the Kharcha box start.
       const openingAtCreation = openingBase;
       const addBalance = orderAddBalance(order);
       const closingAtCreation = Math.max(0, openingAtCreation + addBalance - calc.kharchaAmount);
@@ -713,17 +707,26 @@ export default function OrdersPage() {
       await updateDoc(doc(db, "employees", kaariger.phone), {
         openingBalance: Math.max(0, closingAtCreation),
         oldKharcha: 0,
+        kharchaCarry: 0,
       });
 
       const totalAfterCreate = totalRemainingAmount({
         openingBalance: closingAtCreation,
-        weekKharchaUnpaid: calc.kharchaAmount,
         creditBalance: liveCredit,
       });
+      const boxStart = calc.kharchaAmount - carryIn;
       setSuccessMsg(
         `${weekMeta.label} bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
           (calc.kharchaAmount > 0
-            ? ` · Kharcha budget ${money(calc.kharchaAmount)} (Pay transfers reduce remaining; leftover returns next Saturday).`
+            ? ` · Kharcha box ${money(boxStart)}${
+                carryIn !== 0
+                  ? ` (budget ${money(calc.kharchaAmount)}${
+                      carryIn > 0
+                        ? ` − overpay ${money(carryIn)}`
+                        : ` + left ${money(-carryIn)}`
+                    })`
+                  : ""
+              }. Pay only hits the Kharcha box.`
             : ".") +
           (liveCredit > 0 ? ` Credit ${money(liveCredit)} already applied.` : "")
       );
@@ -1118,12 +1121,29 @@ export default function OrdersPage() {
             <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
             <Row label="Running balance after ADD" value={money(calc.runningAfterAdd)} bold />
             <Row label="Kharcha budget (this week)" value={money(calc.kharchaAmount)} accent />
+            {calc.pendingKharchaCarry !== 0 && (
+              <Row
+                label={
+                  calc.pendingKharchaCarry > 0
+                    ? "Prior overpay (into box)"
+                    : "Prior left unpaid (into box)"
+                }
+                value={
+                  calc.pendingKharchaCarry > 0
+                    ? `−${money(calc.pendingKharchaCarry)}`
+                    : `+${money(-calc.pendingKharchaCarry)}`
+                }
+              />
+            )}
+            {calc.kharchaAmount > 0 && (
+              <Row label="Kharcha box after send" value={money(calc.kharchaBoxStart)} bold accent />
+            )}
             <div className="my-2 border-t border-jade/20" />
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Opening is the outstanding Total Remaining (same as Hisaab). Budget alone does not drop
-            live remaining — each Pay transfer does. Unused leftover returns next Saturday.
+            Opening is outstanding Remaining (old pending + bills). Send does Remaining + ADD −
+            kharcha. Pay only updates the Kharcha box; under/over carry into next week’s box only.
           </p>
         </div>
 

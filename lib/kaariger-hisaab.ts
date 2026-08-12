@@ -1,17 +1,13 @@
 import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
 
 /**
- * Weekly Hisaab (sheet installment model):
+ * Simple Remaining + Kharcha:
  *
- *   Running / opening += ADD (MAAL − deductions − repair)
- *   Week kharcha on bill = BUDGET (stored: closing = opening + ADD − budget)
- *   Live Total Remaining = openingBalance + weekKharchaUnpaid − credit − repairs
- *     → budget alone does not drop live remaining; each Pay transfer does
- *   Kharcha box = budget − paid − carried (installment tracking)
- *   Paying week kharcha does NOT write openingBalance (unpaid term drives live drop)
- *   Next Saturday: unused (budget − paid) folds back into opening (+unused)
- *
- * Opening payments reduce openingBalance and appear line-by-line on the ledger.
+ *   Opening = old pending (part of Remaining)
+ *   Bill create: Remaining += ADD, Remaining −= week kharcha budget
+ *   Kharcha box = budget − carryIn − paid (signed; negative = overpay)
+ *   Pay only hits the Kharcha box — never Total Remaining
+ *   Carry (paid − effective budget) folds into next week's box only
  */
 
 export function orderMaal(order: KaarigerOrder): number {
@@ -28,19 +24,40 @@ export function orderRepairDeductions(order: KaarigerOrder): number {
   return Math.max(0, order.repairDeductionTotal || 0);
 }
 
-/** Full week's kharcha set on the bill (cash given / budget). */
+/** Full week's kharcha set on the bill (allotment cut from Remaining at create). */
 export function orderWeekKharcha(order: KaarigerOrder): number {
   return Math.max(0, order.kharchaGiven || 0);
 }
 
-/** Week kharcha still open on this bill (budget − rolled back as unused). */
+/**
+ * Signed carry folded into this week's box at create (paid − budget from prior week).
+ * Overpay → positive; underpay left → negative.
+ */
+export function orderKharchaCarryIn(order: KaarigerOrder): number {
+  return order.kharchaCarryIn || 0;
+}
+
+/** Week kharcha still open on this bill after legacy fold-outs (budget − rolled). */
 export function orderKharchaDue(order: KaarigerOrder): number {
   return Math.max(0, orderWeekKharcha(order) - Math.max(0, order.kharchaCarriedForward || 0));
 }
 
-/** Unpaid / unused portion still showing in the Kharcha box. */
+/**
+ * Signed Kharcha box: budget − carryIn − paid.
+ * Negative = extra paid this week (overpay).
+ */
+export function orderKharchaBalance(order: KaarigerOrder, paidOnOrder: number): number {
+  return orderKharchaDue(order) - orderKharchaCarryIn(order) - Math.max(0, paidOnOrder);
+}
+
+/** Left to pay (never negative). Prefer orderKharchaBalance for display that allows overpay. */
 export function orderKharchaUnpaid(order: KaarigerOrder, paidOnOrder: number): number {
-  return Math.max(0, orderKharchaDue(order) - Math.max(0, paidOnOrder));
+  return Math.max(0, orderKharchaBalance(order, paidOnOrder));
+}
+
+/** Carry to fold into next week: −box at close (= paid − effective start). */
+export function orderKharchaCarryOut(order: KaarigerOrder, paidOnOrder: number): number {
+  return -orderKharchaBalance(order, paidOnOrder);
 }
 
 /**
@@ -60,22 +77,21 @@ export function orderClosingAfterKharcha(openingBalance: number, order: Kaariger
 }
 
 /**
- * Live Total Remaining (sheet installment rule):
- *   stored opening (net of full week budget at create)
- *   + unpaid week kharcha still in the box (so only paid transfers reduce live remaining)
+ * Live Total Remaining:
+ *   stored openingBalance (already net of week kharcha at create)
  *   − credit − standalone repairs
+ * Pay does not change this. Unpaid week kharcha is NOT added back.
  */
 export function totalRemainingAmount(opts: {
   openingBalance: number;
-  /** Unpaid week kharcha budget (budget − carried − paid). Added back for live display. */
+  /** @deprecated Ignored — Pay no longer reduces Remaining via unpaid. Kept for call-site compat. */
   weekKharchaUnpaid?: number;
   creditBalance?: number;
   standaloneRepairTotal?: number;
 }): number {
   return Math.max(
     0,
-    Math.max(0, opts.openingBalance) +
-      Math.max(0, opts.weekKharchaUnpaid || 0) -
+    Math.max(0, opts.openingBalance) -
       Math.max(0, opts.creditBalance || 0) -
       Math.max(0, opts.standaloneRepairTotal || 0)
   );
@@ -163,11 +179,12 @@ export type HisaabLedgerLine = {
   deltaRemaining: number;
   deltaKharcha: number;
   remainingAfter: number;
+  /** Signed — can be negative after overpay. */
   kharchaAfter: number;
   at: number;
-  /** Full cash paid on this Pay (may exceed deltaRemaining when part is credit). */
+  /** Full cash paid on this Pay. */
   paidTotal?: number;
-  /** Extra parked as credit on this Pay. */
+  /** Extra parked as credit on this Pay (legacy). */
   creditAdded?: number;
 };
 
@@ -224,13 +241,10 @@ type RawEvent = {
 };
 
 /**
- * Oldest-first ledger with running Total Remaining after each line.
+ * Oldest-first ledger with running Total Remaining + signed Kharcha box.
  *
- * Opening line is GROSS (before opening payments), reconstructed from live
- * openingBalance so the ledger ends on Total Remaining even if an old bill
- * snapshot ignored a Pay.
- *
- * Week kharcha given reduces remaining; week kharcha pays only reduce the Kharcha box.
+ * Bill ADD +, week kharcha budget − Remaining once and fills the box (net of carryIn).
+ * Pay lines: deltaRemaining = 0, deltaKharcha = −paid.
  */
 export function buildHisaabLedger(opts: {
   orders: KaarigerOrder[];
@@ -251,11 +265,9 @@ export function buildHisaabLedger(opts: {
     (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
     0
   );
+  // Legacy folds that were written into openingBalance under the old model.
   const foldTotal = orders.reduce((s, o) => s + Math.max(0, o.kharchaCarriedForward || 0), 0);
 
-  // Live opening reconstructed so playback ends on OB + unpaid.
-  // Installment model: budgets/folds do not move remaining in the ledger — only Pay transfers do.
-  // Storage still writes closing = open + ADD − budget and folds unused into OB on next bill.
   const startOpening = Math.max(
     0,
     Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
@@ -272,7 +284,7 @@ export function buildHisaabLedger(opts: {
     id: "opening",
     kind: "opening",
     title: "Opening balance",
-    subtitle: "Starting balance (before payments below)",
+    subtitle: "Old pending before / starting Remaining",
     deltaRemaining: startOpening,
     deltaKharcha: 0,
     at: startAt,
@@ -284,15 +296,12 @@ export function buildHisaabLedger(opts: {
       id: "old_kharcha_balance",
       kind: "old_kharcha",
       title: "Old kharcha (on profile)",
-      subtitle: "Folds into running balance on next Saturday bill",
+      subtitle: "Legacy carry — folds into Remaining on next bill",
       deltaRemaining: oldK,
       deltaKharcha: 0,
       at: startAt + 1,
     });
   }
-
-  // Do NOT apply creditBalance at the start — that rewrites every old Remaining
-  // when an overpay creates credit. Credit is shown on the Pay line + at the end.
 
   const repair = Math.max(0, opts.standaloneRepairTotal || 0);
   if (repair > 0) {
@@ -326,15 +335,22 @@ export function buildHisaabLedger(opts: {
     }
 
     const kharcha = orderWeekKharcha(order);
-    if (kharcha > 0) {
+    const carryIn = orderKharchaCarryIn(order);
+    if (kharcha > 0 || carryIn !== 0) {
+      const boxStart = kharcha - carryIn;
+      const carryNote =
+        carryIn > 0
+          ? ` · prior overpay −${Math.round(carryIn).toLocaleString("en-IN")}`
+          : carryIn < 0
+            ? ` · prior left +${Math.round(-carryIn).toLocaleString("en-IN")}`
+            : "";
       events.push({
         id: `kharcha-${order.id}`,
         kind: "week_kharcha",
-        title: `${week.label} kharcha budget`,
-        subtitle: `Budget ${Math.round(kharcha).toLocaleString("en-IN")} — transfers below (thoda thoda) reduce Total Remaining`,
-        // Budget only fills the Kharcha box; live remaining drops on each Pay transfer.
-        deltaRemaining: 0,
-        deltaKharcha: kharcha,
+        title: `${week.label} kharcha`,
+        subtitle: `Budget ${Math.round(kharcha).toLocaleString("en-IN")} cuts Remaining; box starts ${Math.round(boxStart).toLocaleString("en-IN")}${carryNote}. Pay only hits the box.`,
+        deltaRemaining: -kharcha,
+        deltaKharcha: boxStart,
         at: t + 1,
       });
     }
@@ -346,10 +362,8 @@ export function buildHisaabLedger(opts: {
       events.push({
         id: `fold-${order.id}`,
         kind: "kharcha_fold",
-        title: `${week.label} unused kharcha cleared`,
-        subtitle:
-          "Unused budget folded into next bill’s stored opening — live Total Remaining unchanged (was never deducted)",
-        // Unpaid budget was never removed from live remaining (only transfers were), so do not +again.
+        title: `${week.label} unused kharcha cleared (legacy)`,
+        subtitle: "Old model folded unused into opening — shown for history only",
         deltaRemaining: 0,
         deltaKharcha: -carried,
         at: foldAt,
@@ -357,7 +371,6 @@ export function buildHisaabLedger(opts: {
     }
   }
 
-  // One Pay click → one ledger line (− total), even if Firestore stored splits.
   type PayBucket = {
     id: string;
     payments: KaarigerPayment[];
@@ -398,13 +411,18 @@ export function buildHisaabLedger(opts: {
         creditAmt += amount;
         continue;
       }
-      remCut += amount;
-      if (!payIsOpening(p)) kharchaCut += amount;
+      // Legacy opening / old-kharcha pays still reduced Remaining historically.
+      if (payIsOpening(p) || payIsOldKharcha(p)) {
+        remCut += amount;
+        continue;
+      }
+      // Normal week Pay: Remaining unchanged; Kharcha box only.
+      kharchaCut += amount;
     }
 
     if (paidTotal <= 0) continue;
 
-    if (remCut <= 0 && creditAmt > 0) {
+    if (remCut <= 0 && kharchaCut <= 0 && creditAmt > 0) {
       events.push({
         id: `pay-batch-${g.id}`,
         kind: "credit",
@@ -422,9 +440,13 @@ export function buildHisaabLedger(opts: {
     }
 
     const subtitleParts = [g.date, g.time].filter(Boolean);
-    if (creditAmt > 0) {
+    if (kharchaCut > 0 && remCut <= 0) {
       subtitleParts.push(
-        `Paid ₹${Math.round(paidTotal).toLocaleString("en-IN")} · Remaining ₹0 · Credit ₹${Math.round(creditAmt).toLocaleString("en-IN")}`
+        `Paid ₹${Math.round(paidTotal).toLocaleString("en-IN")} · Kharcha box only (Remaining unchanged)`
+      );
+    } else if (creditAmt > 0) {
+      subtitleParts.push(
+        `Paid ₹${Math.round(paidTotal).toLocaleString("en-IN")} · Credit ₹${Math.round(creditAmt).toLocaleString("en-IN")}`
       );
     }
 
@@ -433,7 +455,6 @@ export function buildHisaabLedger(opts: {
       kind: "payment",
       title: "Paid",
       subtitle: subtitleParts.join(" · "),
-      // Math only clears what was owed; display uses paidTotal (full 10k) so admin finds the Pay.
       deltaRemaining: -remCut,
       deltaKharcha: -kharchaCut,
       at: g.at,
@@ -446,7 +467,6 @@ export function buildHisaabLedger(opts: {
   const creditFromPays = payments
     .filter(payIsCredit)
     .reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
-  // Show current credit once at the end (profile may differ slightly from sum of rows).
   const creditShow = Math.max(creditBal, creditFromPays);
   if (creditShow > 0) {
     const lastPayAt = paymentGroupsChrono.reduce((m, g) => Math.max(m, g.at), startAt);
@@ -469,7 +489,7 @@ export function buildHisaabLedger(opts: {
   const lines: HisaabLedgerLine[] = [];
   for (const e of events) {
     remaining = Math.max(0, remaining + e.deltaRemaining);
-    kharchaBox = Math.max(0, kharchaBox + e.deltaKharcha);
+    kharchaBox = kharchaBox + e.deltaKharcha;
     lines.push({
       ...e,
       remainingAfter: remaining,
@@ -481,7 +501,6 @@ export function buildHisaabLedger(opts: {
 
 /**
  * Gross opening before any opening payments (for Hisaab "was the opening" copy).
- * Same reconstruction as the ledger opening line.
  */
 export function grossOpeningBeforePays(opts: {
   orders: KaarigerOrder[];

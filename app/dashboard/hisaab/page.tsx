@@ -36,7 +36,13 @@ import {
   paymentKind,
   paymentLabel,
 } from "@/lib/kaariger-pay";
-import { buildHisaabLedger, grossOpeningBeforePays, orderKharchaUnpaid, orderWeekMeta } from "@/lib/kaariger-hisaab";
+import {
+  buildHisaabLedger,
+  grossOpeningBeforePays,
+  orderKharchaBalance,
+  orderWeekMeta,
+  totalRemainingAmount,
+} from "@/lib/kaariger-hisaab";
 import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -173,6 +179,7 @@ export default function HisaabPage() {
             materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
             kharchaGiven: data.kharchaGiven as number | undefined,
             kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
+            kharchaCarryIn: data.kharchaCarryIn as number | undefined,
             weekLabel: data.weekLabel as string | undefined,
             weekKey: data.weekKey as string | undefined,
             openingAtCreation: data.openingAtCreation as number | undefined,
@@ -339,14 +346,14 @@ export default function HisaabPage() {
     const weekKharcha = activeOrders.reduce((s, o) => s + Math.max(0, o.kharchaGiven || 0), 0);
     const paid = activeOrders.reduce((s, o) => s + (orderPaidMap.get(o.id) || 0), 0);
     const balance = activeOrders.reduce(
-      (s, o) => s + orderKharchaUnpaid(o, orderPaidMap.get(o.id) || 0),
+      (s, o) => s + orderKharchaBalance(o, orderPaidMap.get(o.id) || 0),
       0
     );
     return { deal: weekKharcha, paid, balance };
   }, [activeOrders, orderPaidMap]);
 
-  // Running balance (opening) + this week's unpaid kharcha = Total Remaining.
-  // Kharcha box shows only this week's unpaid (old carry is folded into opening on next Saturday).
+  // Opening (old pending + bill closings) − credit − repairs = Total Remaining.
+  // Kharcha box is signed (can be negative after overpay). Pay never changes Remaining.
   const openingBal = Math.max(0, selectedKaariger?.openingBalance || 0);
   const oldKharchaBal = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
@@ -361,10 +368,10 @@ export default function HisaabPage() {
         .reduce((s, r) => s + (r.totalRepairCost || 0), 0),
     [repairs]
   );
-  /** Legacy oldKharcha still on profile until next Saturday bill folds it in. */
+  /** Legacy oldKharcha still on profile until next Saturday bill folds it into Remaining. */
   const runningBalance = openingBal + oldKharchaBal;
-  const weekKharchaUnpaid = activeTotals.balance;
-  const kharchaRemaining = weekKharchaUnpaid;
+  const kharchaBox = activeTotals.balance;
+  const kharchaRemaining = kharchaBox;
   const weekKharchaBudget = activeTotals.deal;
   const weekKharchaPaid = activeTotals.paid;
   /** This week's transfer payments (line-wise for Kharcha breakdown). Oldest first like the sheet. */
@@ -388,12 +395,16 @@ export default function HisaabPage() {
         ),
     [payments]
   );
-  // Live Remaining = stored opening + unpaid week kharcha − credit − repairs
-  // (budget alone does not drop live; each Pay transfer does).
-  const grossOwed = runningBalance + weekKharchaUnpaid;
-  const totalRemaining = Math.max(0, grossOwed - creditBal - standaloneRepairTotal);
-  const surplusCredit = Math.max(0, creditBal - Math.max(0, grossOwed - standaloneRepairTotal));
-  const creditAppliedToRemaining = Math.min(creditBal, Math.max(0, grossOwed - standaloneRepairTotal));
+  const totalRemaining = totalRemainingAmount({
+    openingBalance: runningBalance,
+    creditBalance: creditBal,
+    standaloneRepairTotal,
+  });
+  const surplusCredit = Math.max(0, creditBal - Math.max(0, runningBalance - standaloneRepairTotal));
+  const creditAppliedToRemaining = Math.min(
+    creditBal,
+    Math.max(0, runningBalance - standaloneRepairTotal)
+  );
   const openingPayments = useMemo(
     () =>
       payments
@@ -475,7 +486,7 @@ export default function HisaabPage() {
     rows.push([`Hisaab Statement — ${selectedKaariger.name}`]);
     rows.push([`Phone: ${selectedKaariger.phone}`]);
     rows.push([`Generated: ${new Date().toLocaleString("en-IN")}`]);
-    if (grossOwed > 0 || creditBal > 0) {
+    if (runningBalance > 0 || creditBal > 0 || Math.abs(kharchaBox) > 0) {
       rows.push([
         `Remaining balance (opening + bills − credit): ${money(totalRemaining)}`,
       ]);
@@ -488,8 +499,10 @@ export default function HisaabPage() {
             : [`  Opening balance: ${money(openingBal)}`]
         );
       }
-      if (activeTotals.balance > 0) rows.push([`  Unpaid bills: ${money(activeTotals.balance)}`]);
-      if (creditBal > 0) rows.push([`  Credit applied to remaining: ${money(Math.min(creditBal, grossOwed))}`]);
+      if (kharchaBox !== 0) rows.push([`  Kharcha box: ${money(kharchaBox)}`]);
+      if (creditBal > 0) {
+        rows.push([`  Credit applied to remaining: ${money(creditAppliedToRemaining)}`]);
+      }
       if (surplusCredit > 0) {
         rows.push([`Credit left for next bill: ${money(surplusCredit)}`]);
       }
@@ -503,7 +516,7 @@ export default function HisaabPage() {
     orders.forEach((o) => {
       const weekKharcha = Math.max(0, o.kharchaGiven || 0);
       const paid = orderPaidMap.get(o.id) || 0;
-      const balance = orderKharchaUnpaid(o, paid);
+      const balance = orderKharchaBalance(o, paid);
       allDeal += weekKharcha;
       allPaid += paid;
       rows.push([
@@ -515,7 +528,7 @@ export default function HisaabPage() {
         String(Math.round(balance)),
       ]);
     });
-    rows.push(["", "", "TOTAL", String(Math.round(allDeal)), String(Math.round(allPaid)), String(Math.round(Math.max(0, allDeal - allPaid)))]);
+    rows.push(["", "", "TOTAL", String(Math.round(allDeal)), String(Math.round(allPaid)), String(Math.round(allDeal - allPaid))]);
     rows.push([]);
 
     if (payments.length > 0) {
@@ -680,12 +693,14 @@ export default function HisaabPage() {
                 title="See kharcha payments line by line"
               >
                 <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
-                  Kharcha
+                  Kharcha box
                 </p>
                 <p className="font-display text-base font-bold text-jade-deep">
                   {money(kharchaRemaining)}
                 </p>
-                <p className="text-[10px] text-jade-deep/80">Tap for kharcha records</p>
+                <p className="text-[10px] text-jade-deep/80">
+                  {kharchaRemaining < 0 ? "Extra paid · tap records" : "Tap for kharcha records"}
+                </p>
               </button>
               {totalRemaining <= 0 && surplusCredit > 0 && (
                 <div className="rounded-xl bg-jade-soft px-3 py-2 text-right">
@@ -793,7 +808,7 @@ export default function HisaabPage() {
 
               {paymentGroups.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
-                  No payments yet. Use Pay — amount is cut from Total Remaining.
+                  No payments yet. Use Pay — amount hits the Kharcha box only (Remaining unchanged).
                 </p>
               ) : (
                 <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
@@ -820,7 +835,7 @@ export default function HisaabPage() {
                             −{money(g.total)}
                           </p>
                           <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                            {creditPart > 0 ? "Pay + credit" : "Total Remaining"}
+                            {creditPart > 0 ? "Pay + credit" : "Kharcha box"}
                           </p>
                         </div>
                       </div>
@@ -841,7 +856,7 @@ export default function HisaabPage() {
 
           {(openingBal > 0 ||
             oldKharchaBal > 0 ||
-            activeTotals.balance > 0 ||
+            Math.abs(kharchaBox) > 0 ||
             creditBal > 0 ||
             openingPaidTotal > 0 ||
             standaloneRepairTotal > 0) && (
@@ -849,9 +864,10 @@ export default function HisaabPage() {
               <p className="text-sm text-[var(--text-muted)]">
                 <span className="font-semibold text-[var(--text)]">Total remaining</span>{" "}
                 {money(totalRemaining)}
-                {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Budget on
-                bill; Total Remaining falls only when you Pay; leftover returns next Saturday. Tap
-                Total remaining for the full ledger.
+                {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening =
+                old pending inside Remaining. Pay only hits the Kharcha box
+                {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}. Tap Total remaining
+                for the ledger.
               </p>
             </div>
           )}
@@ -911,8 +927,7 @@ export default function HisaabPage() {
                     <div className="overflow-hidden rounded-xl border border-[var(--border)]">
                       {ledgerLines.map((line, idx) => {
                         const delta = line.deltaRemaining;
-                        const isBudget =
-                          line.kind === "week_kharcha" && delta === 0 && line.deltaKharcha > 0;
+                        const isWeekKharcha = line.kind === "week_kharcha";
                         const isCreditLine = line.kind === "credit";
                         const showPayAmount =
                           line.kind === "payment" && (line.paidTotal || 0) > 0
@@ -920,8 +935,10 @@ export default function HisaabPage() {
                             : null;
                         const deltaLabel = isCreditLine
                           ? `Credit ${money(line.creditAdded || 0)}`
-                          : isBudget
-                            ? "Budget"
+                          : isWeekKharcha
+                            ? delta < 0
+                              ? `−${money(Math.abs(delta))}`
+                              : "Kharcha"
                             : showPayAmount != null
                               ? `−${money(showPayAmount)}`
                               : delta === 0
@@ -957,13 +974,11 @@ export default function HisaabPage() {
                                   className={`text-sm font-bold ${
                                     isCreditLine
                                       ? "text-jade-deep"
-                                      : isBudget
-                                        ? "text-jade-deep"
-                                        : showPayAmount != null || delta < 0
-                                          ? "text-danger"
-                                          : delta > 0
-                                            ? "text-jade-deep"
-                                            : "text-[var(--text-muted)]"
+                                      : isWeekKharcha || showPayAmount != null || delta < 0
+                                        ? "text-danger"
+                                        : delta > 0
+                                          ? "text-jade-deep"
+                                          : "text-[var(--text-muted)]"
                                   }`}
                                 >
                                   {deltaLabel}
@@ -973,9 +988,18 @@ export default function HisaabPage() {
                                     Credit
                                   </p>
                                 ) : (
-                                  <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                                    Remaining {money(line.remainingAfter)}
-                                  </p>
+                                  <>
+                                    <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                                      Remaining {money(line.remainingAfter)}
+                                    </p>
+                                    {(isWeekKharcha ||
+                                      line.kind === "payment" ||
+                                      line.kind === "kharcha_fold") && (
+                                      <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-jade-deep">
+                                        Box {money(line.kharchaAfter)}
+                                      </p>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -1059,7 +1083,7 @@ export default function HisaabPage() {
                       </div>
                       <div className="bg-white px-3 py-3 text-center">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                          Left
+                          {kharchaRemaining < 0 ? "Extra" : "Left"}
                         </p>
                         <p className="mt-1 font-display text-lg font-bold text-amber-900">
                           {money(kharchaRemaining)}
@@ -1067,8 +1091,10 @@ export default function HisaabPage() {
                       </div>
                     </div>
                     <p className="border-t border-jade/15 px-3 py-2 text-center text-[11px] text-[var(--text-muted)]">
-                      {money(weekKharchaBudget)} − {money(weekKharchaPaid)} paid ={" "}
-                      {money(kharchaRemaining)} left
+                      Box {money(kharchaRemaining)}
+                      {kharchaRemaining < 0
+                        ? " (overpay — next week’s box shrinks)"
+                        : " · Pay only hits this box; Remaining unchanged"}
                     </p>
                   </div>
 
@@ -1129,13 +1155,14 @@ export default function HisaabPage() {
 
                   <div className="rounded-xl bg-amber-50 px-3 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                      After kharcha — Total Remaining
+                      Total Remaining (unchanged by Pay)
                     </p>
                     <p className="font-display text-xl font-bold text-amber-900">
                       {money(totalRemaining)}
                     </p>
                     <p className="mt-0.5 text-[11px] text-amber-800/80">
-                      Same as Hisaab header. Leftover kharcha returns next Saturday.
+                      Moves only on bill create (+ADD − kharcha). Under/over pay carries into next
+                      week’s Kharcha box.
                     </p>
                   </div>
                 </div>
@@ -1144,17 +1171,14 @@ export default function HisaabPage() {
           )}
 
           {openingPaidTotal > 0 && (
-            <div className="surface space-y-2 p-4">
+            <div className="surface space-y-2 p-4 opacity-90">
               <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                Opening payments (with date &amp; time)
+                Legacy opening payments
               </p>
               <p className="mb-2 text-xs text-[var(--text-muted)]">
-                {orders.length > 0
-                  ? `${money(openingPaidTotal)} paid against opening · live Total Remaining ${money(totalRemaining)}` +
-                    (openingBal !== totalRemaining
-                      ? ` (stored opening ${money(openingBal)}${weekKharchaUnpaid > 0 ? ` + unpaid kharcha ${money(weekKharchaUnpaid)}` : ""})`
-                      : "")
-                  : `${money(originalOpening)} was the opening · ${money(openingPaidTotal)} paid · ${money(openingBal)} still pending`}
+                Older pays against opening (before weekly Pay → Kharcha-only). Weekly Pay no longer
+                settles opening. Live Remaining {money(totalRemaining)}
+                {openingBal > 0 ? ` · stored opening ${money(openingBal)}` : ""}.
               </p>
               <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
                 {openingPayments.map((p) => (
@@ -1176,14 +1200,12 @@ export default function HisaabPage() {
                     </div>
                   </div>
                 ))}
-                <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
-                  <span className="font-bold text-jade-deep">
-                    {orders.length > 0
-                      ? `Opening pays ${money(openingPaidTotal)}`
-                      : `${money(originalOpening)} − ${money(openingPaidTotal)} = ${money(openingBal)}`}
+                <div className="flex items-center justify-between bg-[var(--surface-mist)] px-3 py-2 text-sm">
+                  <span className="font-medium text-[var(--text-muted)]">
+                    Opening pays {money(openingPaidTotal)}
                   </span>
-                  <span className="font-bold text-jade-deep">
-                    Live remaining {money(totalRemaining)}
+                  <span className="font-bold text-amber-900">
+                    Remaining {money(totalRemaining)}
                   </span>
                 </div>
               </div>
@@ -1216,23 +1238,20 @@ export default function HisaabPage() {
             <>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="stat-card">
-                  <p className="stat-card-label">Active Deal</p>
+                  <p className="stat-card-label">Week kharcha budget</p>
                   <p className="stat-card-value">{money(activeTotals.deal)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Kharcha on bills</p>
+                  <p className="stat-card-label">Paid on kharcha</p>
                   <p className="stat-card-value text-jade-deep">{money(activeTotals.paid)}</p>
                 </div>
                 <div className="stat-card">
-                  <p className="stat-card-label">Bill balance</p>
+                  <p className="stat-card-label">Kharcha box</p>
                   <p className="stat-card-value">{money(activeTotals.balance)}</p>
                   <p className="mt-1 text-[10px] text-[var(--text-muted)]">
-                    Live remaining {money(totalRemaining)}
-                    {weekKharchaUnpaid > 0
-                      ? ` = stored ${money(openingBal)} + unpaid kharcha ${money(weekKharchaUnpaid)}`
-                      : openingBal > 0
-                        ? ` (opening ${money(openingBal)})`
-                        : ""}
+                    Remaining {money(totalRemaining)}
+                    {openingBal > 0 ? ` · opening ${money(openingBal)}` : ""}
+                    {activeTotals.balance < 0 ? " · extra paid" : ""}
                   </p>
                 </div>
               </div>
@@ -1265,7 +1284,7 @@ export default function HisaabPage() {
           <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setHistoryOrderId("")} />
           <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
             <div
-              className="max-h-[88vh] w-full max-w-2xl overflow-y-auto"
+              className="max-h-[88vh] w-full max-w-4xl overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-2 flex justify-end">
@@ -1278,11 +1297,7 @@ export default function HisaabPage() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <OrderDetailCard
-                order={historyOrder}
-                payments={payments}
-                repairs={repairs}
-              />
+              <PreviousHisaabCard order={historyOrder} payments={payments} repairs={repairs} />
             </div>
           </div>
         </>
@@ -1307,9 +1322,11 @@ export default function HisaabPage() {
                 <div>
                   <h3 className="font-display text-lg font-bold">Pay / transfer</h3>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Amount is cut from Total Remaining. Example: remaining 28k, Pay 20k → remaining
-                    8k.
-                    {totalRemaining > 0 ? ` Now: ${money(totalRemaining)}.` : ""}
+                    Hits the Kharcha box only — Total Remaining stays the same. Overpay is OK (box
+                    goes negative and carries into next week).
+                    {Math.abs(kharchaRemaining) > 0 || weekKharchaBudget > 0
+                      ? ` Box now: ${money(kharchaRemaining)}.`
+                      : ""}
                   </p>
                 </div>
                 <button
@@ -1404,6 +1421,160 @@ function CalcRow({
   );
 }
 
+/**
+ * Previous hisaab: two columns —
+ * 1) Week bill (products / deductions / ADD / outstanding before & after)
+ * 2) Kharcha that week (budget, each Pay, paid total, left or extra)
+ */
+function PreviousHisaabCard({
+  order,
+  payments,
+  repairs,
+}: {
+  order: KaarigerOrder;
+  payments: KaarigerPayment[];
+  repairs: OrderRepair[];
+}) {
+  const week = orderWeekMeta(order);
+  const orderPayments = payments
+    .filter((p) => p.orderId === order.id)
+    .sort((a, b) => `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`));
+  const orderRepairs = repairs.filter((r) => r.orderId === order.id && isApprovedRepair(r));
+  const productsTotal = order.productsTotal ?? 0;
+  const deductionLines = order.materialDeductions || [];
+  const deductionsTotal =
+    order.materialDeductionsTotal ??
+    deductionLines.reduce((s, it) => s + (it.lineTotal || 0), 0);
+  const repairTotal =
+    order.repairDeductionTotal || orderRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
+  const weekKharcha = Math.max(0, order.kharchaGiven || 0);
+  const carryIn = order.kharchaCarryIn || 0;
+  const addBalance =
+    order.addBalance != null ? order.addBalance : productsTotal - deductionsTotal - repairTotal;
+  const opening =
+    order.openingAtCreation != null ? Math.max(0, order.openingAtCreation) : 0;
+  const closing =
+    order.closingAtCreation != null
+      ? order.closingAtCreation
+      : Math.max(0, opening + addBalance - weekKharcha);
+  const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
+  const box = orderKharchaBalance(order, paid);
+
+  return (
+    <div className="surface space-y-4 p-4">
+      <div>
+        <p className="font-display text-lg font-bold">{week.label}</p>
+        <p className="text-xs text-[var(--text-muted)]">
+          {formatDate(order.createdAt)}
+          {order.productName ? ` · ${order.productName}` : ""} · Previous hisaab
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded-2xl border border-[var(--border)] p-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
+            Week bill
+          </p>
+          <div className="space-y-1 text-sm">
+            <Row label="Outstanding before" value={money(opening)} accent="amber" />
+            {order.products && order.products.length > 0 && (
+              <>
+                {order.products.map((p, i) => (
+                  <Row
+                    key={i}
+                    label={`${p.productName} (${p.quantity}×₹${p.pricePerPiece})`}
+                    value={money(p.lineTotal)}
+                  />
+                ))}
+                <Row label="MAAL" value={money(productsTotal)} bold />
+              </>
+            )}
+            {deductionLines.map((it, i) => (
+              <Row
+                key={`${it.type}-${i}`}
+                label={`Less: ${it.label || it.type}`}
+                value={`−${money(it.lineTotal)}`}
+              />
+            ))}
+            {repairTotal > 0 && (
+              <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
+            )}
+            <div className="my-1 border-t border-[var(--border)]" />
+            <Row label="ADD" value={money(addBalance)} bold />
+            {weekKharcha > 0 && (
+              <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
+            )}
+            <Row label="Outstanding after create" value={money(closing)} bold accent="amber" />
+          </div>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            {money(opening)} + {money(addBalance)} ADD − {money(weekKharcha)} kharcha ={" "}
+            {money(closing)} Remaining. Pays that week did not change Remaining.
+          </p>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border border-jade/25 bg-jade-soft/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-jade-deep">
+            Kharcha that week
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-center text-sm">
+            <div className="rounded-xl bg-white/80 px-2 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                Budget
+              </p>
+              <p className="font-bold text-jade-deep">{money(weekKharcha)}</p>
+            </div>
+            <div className="rounded-xl bg-white/80 px-2 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                Paid
+              </p>
+              <p className="font-bold text-jade-deep">{money(paid)}</p>
+            </div>
+            <div className="rounded-xl bg-white/80 px-2 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                {box < 0 ? "Extra" : "Left"}
+              </p>
+              <p className="font-bold text-amber-900">{money(box)}</p>
+            </div>
+          </div>
+          {carryIn !== 0 && (
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Carry into this week:{" "}
+              {carryIn > 0
+                ? `−${money(carryIn)} (prior overpay)`
+                : `+${money(-carryIn)} (prior left)`}
+            </p>
+          )}
+          {orderPayments.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-jade/30 px-3 py-4 text-center text-sm text-[var(--text-muted)]">
+              No Pay recorded this week.
+            </p>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-jade/20 bg-white/70">
+              {orderPayments.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between gap-3 border-b border-jade/10 px-3 py-2 text-sm last:border-b-0"
+                >
+                  <p className="font-medium">
+                    {formatDisplayDate(p.date)}
+                    {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
+                    {p.createdBy ? ` · ${p.createdBy}` : ""}
+                  </p>
+                  <span className="shrink-0 font-bold text-jade-deep">{money(p.amount)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2 text-sm">
+                <span className="font-bold text-jade-deep">Paid total</span>
+                <span className="font-bold text-jade-deep">{money(paid)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Full, self-contained breakdown for a single order — products, deductions,
  * repairs and kharcha timeline all scoped to just this one order. Orders are
  * never merged together; each gets rendered as its own card. */
@@ -1432,10 +1603,10 @@ function OrderDetailCard({
 
   const net = orderNetDeal(order);
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
-  const weekKharchaUnpaid = orderKharchaUnpaid(order, paid);
-  const balance = weekKharchaUnpaid;
+  const box = orderKharchaBalance(order, paid);
+  const balance = box;
   const week = orderWeekMeta(order);
-  const isCompleted = order.status === "COMPLETED" || weekKharchaUnpaid <= 0;
+  const isCompleted = order.status === "COMPLETED";
 
   return (
     <div className="surface space-y-4 p-4">
@@ -1501,10 +1672,10 @@ function OrderDetailCard({
               isCompleted ? "text-jade-deep" : "text-amber-700"
             }`}
           >
-            Balance
+            {balance < 0 ? "Extra" : "Kharcha box"}
           </p>
           <p className={`font-display text-sm font-bold ${isCompleted ? "text-jade-deep" : "text-amber-700"}`}>
-            {isCompleted ? "All Paid" : money(balance)}
+            {isCompleted && balance === 0 ? "Settled" : money(balance)}
           </p>
         </div>
       </div>
@@ -1626,9 +1797,9 @@ function OrderDetailCard({
               </div>
               <div className="bg-[var(--surface)] px-2 py-2">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Left
+                  {box < 0 ? "Extra" : "Box"}
                 </p>
-                <p className="font-bold text-amber-900">{money(weekKharchaUnpaid)}</p>
+                <p className="font-bold text-amber-900">{money(box)}</p>
               </div>
             </div>
             {orderPayments
@@ -1699,9 +1870,9 @@ function GrandTotalBox({
       : Math.max(0, opening + addBalance - weekKharcha);
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
-  const weekUnpaid = orderKharchaUnpaid(order, paid);
-  /** Live remaining for this bill view = sheet closing + unpaid budget still in box. */
-  const totalRemainingHere = Math.max(0, closing + old + weekUnpaid);
+  const box = orderKharchaBalance(order, paid);
+  /** Remaining after this bill create (Pay does not change it). */
+  const totalRemainingHere = Math.max(0, closing + old);
   const transferLines = [...payments].sort((a, b) =>
     `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
   );
@@ -1733,23 +1904,23 @@ function GrandTotalBox({
         <Row label="ADD BALANCE" value={money(addBalance)} bold />
         <Row label="After ADD" value={money(opening + addBalance)} bold />
         {weekKharcha > 0 && (
-          <Row label="Kharcha budget (sheet)" value={`−${money(weekKharcha)}`} accent="green" />
+          <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
         )}
-        <Row label="Bill closing (sheet)" value={money(closing)} bold accent="amber" />
+        <Row label="Outstanding after create" value={money(closing)} bold accent="amber" />
         <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-          {money(opening)} + {money(addBalance)} add − {money(weekKharcha)} budget = {money(closing)}{" "}
-          stored. Live Total Remaining follows Pay transfers.
+          {money(opening)} + {money(addBalance)} ADD − {money(weekKharcha)} = {money(closing)}. Pay
+          only updates the Kharcha box.
         </p>
 
         <div className="my-1.5 border-t border-jade/20" />
         <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
-          Kharcha records
+          Kharcha box
         </p>
         <div className="mt-1 overflow-hidden rounded-xl border border-jade/20 bg-white/70">
           <div className="grid grid-cols-3 gap-px bg-jade/10 text-center text-sm">
             <div className="bg-white px-2 py-2">
               <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                Total
+                Budget
               </p>
               <p className="font-bold text-jade-deep">{money(weekKharcha)}</p>
             </div>
@@ -1761,9 +1932,9 @@ function GrandTotalBox({
             </div>
             <div className="bg-white px-2 py-2">
               <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                Left
+                {box < 0 ? "Extra" : "Left"}
               </p>
-              <p className="font-bold text-amber-900">{money(weekUnpaid)}</p>
+              <p className="font-bold text-amber-900">{money(box)}</p>
             </div>
           </div>
           {transferLines.length > 0 ? (
@@ -1785,19 +1956,20 @@ function GrandTotalBox({
             </div>
           ) : (
             <p className="border-t border-jade/10 px-3 py-2 text-[11px] text-[var(--text-muted)]">
-              No kharcha pays yet — Pay thoda thoda against this budget.
+              No kharcha pays yet — Pay hits this box only.
             </p>
           )}
         </div>
         <div className="my-1.5 border-t border-jade/20" />
         <Row
-          label="Live total remaining"
+          label="Total remaining"
           value={money(totalRemainingHere)}
           bold
           accent={totalRemainingHere > 0 ? "amber" : "green"}
         />
         <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-          After kharcha pays. Unused left ({money(weekUnpaid)}) returns next Saturday if not paid.
+          Same as after bill create. Box left/extra ({money(box)}) carries into next week’s kharcha
+          only.
         </p>
       </div>
     </div>
