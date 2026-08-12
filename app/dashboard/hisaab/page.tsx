@@ -217,25 +217,20 @@ export default function HisaabPage() {
         });
       setPayments(loadedPayments);
 
-      // Self-heal stored credit from order overpayments only.
-      // Opening / old-remaining payments and advance ledger rows are excluded —
-      // they must not inflate or wipe creditBalance.
-      const totalDealAll = loadedOrders.reduce((s, o) => s + orderNetDeal(o), 0);
-      const totalFreshCashPaid = loadedPayments
-        .filter(
-          (p) =>
-            !isOpeningPayment(p) &&
-            p.remarks !== "Credit carried from previous overpaid bill" &&
-            p.remarks !== "Extra kharcha — carried as credit"
-        )
-        .reduce((s, p) => s + p.amount, 0);
-      const correctCredit = Math.max(0, totalFreshCashPaid - totalDealAll);
-      const storedCredit = kaarigers.find((k) => k.phone === id)?.creditBalance || 0;
-      // Only heal upward (legacy under-credit bug). Never wipe opening/advance credit.
-      if (correctCredit > storedCredit + 0.5) {
-        await updateDoc(doc(db, "employees", id), { creditBalance: correctCredit });
+      // creditBalance must only come from real credit/advance pays — never invent
+      // credit from (week kharcha paid − ADD). That wrongly cut Remaining when
+      // overpaying the Kharcha box (extra stays on the box / next-week carry only).
+      const explicitCredit = loadedPayments
+        .filter(isCreditPayment)
+        .reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
+      const storedCredit = Math.max(
+        0,
+        kaarigers.find((k) => k.phone === id)?.creditBalance || 0
+      );
+      if (storedCredit > explicitCredit + 0.5) {
+        await updateDoc(doc(db, "employees", id), { creditBalance: explicitCredit });
         setKaarigers((prev) =>
-          prev.map((k) => (k.phone === id ? { ...k, creditBalance: correctCredit } : k))
+          prev.map((k) => (k.phone === id ? { ...k, creditBalance: explicitCredit } : k))
         );
       }
 
@@ -923,8 +918,11 @@ export default function HisaabPage() {
                 {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening =
                 old pending inside Remaining. Use <strong>Pay</strong> inside Total remaining to cut
                 it; week Pay hits the Kharcha box
-                {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}. If there is no
-                kharcha, the main Pay button settles Remaining.
+                {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}
+                {kharchaBox < 0
+                  ? " — extra stays on the box (next week carry), Remaining unchanged"
+                  : ""}
+                . If there is no kharcha, the main Pay button settles Remaining.
               </p>
             </div>
           )}
