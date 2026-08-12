@@ -483,6 +483,19 @@ export default function HisaabPage() {
     [orders, payments, openingBal, oldKharchaBal, creditBal, standaloneRepairTotal]
   );
 
+  /** Remaining breakdown: only lines that move Total Remaining (no kharcha-only Pays). */
+  const remainingLedgerLines = useMemo(
+    () =>
+      ledgerLines.filter((line) => {
+        if (line.kind === "payment" || line.kind === "credit") {
+          return line.deltaRemaining !== 0;
+        }
+        if (line.kind === "kharcha_fold") return false;
+        return true;
+      }),
+    [ledgerLines]
+  );
+
   function exportStatement() {
     if (!selectedKaariger) return;
     const rows: string[][] = [];
@@ -675,11 +688,11 @@ export default function HisaabPage() {
               </p>
             </div>
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-              <div className="flex items-stretch gap-1.5">
+              <div className="flex flex-col gap-1.5 rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 sm:min-w-[9.5rem]">
                 <button
                   type="button"
                   onClick={() => setShowRemainingBreakdown(true)}
-                  className="rounded-xl bg-[rgba(232,168,56,0.15)] px-3 py-2 text-left transition hover:bg-[rgba(232,168,56,0.25)] sm:text-right"
+                  className="text-left transition hover:opacity-90 sm:text-right"
                   title="See how total remaining is calculated"
                 >
                   <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
@@ -688,14 +701,15 @@ export default function HisaabPage() {
                   <p className="font-display text-base font-bold text-amber-900">
                     {money(totalRemaining)}
                   </p>
-                  <p className="text-[10px] text-amber-800/80">Tap for full ledger</p>
+                  <p className="text-[10px] text-amber-800/80">Tap for breakdown</p>
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary whitespace-nowrap !px-2.5"
+                  className="btn btn-secondary btn-sm w-full justify-center !bg-white/70"
                   title="Pay against Total Remaining"
                   disabled={totalRemaining <= 0 && surplusCredit <= 0}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setPayTarget("remaining");
                     setShowUnifiedPay(true);
                     setPayOrderId(null);
@@ -703,15 +717,15 @@ export default function HisaabPage() {
                     setPayMsg("");
                   }}
                 >
-                  <IndianRupee className="h-4 w-4" />
+                  <IndianRupee className="h-3.5 w-3.5" />
                   Pay
                 </button>
               </div>
-              <div className="flex items-stretch gap-1.5">
+              <div className="flex flex-col gap-1.5 rounded-xl bg-jade-soft px-3 py-2 sm:min-w-[9.5rem]">
                 <button
                   type="button"
                   onClick={() => setShowKharchaBreakdown(true)}
-                  className="rounded-xl bg-jade-soft px-3 py-2 text-left transition hover:bg-jade-soft/80 sm:text-right"
+                  className="text-left transition hover:opacity-90 sm:text-right"
                   title="See kharcha payments line by line"
                 >
                   <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
@@ -727,9 +741,10 @@ export default function HisaabPage() {
                 {weekKharchaBudget > 0 && (
                   <button
                     type="button"
-                    className="btn btn-secondary whitespace-nowrap !px-2.5"
+                    className="btn btn-secondary btn-sm w-full justify-center !bg-white/70"
                     title="Pay against Kharcha box"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setPayTarget("kharcha");
                       setShowUnifiedPay(true);
                       setPayOrderId(null);
@@ -737,7 +752,7 @@ export default function HisaabPage() {
                       setPayMsg("");
                     }}
                   >
-                    <IndianRupee className="h-4 w-4" />
+                    <IndianRupee className="h-3.5 w-3.5" />
                     Pay
                   </button>
                 )}
@@ -906,8 +921,8 @@ export default function HisaabPage() {
                 <span className="font-semibold text-[var(--text)]">Total remaining</span>{" "}
                 {money(totalRemaining)}
                 {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening =
-                old pending inside Remaining. Use <strong>Pay</strong> next to Total remaining to
-                cut it; week Pay hits the Kharcha box
+                old pending inside Remaining. Use <strong>Pay</strong> inside Total remaining to cut
+                it; week Pay hits the Kharcha box
                 {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}. If there is no
                 kharcha, the main Pay button settles Remaining.
               </p>
@@ -927,9 +942,9 @@ export default function HisaabPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-display text-lg font-bold">Hisaab ledger</h3>
+                      <h3 className="font-display text-lg font-bold">Remaining breakdown</h3>
                       <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-                        Line by line — oldest first. Running Total Remaining after each row.
+                        Only lines that change Total Remaining. Kharcha Pays stay in the Kharcha box.
                       </p>
                     </div>
                     <button
@@ -942,52 +957,39 @@ export default function HisaabPage() {
                     </button>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 text-sm">
-                    <div className="rounded-xl bg-amber-50 px-3 py-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                        Total remaining
-                      </p>
-                      <p className="font-display text-lg font-bold text-amber-900">
-                        {money(totalRemaining)}
-                      </p>
-                    </div>
-                    <div className="rounded-xl bg-jade-soft px-3 py-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-jade-deep">
-                        Kharcha (this week)
-                      </p>
-                      <p className="font-display text-lg font-bold text-jade-deep">
-                        {money(kharchaRemaining)}
-                      </p>
-                    </div>
+                  <div className="rounded-xl bg-amber-50 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                      Total remaining
+                    </p>
+                    <p className="font-display text-lg font-bold text-amber-900">
+                      {money(totalRemaining)}
+                    </p>
                   </div>
 
-                  {ledgerLines.length === 0 ? (
+                  {remainingLedgerLines.length === 0 ? (
                     <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
-                      No ledger lines yet.
+                      No Remaining lines yet.
                     </p>
                   ) : (
                     <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-                      {ledgerLines.map((line, idx) => {
+                      {remainingLedgerLines.map((line, idx) => {
                         const delta = line.deltaRemaining;
                         const isWeekKharcha = line.kind === "week_kharcha";
-                        const isCreditLine = line.kind === "credit";
                         const showPayAmount =
                           line.kind === "payment" && (line.paidTotal || 0) > 0
                             ? Math.max(0, line.paidTotal || 0)
                             : null;
-                        const deltaLabel = isCreditLine
-                          ? `Credit ${money(line.creditAdded || 0)}`
-                          : isWeekKharcha
-                            ? delta < 0
-                              ? `−${money(Math.abs(delta))}`
-                              : "Kharcha"
-                            : showPayAmount != null
-                              ? `−${money(showPayAmount)}`
-                              : delta === 0
-                                ? "—"
-                                : delta > 0
-                                  ? `+${money(delta)}`
-                                  : `−${money(Math.abs(delta))}`;
+                        const deltaLabel = isWeekKharcha
+                          ? delta < 0
+                            ? `−${money(Math.abs(delta))}`
+                            : "Kharcha"
+                          : showPayAmount != null
+                            ? `−${money(showPayAmount)}`
+                            : delta === 0
+                              ? "—"
+                              : delta > 0
+                                ? `+${money(delta)}`
+                                : `−${money(Math.abs(delta))}`;
                         return (
                           <div
                             key={line.id}
@@ -1003,74 +1005,39 @@ export default function HisaabPage() {
                                     {line.subtitle}
                                   </p>
                                 )}
-                                {line.creditAdded != null &&
-                                  line.creditAdded > 0 &&
-                                  line.kind === "payment" && (
-                                    <p className="mt-0.5 text-[11px] font-medium text-jade-deep">
-                                      Credit {money(line.creditAdded)} for next bill
-                                    </p>
-                                  )}
                               </div>
                               <div className="shrink-0 text-right">
                                 <p
                                   className={`text-sm font-bold ${
-                                    isCreditLine
-                                      ? "text-jade-deep"
-                                      : isWeekKharcha || showPayAmount != null || delta < 0
-                                        ? "text-danger"
-                                        : delta > 0
-                                          ? "text-jade-deep"
-                                          : "text-[var(--text-muted)]"
+                                    isWeekKharcha || showPayAmount != null || delta < 0
+                                      ? "text-danger"
+                                      : delta > 0
+                                        ? "text-jade-deep"
+                                        : "text-[var(--text-muted)]"
                                   }`}
                                 >
                                   {deltaLabel}
                                 </p>
-                                {isCreditLine ? (
-                                  <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-jade-deep">
-                                    Credit
-                                  </p>
-                                ) : (
-                                  <>
-                                    <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                                      Remaining {money(line.remainingAfter)}
-                                    </p>
-                                    {(isWeekKharcha ||
-                                      line.kind === "payment" ||
-                                      line.kind === "kharcha_fold") && (
-                                      <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-jade-deep">
-                                        Box {money(line.kharchaAfter)}
-                                      </p>
-                                    )}
-                                  </>
-                                )}
+                                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                                  Remaining {money(line.remainingAfter)}
+                                </p>
                               </div>
                             </div>
                           </div>
                         );
                       })}
-                      <div className="space-y-2 bg-amber-50 px-3 py-3 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-bold text-amber-900">Live Total remaining</p>
-                          <p className="font-display text-lg font-bold text-amber-900">
-                            {money(totalRemaining)}
-                          </p>
-                        </div>
-                        {surplusCredit > 0 && (
-                          <div className="flex items-center justify-between gap-3 border-t border-amber-200/80 pt-2">
-                            <p className="font-bold text-jade-deep">Credit (next bill)</p>
-                            <p className="font-display text-lg font-bold text-jade-deep">
-                              {money(surplusCredit)}
-                            </p>
-                          </div>
-                        )}
+                      <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
+                        <p className="font-bold text-amber-900">Live Total remaining</p>
+                        <p className="font-display text-lg font-bold text-amber-900">
+                          {money(totalRemaining)}
+                        </p>
                       </div>
                     </div>
                   )}
 
                   <p className="text-[11px] text-[var(--text-muted)]">
-                    Opening starts at the full amount, then each Pay with date &amp; time. Week
-                    kharcha on the bill is a budget; each transfer reduces live Total Remaining.
-                    Unused leftover on next Saturday folds back into remaining.
+                    Opening, bills (+ADD − week kharcha budget), and Remaining Pays only. Week
+                    Kharcha Pays are under the Kharcha box.
                   </p>
                 </div>
               </div>
