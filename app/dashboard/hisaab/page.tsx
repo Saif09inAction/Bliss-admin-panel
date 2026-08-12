@@ -786,20 +786,6 @@ export default function HisaabPage() {
                   ? ` (${allTransactions.length})`
                   : ""}
               </button>
-              <button
-                type="button"
-                className="btn btn-primary whitespace-nowrap"
-                onClick={() => {
-                  setPayTarget(weekKharchaBudget > 0 ? "kharcha" : "remaining");
-                  setShowUnifiedPay(true);
-                  setPayOrderId(null);
-                  setPayForm({ amount: "", remarks: "" });
-                  setPayMsg("");
-                }}
-              >
-                <IndianRupee className="h-4 w-4" />
-                Pay
-              </button>
             </div>
           </div>
 
@@ -917,12 +903,12 @@ export default function HisaabPage() {
                 {money(totalRemaining)}
                 {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening =
                 old pending inside Remaining. Use <strong>Pay</strong> inside Total remaining to cut
-                it; week Pay hits the Kharcha box
+                it; week Pay / Add kharcha hits the Kharcha box
                 {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}
                 {kharchaBox < 0
                   ? " — extra stays on the box (next week carry), Remaining unchanged"
                   : ""}
-                . If there is no kharcha, the main Pay button settles Remaining.
+                .
               </p>
             </div>
           )}
@@ -1069,6 +1055,22 @@ export default function HisaabPage() {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary w-full justify-center"
+                    onClick={() => {
+                      setPayTarget(weekKharchaBudget > 0 ? "kharcha" : "remaining");
+                      setShowKharchaBreakdown(false);
+                      setShowUnifiedPay(true);
+                      setPayOrderId(null);
+                      setPayForm({ amount: "", remarks: "" });
+                      setPayMsg("");
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add kharcha
+                  </button>
 
                   <div className="overflow-hidden rounded-2xl border border-jade/25 bg-jade-soft/20">
                     <div className="grid grid-cols-3 gap-px bg-jade/10">
