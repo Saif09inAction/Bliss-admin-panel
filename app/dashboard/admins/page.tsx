@@ -176,8 +176,7 @@ export default function AdminsPage() {
           </button>
         }
       >
-        <p className="section-sub">Create logins for the operations studio</p>
-      </PageToolbar>
+</PageToolbar>
 
       <AdminSearchBar value={search} onChange={setSearch} placeholder="Search by name or mobile…" />
 

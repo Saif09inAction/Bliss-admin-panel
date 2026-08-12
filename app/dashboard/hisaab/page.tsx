@@ -645,8 +645,7 @@ export default function HisaabPage() {
           </button>
         }
       >
-        <p className="section-sub">Full payment & kharcha history per kaariger</p>
-      </PageToolbar>
+</PageToolbar>
 
       <div className="card grid gap-5 sm:grid-cols-2">
         <div>
@@ -682,11 +681,7 @@ export default function HisaabPage() {
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-jade-soft text-jade-deep">
             <Receipt size={22} />
           </div>
-          <p className="mt-3 font-semibold">Select a kaariger to view their hisaab</p>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            You&apos;ll see their active orders in full detail, and can pull up any completed
-            order&apos;s history separately above.
-          </p>
+          <p className="mt-3 font-semibold">Select a kaariger</p>
         </div>
       ) : loading ? (
         <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">Loading hisaab…</div>
@@ -717,7 +712,6 @@ export default function HisaabPage() {
                   <p className="font-display text-base font-bold text-amber-900">
                     {money(totalRemaining)}
                   </p>
-                  <p className="text-[10px] text-amber-800/80">Tap for breakdown</p>
                 </button>
                 <button
                   type="button"
@@ -750,9 +744,9 @@ export default function HisaabPage() {
                   <p className="font-display text-base font-bold text-jade-deep">
                     {money(kharchaRemaining)}
                   </p>
-                  <p className="text-[10px] text-jade-deep/80">
-                    {kharchaRemaining < 0 ? "Extra paid · tap records" : "Tap for kharcha records"}
-                  </p>
+                  {kharchaRemaining < 0 && (
+                    <p className="text-[10px] text-jade-deep/80">Extra</p>
+                  )}
                 </button>
                 {weekKharchaBudget > 0 && (
                   <button
@@ -866,7 +860,7 @@ export default function HisaabPage() {
 
               {paymentGroups.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
-                  No payments yet. Use Pay — amount hits the Kharcha box only (Remaining unchanged).
+                  No payments yet.
                 </p>
               ) : (
                 <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
@@ -912,27 +906,7 @@ export default function HisaabPage() {
             </div>
           )}
 
-          {(openingBal > 0 ||
-            oldKharchaBal > 0 ||
-            Math.abs(kharchaBox) > 0 ||
-            creditBal > 0 ||
-            openingPaidTotal > 0 ||
-            standaloneRepairTotal > 0) && (
-            <div className="surface space-y-2 p-4">
-              <p className="text-sm text-[var(--text-muted)]">
-                <span className="font-semibold text-[var(--text)]">Total remaining</span>{" "}
-                {money(totalRemaining)}
-                {creditBal > 0 ? ` (credit ${money(creditBal)} already applied)` : ""}. Opening =
-                old pending inside Remaining. Use <strong>Pay</strong> inside Total remaining to cut
-                it; week Pay / Add kharcha hits the Kharcha box
-                {Math.abs(kharchaBox) > 0 ? ` (now ${money(kharchaBox)})` : ""}
-                {kharchaBox < 0
-                  ? " — extra stays on the box (next week carry), Remaining unchanged"
-                  : ""}
-                .
-              </p>
-            </div>
-          )}
+          
 
           {showRemainingBreakdown && (
             <>
@@ -948,9 +922,6 @@ export default function HisaabPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-display text-lg font-bold">Remaining breakdown</h3>
-                      <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-                        Only lines that change Total Remaining. Kharcha Pays stay in the Kharcha box.
-                      </p>
                     </div>
                     <button
                       type="button"
@@ -1032,7 +1003,7 @@ export default function HisaabPage() {
                         );
                       })}
                       <div className="flex items-center justify-between gap-3 bg-amber-50 px-3 py-3 text-sm">
-                        <p className="font-bold text-amber-900">Live Total remaining</p>
+                        <p className="font-bold text-amber-900">Total remaining</p>
                         <p className="font-display text-lg font-bold text-amber-900">
                           {money(totalRemaining)}
                         </p>
@@ -1040,10 +1011,7 @@ export default function HisaabPage() {
                     </div>
                   )}
 
-                  <p className="text-[11px] text-[var(--text-muted)]">
-                    Opening, bills (+ADD − week kharcha budget), and Remaining Pays only. Week
-                    Kharcha Pays are under the Kharcha box.
-                  </p>
+ 
                 </div>
               </div>
             </>
@@ -1063,9 +1031,6 @@ export default function HisaabPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-display text-lg font-bold">Kharcha records</h3>
-                      <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-                        Total kharcha → how much paid → how much left
-                      </p>
                     </div>
                     <button
                       type="button"
@@ -1141,7 +1106,7 @@ export default function HisaabPage() {
                     priorOverpayApplied <= 0 &&
                     priorLeftAdded <= 0 ? (
                       <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-4 text-center text-sm text-[var(--text-muted)]">
-                        No kharcha pays yet. Pay 5k, then 5k — each shows as Paid ₹5,000 here.
+                        No payments yet.
                       </p>
                     ) : (
                       <div className="overflow-hidden rounded-xl border border-[var(--border)]">
@@ -1149,9 +1114,7 @@ export default function HisaabPage() {
                           <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm">
                             <div className="min-w-0">
                               <p className="font-medium">Prior overpay (from last week)</p>
-                              <p className="text-[11px] text-[var(--text-muted)]">
-                                Already counted against this week’s budget
-                              </p>
+ 
                             </div>
                             <span className="shrink-0 font-bold text-jade-deep">
                               Paid {money(priorOverpayApplied)}
@@ -1162,9 +1125,7 @@ export default function HisaabPage() {
                           <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2.5 text-sm">
                             <div className="min-w-0">
                               <p className="font-medium">Prior left unpaid</p>
-                              <p className="text-[11px] text-[var(--text-muted)]">
-                                Added into this week’s Kharcha box
-                              </p>
+ 
                             </div>
                             <span className="shrink-0 font-bold text-amber-900">
                               +{money(priorLeftAdded)}
@@ -1223,14 +1184,10 @@ export default function HisaabPage() {
 
                   <div className="rounded-xl bg-amber-50 px-3 py-3">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                      Total Remaining (unchanged by Pay)
+                      Total remaining
                     </p>
                     <p className="font-display text-xl font-bold text-amber-900">
                       {money(totalRemaining)}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-amber-800/80">
-                      Moves only on bill create (+ADD − kharcha). Under/over pay carries into next
-                      week’s Kharcha box.
                     </p>
                   </div>
                 </div>
@@ -1243,11 +1200,7 @@ export default function HisaabPage() {
               <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
                 Legacy opening payments
               </p>
-              <p className="mb-2 text-xs text-[var(--text-muted)]">
-                Older pays against opening (before weekly Pay → Kharcha-only). Weekly Pay no longer
-                settles opening. Live Remaining {money(totalRemaining)}
-                {openingBal > 0 ? ` · stored opening ${money(openingBal)}` : ""}.
-              </p>
+ 
               <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
                 {openingPayments.map((p) => (
                   <div key={p.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
@@ -1286,8 +1239,7 @@ export default function HisaabPage() {
                 <Wallet size={16} />
               </div>
               <p className="text-sm text-jade-deep">
-                Nothing pending to pay. <strong>{money(surplusCredit)}</strong> credit will adjust on the next
-                bill automatically.
+                Credit <strong>{money(surplusCredit)}</strong>
               </p>
             </div>
           )}
@@ -1300,7 +1252,7 @@ export default function HisaabPage() {
                   ? "No active bills — remaining above is from opening balance on the profile."
                   : surplusCredit > 0
                     ? "Nothing pending. Credit will apply on the next bill."
-                    : "No orders yet. Set opening balance on the kaariger profile if they had old pending, or Pay to add credit."}
+                    : "No orders yet."}
             </div>
           ) : (
             <>
@@ -1399,17 +1351,13 @@ export default function HisaabPage() {
                   <h3 className="font-display text-lg font-bold">
                     {payTarget === "remaining" ? "Pay Remaining" : "Pay Kharcha"}
                   </h3>
-                  <p className="text-xs text-[var(--text-muted)]">
-                    {payTarget === "remaining"
-                      ? `Cuts Total Remaining (opening / old pending).${
-                          totalRemaining > 0 ? ` Now: ${money(totalRemaining)}.` : ""
-                        }`
-                      : `Hits the Kharcha box only — Total Remaining stays the same. Overpay is OK.${
-                          Math.abs(kharchaRemaining) > 0 || weekKharchaBudget > 0
-                            ? ` Box now: ${money(kharchaRemaining)}.`
-                            : ""
-                        }`}
-                  </p>
+                  {(payTarget === "remaining" ? totalRemaining > 0 : weekKharchaBudget > 0 || Math.abs(kharchaRemaining) > 0) && (
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {payTarget === "remaining"
+                        ? `Now ${money(totalRemaining)}`
+                        : `Box ${money(kharchaRemaining)}`}
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -1590,10 +1538,7 @@ function PreviousHisaabCard({
             )}
             <Row label="Outstanding after create" value={money(closing)} bold accent="amber" />
           </div>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            {money(opening)} + {money(addBalance)} ADD − {money(weekKharcha)} kharcha ={" "}
-            {money(closing)} Remaining. Pays that week did not change Remaining.
-          </p>
+ 
         </div>
 
         <div className="space-y-3 rounded-2xl border border-jade/25 bg-jade-soft/20 p-3">
@@ -1622,10 +1567,7 @@ function PreviousHisaabCard({
           </div>
           {carryIn !== 0 && (
             <p className="text-[11px] text-[var(--text-muted)]">
-              Carry into this week:{" "}
-              {carryIn > 0
-                ? `−${money(carryIn)} (prior overpay) counted in Paid`
-                : `+${money(-carryIn)} (prior left)`}
+              Carry: {carryIn > 0 ? `−${money(carryIn)}` : `+${money(-carryIn)}`}
             </p>
           )}
           {orderPayments.length === 0 && priorOverpay <= 0 ? (
@@ -1997,10 +1939,7 @@ function GrandTotalBox({
           <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
         )}
         <Row label="Outstanding after create" value={money(closing)} bold accent="amber" />
-        <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-          {money(opening)} + {money(addBalance)} ADD − {money(weekKharcha)} = {money(closing)}. Pay
-          only updates the Kharcha box.
-        </p>
+ 
 
         <div className="my-1.5 border-t border-jade/20" />
         <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
@@ -2046,7 +1985,7 @@ function GrandTotalBox({
             </div>
           ) : (
             <p className="border-t border-jade/10 px-3 py-2 text-[11px] text-[var(--text-muted)]">
-              No kharcha pays yet — Pay hits this box only.
+              No payments yet.
             </p>
           )}
         </div>
@@ -2057,10 +1996,7 @@ function GrandTotalBox({
           bold
           accent={totalRemainingHere > 0 ? "amber" : "green"}
         />
-        <p className="pt-0.5 text-[11px] text-[var(--text-muted)]">
-          Same as after bill create. Box left/extra ({money(box)}) carries into next week’s kharcha
-          only.
-        </p>
+ 
       </div>
     </div>
   );

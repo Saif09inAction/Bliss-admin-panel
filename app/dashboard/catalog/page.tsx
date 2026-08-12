@@ -200,7 +200,7 @@ export default function CatalogPage() {
         }
       >
         <p className="section-sub">
-          {products.length} product{products.length === 1 ? "" : "s"} · optional price fills on bill
+          {products.length} product{products.length === 1 ? "" : "s"}
         </p>
       </PageToolbar>
 

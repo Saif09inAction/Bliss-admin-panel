@@ -90,7 +90,9 @@ export function ModuleRow({
       </div>
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-[var(--text)]">{title}</p>
-        <p className="truncate text-xs text-[var(--text-muted)]">{description}</p>
+        {description ? (
+          <p className="truncate text-xs text-[var(--text-muted)]">{description}</p>
+        ) : null}
       </div>
       <span className="text-[var(--text-faint)] transition group-hover:translate-x-0.5 group-hover:text-jade-deep">
         →

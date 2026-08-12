@@ -168,23 +168,14 @@ export default function DashboardPage() {
     <div className="admin-hero">
       <div className="relative z-10 flex flex-col gap-4 sm:gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          {!isMobile && (
-            <div className="inline-flex items-center gap-2 rounded-full border border-jade/30 bg-jade/10 px-3 py-1 text-[11px] font-semibold text-jade-glow">
-              <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-jade" />
-              Live operations
-            </div>
-          )}
+          
           <p className={`${isMobile ? "mt-0" : "mt-4"} text-xs font-semibold uppercase tracking-[0.22em] text-bronze`}>
             {greeting()}
           </p>
           <h2 className={`mt-1.5 font-display font-extrabold tracking-tight ${isMobile ? "text-2xl" : "text-3xl sm:text-4xl"}`}>
             {session?.name || "Administrator"}
           </h2>
-          <p className={`mt-1.5 max-w-md text-sm text-white/55 ${isMobile ? "line-clamp-2" : ""}`}>
-            {isMobile
-              ? "People, stock, orders & payouts — tap below."
-              : "Your manufacturing control center — people, stock, orders, and payouts in one studio."}
-          </p>
+
         </div>
         <Link
           href="/dashboard/orders"
@@ -372,14 +363,14 @@ export default function DashboardPage() {
           <p className="alert-banner-title">
             {stats.pendingOrders} active kaariger order{stats.pendingOrders > 1 ? "s" : ""}
           </p>
-          <p className="alert-banner-sub">Awaiting delivery or staff approval — tap to manage</p>
+          <p className="alert-banner-sub">Awaiting approval</p>
         </Link>
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
         <SectionHeader
-          title={isMobile ? "All sections" : "Command center"}
-          subtitle={isMobile ? "Menu · Attendance & more" : "Jump into any workspace"}
+          title={isMobile ? "All sections" : "Sections"}
+          subtitle={undefined}
         />
         {!isMobile && (
           <div className="w-full sm:max-w-xs">

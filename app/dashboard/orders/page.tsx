@@ -726,9 +726,9 @@ export default function OrdersPage() {
                         : ` + left ${money(-carryIn)}`
                     })`
                   : ""
-              }. Pay only hits the Kharcha box.`
+              }.`
             : ".") +
-          (liveCredit > 0 ? ` Credit ${money(liveCredit)} already applied.` : "")
+          (liveCredit > 0 ? `` : "")
       );
       resetForm();
       loadMeta();
@@ -766,8 +766,7 @@ export default function OrdersPage() {
           </button>
         }
       >
-        <p className="section-sub">Create a new bill for a kaariger</p>
-      </PageToolbar>
+</PageToolbar>
 
       <form onSubmit={sendOrder} className="card mx-auto max-w-4xl space-y-5">
         <div className="flex items-center justify-between gap-3">
@@ -777,9 +776,6 @@ export default function OrdersPage() {
             </div>
             <div className="min-w-0">
               <h2 className="font-display text-base font-bold">New Kaarigar Bill</h2>
-              <p className="text-xs text-[var(--text-muted)]">
-                Draft stays if you switch sections — until Send or Clear
-              </p>
             </div>
           </div>
           <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={clearForm}>
@@ -806,7 +802,7 @@ export default function OrdersPage() {
                     Outstanding · Total Remaining
                   </p>
                   <p className="truncate text-xs text-amber-900/70">
-                    {selectedKaariger?.name || "Kaariger"} — same as Hisaab
+                    {selectedKaariger?.name || "Kaariger"}
                   </p>
                 </div>
               </div>
@@ -828,9 +824,7 @@ export default function OrdersPage() {
               Add product
             </button>
           </div>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Optional — pick from catalog when you have products. Price is per piece and editable.
-          </p>
+ 
           <div className="space-y-2.5">
             {productLines.map((line, i) => {
               const lineTotal = (Number(line.quantity) || 0) * (Number(line.pricePerPiece) || 0);
@@ -912,11 +906,9 @@ export default function OrdersPage() {
         <div>
           <p className="label mb-1 flex items-center gap-1.5">
             <Wrench className="h-3.5 w-3.5" />
-            Runner / Fitting / Astar (optional)
+            Runner / Fitting / Astar
           </p>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            These costs are deducted from the products total. Fill only what applies.
-          </p>
+
           <div className="space-y-2">
             {DEDUCTION_ITEMS.map(({ type, label }) => (
               <div
@@ -957,7 +949,7 @@ export default function OrdersPage() {
           <div className="mt-4 flex items-center justify-between">
             <p className="label !mb-0 flex items-center gap-1.5">
               <Package className="h-3.5 w-3.5" />
-              Material (optional)
+              Material
             </p>
             <div className="flex gap-1">
               <button
@@ -977,10 +969,7 @@ export default function OrdersPage() {
               </button>
             </div>
           </div>
-          <p className="mb-2 mt-1 text-[11px] text-[var(--text-muted)]">
-            Pick from Materials — catalog price fills automatically when set. Missing one? Tap
-            &ldquo;New material&rdquo;.
-          </p>
+
           {showNewMaterial && (
             <div className="mb-2 flex gap-2 rounded-xl border border-dashed border-[var(--border-strong)] p-2.5">
               <input
@@ -1081,10 +1070,7 @@ export default function OrdersPage() {
             onChange={(e) => setKharcha(e.target.value)}
             placeholder="e.g. 40000"
           />
-          <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Saturday budget (e.g. 40,000). Pay thoda thoda through the week (10k, 20k, 5k…) — leftover
-            returns to Total Remaining next Saturday.
-          </p>
+ 
           {currentOldKharcha > 0 && (
             <p className="mt-1 text-xs text-amber-700">
               Old kharcha still pending: {money(currentOldKharcha)}
@@ -1141,10 +1127,7 @@ export default function OrdersPage() {
             <div className="my-2 border-t border-jade/20" />
             <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
           </div>
-          <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Opening is outstanding Remaining (old pending + bills). Send does Remaining + ADD −
-            kharcha. Pay only updates the Kharcha box; under/over carry into next week’s box only.
-          </p>
+ 
         </div>
 
         {formMsg && (

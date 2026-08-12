@@ -658,10 +658,7 @@ export default function RepairingPage() {
           </button>
         }
       >
-        <p className="section-sub">
-          Add faulty pieces yourself, or approve updates from staff — only approved ones deduct from Hisaab
-        </p>
-      </PageToolbar>
+</PageToolbar>
 
       {msg && !showAdd && !editRepair && (
         <p className="rounded-xl bg-jade-soft px-4 py-3 text-sm text-jade-deep">{msg}</p>
@@ -728,11 +725,7 @@ export default function RepairingPage() {
           <p className="mt-3 font-semibold">
             {tab === "PENDING" ? "No pending repairing updates" : "No repairing updates yet"}
           </p>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            {tab === "PENDING"
-              ? "Staff submissions wait here, or add one yourself (bill or catalog product)."
-              : "Use Add Repairing with a bill product or catalog product, or wait for staff updates."}
-          </p>
+
           <button type="button" className="btn btn-primary mt-4" onClick={openAdd}>
             <Plus size={16} />
             Add Repairing
@@ -954,9 +947,6 @@ export default function RepairingPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-display text-lg font-bold">Add repairing</h3>
-                  <p className="text-xs text-[var(--text-muted)]">
-                    Faulty pcs deducted from kaariger hisaab
-                  </p>
                 </div>
                 <button type="button" className="btn-icon" onClick={() => setShowAdd(false)} aria-label="Close">
                   <X className="h-4 w-4" />
@@ -1019,11 +1009,7 @@ export default function RepairingPage() {
                     )}
                   </select>
                 )}
-                {addKaarigerId && billProductOptions.length === 0 && catalogProductOptions.length > 0 && (
-                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                    No bills for this kaariger — pick a catalog product. Deduction applies to overall hisaab.
-                  </p>
-                )}
+
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1205,9 +1191,6 @@ export default function RepairingPage() {
                 <p className="mt-1 text-sm text-[var(--text-muted)]">
                   {approveRepairDoc.kaarigerName} · {approveRepairDoc.productName} ·{" "}
                   {approveRepairDoc.faultyQuantity} pcs
-                  {isStandaloneRepair(approveRepairDoc.orderId)
-                    ? " · deducts from hisaab (no bill)"
-                    : " · deducts from bill"}
                 </p>
               </div>
               <div>

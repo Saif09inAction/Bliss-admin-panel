@@ -284,7 +284,7 @@ export function buildHisaabLedger(opts: {
     id: "opening",
     kind: "opening",
     title: "Opening balance",
-    subtitle: "Old pending before / starting Remaining",
+    subtitle: undefined,
     deltaRemaining: startOpening,
     deltaKharcha: 0,
     at: startAt,
@@ -296,7 +296,6 @@ export function buildHisaabLedger(opts: {
       id: "old_kharcha_balance",
       kind: "old_kharcha",
       title: "Old kharcha (on profile)",
-      subtitle: "Legacy carry — folds into Remaining on next bill",
       deltaRemaining: oldK,
       deltaKharcha: 0,
       at: startAt + 1,
@@ -309,7 +308,6 @@ export function buildHisaabLedger(opts: {
       id: "standalone_repair",
       kind: "repair",
       title: "Repairing (no bill)",
-      subtitle: "Approved faulty pcs — reduces Total Remaining",
       deltaRemaining: -repair,
       deltaKharcha: 0,
       at: startAt + 3,
@@ -327,7 +325,7 @@ export function buildHisaabLedger(opts: {
         id: `add-${order.id}`,
         kind: "bill_add",
         title: `Bill · ${week.label}`,
-        subtitle: `ADD (MAAL − deductions)${order.productName ? ` · ${order.productName}` : ""}`,
+        subtitle: order.productName || undefined,
         deltaRemaining: add,
         deltaKharcha: 0,
         at: t,
@@ -338,17 +336,10 @@ export function buildHisaabLedger(opts: {
     const carryIn = orderKharchaCarryIn(order);
     if (kharcha > 0 || carryIn !== 0) {
       const boxStart = kharcha - carryIn;
-      const carryNote =
-        carryIn > 0
-          ? ` · prior overpay −${Math.round(carryIn).toLocaleString("en-IN")}`
-          : carryIn < 0
-            ? ` · prior left +${Math.round(-carryIn).toLocaleString("en-IN")}`
-            : "";
       events.push({
         id: `kharcha-${order.id}`,
         kind: "week_kharcha",
         title: `${week.label} kharcha`,
-        subtitle: `Budget ${Math.round(kharcha).toLocaleString("en-IN")} cuts Remaining; box starts ${Math.round(boxStart).toLocaleString("en-IN")}${carryNote}. Pay only hits the box.`,
         deltaRemaining: -kharcha,
         deltaKharcha: boxStart,
         at: t + 1,
@@ -363,7 +354,6 @@ export function buildHisaabLedger(opts: {
         id: `fold-${order.id}`,
         kind: "kharcha_fold",
         title: `${week.label} unused kharcha cleared (legacy)`,
-        subtitle: "Old model folded unused into opening — shown for history only",
         deltaRemaining: 0,
         deltaKharcha: -carried,
         at: foldAt,
@@ -474,7 +464,6 @@ export function buildHisaabLedger(opts: {
       id: "credit_balance",
       kind: "credit",
       title: "Credit (next bill)",
-      subtitle: `Extra paid — will adjust on the next bill`,
       deltaRemaining: 0,
       deltaKharcha: 0,
       at: lastPayAt + 1,

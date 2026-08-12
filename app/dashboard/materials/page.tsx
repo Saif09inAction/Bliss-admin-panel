@@ -188,7 +188,7 @@ export default function MaterialsPage() {
         }
       >
         <p className="section-sub">
-          {materials.length} material{materials.length === 1 ? "" : "s"} · optional price fills on bill
+          {materials.length} material{materials.length === 1 ? "" : "s"}
         </p>
       </PageToolbar>
 
