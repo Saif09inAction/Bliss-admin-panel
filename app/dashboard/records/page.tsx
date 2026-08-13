@@ -314,88 +314,96 @@ export default function RecordsPage() {
   useEffect(() => {
     async function load() {
       const db = getDb();
-      const [oSnap, pSnap, rSnap, matSnap, partnerSnap, companySnap] = await Promise.all([
-        getDocs(collection(db, "kaariger_orders")),
-        getDocs(collection(db, "pickup_records")),
-        getDocs(collection(db, "return_records")),
-        getDocs(collection(db, "raw_materials")),
-        getDocs(collection(db, "delivery_partners")),
-        getDocs(collection(db, "marketplace_companies")),
-      ]);
+      try {
+        const [oSnap, pSnap, rSnap, matSnap, partnerSnap] = await Promise.all([
+          getDocs(collection(db, "kaariger_orders")),
+          getDocs(collection(db, "pickup_records")),
+          getDocs(collection(db, "return_records")),
+          getDocs(collection(db, "raw_materials")),
+          getDocs(collection(db, "delivery_partners")),
+        ]);
 
-      setDbPartners(
-        partnerSnap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: (data.id as string) || d.id,
-              name: ((data.name as string) || "").trim(),
-              createdAt: (data.createdAt as number) || 0,
-            } satisfies DeliveryPartner;
-          })
-          .filter((p) => p.name)
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
+        setDbPartners(
+          partnerSnap.docs
+            .map((d) => {
+              const data = d.data();
+              return {
+                id: (data.id as string) || d.id,
+                name: ((data.name as string) || "").trim(),
+                createdAt: (data.createdAt as number) || 0,
+              } satisfies DeliveryPartner;
+            })
+            .filter((p) => p.name)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
 
-      setDbCompanies(
-        companySnap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: (data.id as string) || d.id,
-              name: ((data.name as string) || "").trim(),
-              createdAt: (data.createdAt as number) || 0,
-            } satisfies MarketplaceCompany;
-          })
-          .filter((c) => c.name)
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
+        // Companies are a newer collection — load separately so a missing rule
+        // cannot blank orders / pickups / returns.
+        try {
+          const companySnap = await getDocs(collection(db, "marketplace_companies"));
+          setDbCompanies(
+            companySnap.docs
+              .map((d) => {
+                const data = d.data();
+                return {
+                  id: (data.id as string) || d.id,
+                  name: ((data.name as string) || "").trim(),
+                  createdAt: (data.createdAt as number) || 0,
+                } satisfies MarketplaceCompany;
+              })
+              .filter((c) => c.name)
+              .sort((a, b) => a.name.localeCompare(b.name))
+          );
+        } catch (companyErr) {
+          console.warn("marketplace_companies unavailable:", companyErr);
+          setDbCompanies([]);
+        }
 
-      setRawMaterials(
-        matSnap.docs
-          .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
-          .filter((m) => m.name.trim())
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
+        setRawMaterials(
+          matSnap.docs
+            .map((d) => ({ id: (d.data().id as string) || d.id, name: (d.data().name as string) || "" }))
+            .filter((m) => m.name.trim())
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
 
-      setOrders(
-        oSnap.docs
-          .map((d) => {
-            const data = d.data();
-            const products = ((data.products as OrderProductLine[]) || []).map((p) => ({
-              productName: p.productName,
-              quantity: Number(p.quantity) || 0,
-              pricePerPiece: Number(p.pricePerPiece) || 0,
-              lineTotal: Number(p.lineTotal) || 0,
-            }));
-            const materialDeductions = ((data.materialDeductions as RepairLineItem[]) || []).map((it) => ({
-              type: it.type,
-              label: it.label,
-              quantity: Number(it.quantity) || 0,
-              pricePerPiece: Number(it.pricePerPiece) || 0,
-              lineTotal: Number(it.lineTotal) || 0,
-            }));
-            return {
-              id: (data.id as string) || d.id,
-              kaarigerId: data.kaarigerId as string,
-              kaarigerName: data.kaarigerName as string,
-              productName: data.productName as string,
-              targetQuantity: (data.targetQuantity as number) || 0,
-              color: (data.color as string) || "",
-              rawMaterials: [],
-              totalDealAmount: (data.totalDealAmount as number) || 0,
-              pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
-              status: (data.status as string) === "APPROVED" ? "COMPLETED" : (data.status as string) || "",
-              approvedQuantity: (data.approvedQuantity as number) || 0,
-              deliveredQuantity: data.deliveredQuantity as number | undefined,
-              verifiedBy: data.verifiedBy as string | undefined,
-              createdBy: (data.createdBy as string) || "",
-              createdAt: (data.createdAt as number) || 0,
-              notes: data.notes as string | undefined,
-              originalDealAmount: data.originalDealAmount as number | undefined,
-              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
-              products,
-              productsTotal: data.productsTotal as number | undefined,
+        setOrders(
+          oSnap.docs
+            .map((d) => {
+              const data = d.data();
+              const products = ((data.products as OrderProductLine[]) || []).map((p) => ({
+                productName: p.productName,
+                quantity: Number(p.quantity) || 0,
+                pricePerPiece: Number(p.pricePerPiece) || 0,
+                lineTotal: Number(p.lineTotal) || 0,
+              }));
+              const materialDeductions = ((data.materialDeductions as RepairLineItem[]) || []).map((it) => ({
+                type: it.type,
+                label: it.label,
+                quantity: Number(it.quantity) || 0,
+                pricePerPiece: Number(it.pricePerPiece) || 0,
+                lineTotal: Number(it.lineTotal) || 0,
+              }));
+              return {
+                id: (data.id as string) || d.id,
+                kaarigerId: data.kaarigerId as string,
+                kaarigerName: data.kaarigerName as string,
+                productName: data.productName as string,
+                targetQuantity: (data.targetQuantity as number) || 0,
+                color: (data.color as string) || "",
+                rawMaterials: [],
+                totalDealAmount: (data.totalDealAmount as number) || 0,
+                pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+                status: (data.status as string) === "APPROVED" ? "COMPLETED" : (data.status as string) || "",
+                approvedQuantity: (data.approvedQuantity as number) || 0,
+                deliveredQuantity: data.deliveredQuantity as number | undefined,
+                verifiedBy: data.verifiedBy as string | undefined,
+                createdBy: (data.createdBy as string) || "",
+                createdAt: (data.createdAt as number) || 0,
+                notes: data.notes as string | undefined,
+                originalDealAmount: data.originalDealAmount as number | undefined,
+                repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+                products,
+                productsTotal: data.productsTotal as number | undefined,
               materialDeductions,
               materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
               kharchaGiven: data.kharchaGiven as number | undefined,
@@ -421,6 +429,9 @@ export default function RecordsPage() {
           .map((d) => parseReturnDoc(d.id, d.data() as Record<string, unknown>))
           .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
       );
+      } catch (err) {
+        console.error("Failed to load records:", err);
+      }
     }
     load();
   }, []);
