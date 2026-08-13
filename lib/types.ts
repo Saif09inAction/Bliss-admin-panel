@@ -314,33 +314,17 @@ export interface ReturnRecord {
   notes?: string;
 }
 
-export const MARKETPLACE_COMPANIES = [
-  "Amazon",
-  "Flipkart",
-  "Myntra",
-  "Meesho",
-  "Snapdeal",
-  "Ajio",
-  "Nykaa",
-  "Other",
-] as const;
+/**
+ * Marketplace / company in Firestore `marketplace_companies` — shared with staff Pickup/Return.
+ * Admin adds/deletes; staff only sees this list.
+ */
+export interface MarketplaceCompany {
+  id: string;
+  name: string;
+  createdAt: number;
+}
 
-/** Built-in courier suggestions (same set as Android Dispatch). */
-export const DELIVERY_PARTNERS = [
-  "Amazon Delivery",
-  "eKart",
-  "BlueDart",
-  "Shiprocket",
-  "Delhivery",
-  "DTDC",
-  "Ecom Express",
-  "Xpressbees",
-  "Shadowfax",
-  "India Post",
-  "Valmo",
-] as const;
-
-/** Custom courier in Firestore `delivery_partners` — shared with staff Dispatch. */
+/** Courier in Firestore `delivery_partners` — shared with staff Pickup/Return. */
 export interface DeliveryPartner {
   id: string;
   name: string;

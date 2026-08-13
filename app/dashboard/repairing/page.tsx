@@ -18,8 +18,6 @@ import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import type {
   Employee,
-  KaarigerOrder,
-  OrderProductLine,
   OrderRepair,
   RepairLineItem,
   RepairStatus,
@@ -129,10 +127,7 @@ type FilterTab = "PENDING" | "APPROVED" | "REJECTED" | "ALL";
 type ProductOption = {
   id: string;
   orderId: string;
-  order: KaarigerOrder | null;
   productName: string;
-  pricePerPiece: number;
-  fromCatalog: boolean;
 };
 
 export default function RepairingPage() {
@@ -150,7 +145,6 @@ export default function RepairingPage() {
   });
   const [showAdd, setShowAdd] = useState(false);
   const [addKaarigerId, setAddKaarigerId] = useState("");
-  const [addOrders, setAddOrders] = useState<KaarigerOrder[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [addProductId, setAddProductId] = useState("");
   const [addForm, setAddForm] = useState({
@@ -159,7 +153,6 @@ export default function RepairingPage() {
     notes: "",
     applyNow: true,
   });
-  const [loadingOrders, setLoadingOrders] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -209,105 +202,17 @@ export default function RepairingPage() {
   }, []);
 
   useEffect(() => {
-    if (!addKaarigerId) {
-      setAddOrders([]);
-      setAddProductId("");
-      return;
-    }
-    let cancelled = false;
-    setLoadingOrders(true);
-    getDocs(query(collection(getDb(), "kaariger_orders"), where("kaarigerId", "==", addKaarigerId)))
-      .then((snap) => {
-        if (cancelled) return;
-        const list = snap.docs
-          .map((d) => {
-            const data = d.data();
-            return {
-              id: (data.id as string) || d.id,
-              kaarigerId: (data.kaarigerId as string) || "",
-              kaarigerName: (data.kaarigerName as string) || "",
-              productName: (data.productName as string) || "",
-              targetQuantity: (data.targetQuantity as number) || 0,
-              color: (data.color as string) || "",
-              rawMaterials: [],
-              totalDealAmount: (data.totalDealAmount as number) || 0,
-              pricePerPiece: (data.pricePerPiece as number) || undefined,
-              pricingType: ((data.pricingType as string) || "PER_PIECE") as "PER_PIECE" | "OVERALL",
-              status: (data.status as string) || "",
-              approvedQuantity: (data.approvedQuantity as number) || 0,
-              createdBy: (data.createdBy as string) || "",
-              createdAt: (data.createdAt as number) || 0,
-              originalDealAmount: (data.originalDealAmount as number) || undefined,
-              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
-              products: ((data.products as OrderProductLine[]) || []).map((p) => ({
-                productName: p.productName || "",
-                quantity: Number(p.quantity) || 0,
-                pricePerPiece: Number(p.pricePerPiece) || 0,
-                lineTotal: Number(p.lineTotal) || 0,
-              })),
-            } satisfies KaarigerOrder;
-          })
-          .filter((o) => o.status !== "REJECTED")
-          .sort((a, b) => b.createdAt - a.createdAt);
-        setAddOrders(list);
-        setAddProductId("");
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingOrders(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setAddProductId("");
   }, [addKaarigerId]);
 
-  const billProductOptions: ProductOption[] = useMemo(() => {
-    const opts: ProductOption[] = [];
-    for (const order of addOrders) {
-      const lines =
-        order.products && order.products.length > 0
-          ? order.products
-          : [
-              {
-                productName: order.productName,
-                quantity: order.targetQuantity,
-                pricePerPiece:
-                  order.pricePerPiece ||
-                  (order.targetQuantity > 0 ? order.totalDealAmount / order.targetQuantity : 0),
-                lineTotal: order.totalDealAmount,
-              },
-            ];
-      for (const line of lines) {
-        if (!line.productName.trim()) continue;
-        opts.push({
-          id: `${order.id}::${line.productName}`,
-          orderId: order.id,
-          order,
-          productName: line.productName,
-          pricePerPiece: Number(line.pricePerPiece) || 0,
-          fromCatalog: false,
-        });
-      }
-    }
-    return opts;
-  }, [addOrders]);
-
-  const catalogProductOptions: ProductOption[] = useMemo(() => {
-    const billNames = new Set(billProductOptions.map((p) => p.productName.toLowerCase()));
-    return catalogProducts
-      .filter((p) => !billNames.has(p.name.toLowerCase()))
-      .map((p) => ({
+  const productOptions: ProductOption[] = useMemo(
+    () =>
+      catalogProducts.map((p) => ({
         id: `catalog::${p.id}`,
         orderId: STANDALONE_REPAIR_ORDER_ID,
-        order: null,
         productName: p.name,
-        pricePerPiece: 0,
-        fromCatalog: true,
-      }));
-  }, [catalogProducts, billProductOptions]);
-
-  const productOptions = useMemo(
-    () => [...billProductOptions, ...catalogProductOptions],
-    [billProductOptions, catalogProductOptions]
+      })),
+    [catalogProducts]
   );
 
   const selectedProduct = productOptions.find((p) => p.id === addProductId) || null;
@@ -316,20 +221,12 @@ export default function RepairingPage() {
     setShowAdd(true);
     setMsg("");
     setAddKaarigerId("");
-    setAddOrders([]);
     setAddProductId("");
     setAddForm({ faultyQuantity: "", faultyPricePerPiece: "", notes: "", applyNow: true });
   }
 
   function onPickProduct(id: string) {
     setAddProductId(id);
-    const opt = productOptions.find((p) => p.id === id);
-    if (opt) {
-      setAddForm((f) => ({
-        ...f,
-        faultyPricePerPiece: opt.pricePerPiece ? String(opt.pricePerPiece) : f.faultyPricePerPiece,
-      }));
-    }
   }
 
   async function saveAdd(e: React.FormEvent) {
@@ -354,15 +251,10 @@ export default function RepairingPage() {
     }
 
     const kaariger = kaarigers.find((k) => (k.phone || k.id) === addKaarigerId);
-    const order = selectedProduct.order;
-    const standalone = !order || isStandaloneRepair(selectedProduct.orderId);
-    const orderId = standalone ? STANDALONE_REPAIR_ORDER_ID : order!.id;
-    const kaarigerId = order?.kaarigerId || addKaarigerId;
-    const kaarigerName = order?.kaarigerName || kaariger?.name || "Kaariger";
+    const orderId = STANDALONE_REPAIR_ORDER_ID;
+    const kaarigerId = addKaarigerId;
+    const kaarigerName = kaariger?.name || "Kaariger";
     const faultyTotal = Math.round(qty * price * 100) / 100;
-    const original = standalone ? 0 : order!.originalDealAmount ?? order!.totalDealAmount;
-    const existingDeduction = standalone ? 0 : order!.repairDeductionTotal || 0;
-    const dealAfter = Math.max(0, original - existingDeduction - (addForm.applyNow ? faultyTotal : 0));
     const id = uuid();
     const now = Date.now();
     const status: RepairStatus = addForm.applyNow ? "APPROVED" : "PENDING";
@@ -383,8 +275,8 @@ export default function RepairingPage() {
         faultyTotal,
         items: [],
         totalRepairCost: faultyTotal,
-        originalDealAmount: original,
-        dealAfterThisRepair: dealAfter,
+        originalDealAmount: 0,
+        dealAfterThisRepair: 0,
         createdBy,
         createdAt: now,
         status,
@@ -394,23 +286,11 @@ export default function RepairingPage() {
           : {}),
       });
 
-      if (!standalone && order && order.originalDealAmount == null) {
-        await updateDoc(doc(getDb(), "kaariger_orders", order.id), {
-          originalDealAmount: original,
-        });
-      }
-
-      if (status === "APPROVED" && !standalone) {
-        await syncOrderRepairTotal(orderId);
-      }
-
       setShowAdd(false);
       setTab(status === "APPROVED" ? "APPROVED" : "PENDING");
       setMsg(
         status === "APPROVED"
-          ? standalone
-            ? `Repairing added — ${money(faultyTotal)} deducted from ${kaarigerName}'s hisaab.`
-            : `Repairing added — ${money(faultyTotal)} deducted from ${kaarigerName}'s bill.`
+          ? `Repairing added — ${money(faultyTotal)} deducted from ${kaarigerName}'s hisaab.`
           : `Repairing saved as pending for ${kaarigerName}. Set ₹/pc on approve if needed.`
       );
     } catch (err) {
@@ -970,46 +850,26 @@ export default function RepairingPage() {
 
               <div>
                 <label className="label">Product *</label>
-                {loadingOrders ? (
-                  <p className="text-sm text-[var(--text-muted)]">Loading products…</p>
-                ) : (
-                  <select
-                    className="input"
-                    value={addProductId}
-                    onChange={(e) => onPickProduct(e.target.value)}
-                    disabled={!addKaarigerId || productOptions.length === 0}
-                    required
-                  >
-                    <option value="">
-                      {!addKaarigerId
-                        ? "Select kaariger first"
-                        : productOptions.length === 0
-                          ? "No catalog products — add some in Catalog"
-                          : "Select product"}
+                <select
+                  className="input"
+                  value={addProductId}
+                  onChange={(e) => onPickProduct(e.target.value)}
+                  disabled={!addKaarigerId || productOptions.length === 0}
+                  required
+                >
+                  <option value="">
+                    {!addKaarigerId
+                      ? "Select kaariger first"
+                      : productOptions.length === 0
+                        ? "No catalog products — add some in Catalog"
+                        : "Select product"}
+                  </option>
+                  {productOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.productName}
                     </option>
-                    {billProductOptions.length > 0 && (
-                      <optgroup label="From bills">
-                        {billProductOptions.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.productName}
-                            {p.order?.color ? ` · ${p.order.color}` : ""} · ₹
-                            {p.pricePerPiece.toLocaleString("en-IN")}/pc
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {catalogProductOptions.length > 0 && (
-                      <optgroup label="From catalog (no bill)">
-                        {catalogProductOptions.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.productName}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-                )}
-
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1048,7 +908,7 @@ export default function RepairingPage() {
                   Deduction: −
                   {money((Number(addForm.faultyQuantity) || 0) * (Number(addForm.faultyPricePerPiece) || 0))}
                   {addForm.applyNow ? " (applied now)" : " (pending — set ₹/pc on approve)"}
-                  {selectedProduct?.fromCatalog ? " · hisaab" : selectedProduct ? " · bill" : ""}
+                  {selectedProduct ? " · hisaab" : ""}
                 </p>
               )}
 

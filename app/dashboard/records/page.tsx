@@ -20,13 +20,13 @@ import { getDb } from "@/lib/firebase";
 import type {
   DeliveryPartner,
   KaarigerOrder,
+  MarketplaceCompany,
   OrderProductLine,
   PickupRecord,
   RepairItemType,
   RepairLineItem,
   ReturnRecord,
 } from "@/lib/types";
-import { DELIVERY_PARTNERS, MARKETPLACE_COMPANIES } from "@/lib/types";
 import {
   dateMatchesSearch,
   downloadCsv,
@@ -50,39 +50,21 @@ import { useAuth } from "@/lib/auth-context";
 
 type OwnerFilter = "ALL" | "CLARIS" | "BLISS";
 
-/** Row in the merged partner list (defaults + Firestore custom). */
-type PartnerOption = {
+/** Named row from Firestore list collections (partners / companies). */
+type NamedOption = {
   id: string;
   name: string;
-  /** True when stored in `delivery_partners` and not a built-in default. */
-  canDelete: boolean;
 };
 
-function partnerNameEquals(a: string, b: string) {
+function nameEquals(a: string, b: string) {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-function mergePartnerOptions(fromDb: DeliveryPartner[]): PartnerOption[] {
-  const names = new Set<string>();
-  const merged: PartnerOption[] = [];
-  for (const def of DELIVERY_PARTNERS) {
-    const key = def.toLowerCase();
-    if (names.has(key)) continue;
-    names.add(key);
-    const existing = fromDb.find((p) => partnerNameEquals(p.name, def));
-    merged.push({
-      id: existing?.id || `default_${key}`,
-      name: def,
-      canDelete: false,
-    });
-  }
-  for (const p of fromDb) {
-    const key = p.name.trim().toLowerCase();
-    if (!key || names.has(key)) continue;
-    names.add(key);
-    merged.push({ id: p.id, name: p.name.trim(), canDelete: true });
-  }
-  return merged.sort((a, b) => a.name.localeCompare(b.name));
+function namedOptionsFromDb(fromDb: { id: string; name: string }[]): NamedOption[] {
+  return fromDb
+    .map((p) => ({ id: p.id, name: p.name.trim() }))
+    .filter((p) => p.name.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function ownerQtys(r: { clarisQuantity?: number; blissQuantity?: number; quantity: number }) {
@@ -123,15 +105,9 @@ function companyTotals(
     const key = row.partner?.trim() || "Other";
     map.set(key, (map.get(key) || 0) + amount);
   }
-  const known = MARKETPLACE_COMPANIES.filter((c) => map.has(c)).map((c) => ({
-    company: c,
-    qty: map.get(c) || 0,
-  }));
-  const extras = Array.from(map.entries())
-    .filter(([name]) => !(MARKETPLACE_COMPANIES as readonly string[]).includes(name))
+  const items = Array.from(map.entries())
     .map(([company, qty]) => ({ company, qty }))
     .sort((a, b) => a.company.localeCompare(b.company));
-  const items = [...known, ...extras];
   const grand = items.reduce((s, i) => s + i.qty, 0);
   return { items, grand };
 }
@@ -283,10 +259,11 @@ export default function RecordsPage() {
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
   const [dbPartners, setDbPartners] = useState<DeliveryPartner[]>([]);
-  const [partnerModal, setPartnerModal] = useState(false);
-  const [newPartnerName, setNewPartnerName] = useState("");
-  const [partnerSaving, setPartnerSaving] = useState(false);
-  const [partnerMsg, setPartnerMsg] = useState("");
+  const [dbCompanies, setDbCompanies] = useState<MarketplaceCompany[]>([]);
+  const [listModal, setListModal] = useState<null | "partners" | "companies">(null);
+  const [newListName, setNewListName] = useState("");
+  const [listSaving, setListSaving] = useState(false);
+  const [listMsg, setListMsg] = useState("");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("ALL");
   /** YYYY-MM-DD calendar filter for pickups/returns; empty = all dates. */
@@ -337,12 +314,13 @@ export default function RecordsPage() {
   useEffect(() => {
     async function load() {
       const db = getDb();
-      const [oSnap, pSnap, rSnap, matSnap, partnerSnap] = await Promise.all([
+      const [oSnap, pSnap, rSnap, matSnap, partnerSnap, companySnap] = await Promise.all([
         getDocs(collection(db, "kaariger_orders")),
         getDocs(collection(db, "pickup_records")),
         getDocs(collection(db, "return_records")),
         getDocs(collection(db, "raw_materials")),
         getDocs(collection(db, "delivery_partners")),
+        getDocs(collection(db, "marketplace_companies")),
       ]);
 
       setDbPartners(
@@ -356,6 +334,20 @@ export default function RecordsPage() {
             } satisfies DeliveryPartner;
           })
           .filter((p) => p.name)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+
+      setDbCompanies(
+        companySnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              name: ((data.name as string) || "").trim(),
+              createdAt: (data.createdAt as number) || 0,
+            } satisfies MarketplaceCompany;
+          })
+          .filter((c) => c.name)
           .sort((a, b) => a.name.localeCompare(b.name))
       );
 
@@ -522,10 +514,15 @@ export default function RecordsPage() {
     });
   }, [pickups, q, ownerFilter, dispatchDate]);
 
-  const partnerOptions = useMemo(() => mergePartnerOptions(dbPartners), [dbPartners]);
+  const partnerOptions = useMemo(() => namedOptionsFromDb(dbPartners), [dbPartners]);
   const partnerNames = useMemo(
     () => partnerOptions.map((p) => p.name),
     [partnerOptions]
+  );
+  const companyOptions = useMemo(() => namedOptionsFromDb(dbCompanies), [dbCompanies]);
+  const companyNames = useMemo(
+    () => companyOptions.map((c) => c.name),
+    [companyOptions]
   );
 
   const filteredReturns = useMemo(() => {
@@ -932,48 +929,67 @@ export default function RecordsPage() {
     if (typeof returnModal === "object" && returnModal?.id === rec.id) setReturnModal(null);
   }
 
-  async function addDeliveryPartner(e: React.FormEvent) {
+  function openListModal(kind: "partners" | "companies") {
+    setListMsg("");
+    setNewListName("");
+    setListModal(kind);
+  }
+
+  async function addListItem(e: React.FormEvent) {
     e.preventDefault();
-    const name = newPartnerName.trim();
+    if (!listModal) return;
+    const name = newListName.trim();
+    const isPartners = listModal === "partners";
+    const existing = isPartners ? partnerNames : companyNames;
     if (!name) {
-      setPartnerMsg("Enter a partner name.");
+      setListMsg(isPartners ? "Enter a partner name." : "Enter a company name.");
       return;
     }
-    if (partnerNames.some((n) => partnerNameEquals(n, name))) {
-      setPartnerMsg("That partner is already in the list.");
+    if (existing.some((n) => nameEquals(n, name))) {
+      setListMsg(isPartners ? "That partner is already in the list." : "That company is already in the list.");
       return;
     }
-    setPartnerSaving(true);
-    setPartnerMsg("");
+    setListSaving(true);
+    setListMsg("");
     try {
       const id = uuid();
-      const partner: DeliveryPartner = {
-        id,
-        name,
-        createdAt: Date.now(),
-      };
-      await setDoc(doc(getDb(), "delivery_partners", id), partner);
-      setDbPartners((prev) =>
-        [...prev, partner].sort((a, b) => a.name.localeCompare(b.name))
-      );
-      setNewPartnerName("");
-      setPartnerMsg("Added — staff will see this in Pickup & Return.");
+      const row = { id, name, createdAt: Date.now() };
+      if (isPartners) {
+        await setDoc(doc(getDb(), "delivery_partners", id), row);
+        setDbPartners((prev) =>
+          [...prev, row].sort((a, b) => a.name.localeCompare(b.name))
+        );
+      } else {
+        await setDoc(doc(getDb(), "marketplace_companies", id), row);
+        setDbCompanies((prev) =>
+          [...prev, row].sort((a, b) => a.name.localeCompare(b.name))
+        );
+      }
+      setNewListName("");
+      setListMsg("Added — staff will see this in Pickup & Return.");
     } catch (err) {
-      setPartnerMsg(err instanceof Error ? err.message : "Failed to add partner.");
+      setListMsg(err instanceof Error ? err.message : "Failed to add.");
     } finally {
-      setPartnerSaving(false);
+      setListSaving(false);
     }
   }
 
-  async function deleteDeliveryPartner(partner: PartnerOption) {
-    if (!partner.canDelete) return;
-    if (!confirm(`Remove delivery partner "${partner.name}"? Staff will no longer see it.`)) return;
+  async function deleteListItem(item: NamedOption) {
+    if (!listModal) return;
+    const isPartners = listModal === "partners";
+    const label = isPartners ? "delivery partner" : "company";
+    if (!confirm(`Remove ${label} "${item.name}"? Staff will no longer see it.`)) return;
     try {
-      await deleteDoc(doc(getDb(), "delivery_partners", partner.id));
-      setDbPartners((prev) => prev.filter((p) => p.id !== partner.id));
-      setPartnerMsg(`Removed "${partner.name}".`);
+      if (isPartners) {
+        await deleteDoc(doc(getDb(), "delivery_partners", item.id));
+        setDbPartners((prev) => prev.filter((p) => p.id !== item.id));
+      } else {
+        await deleteDoc(doc(getDb(), "marketplace_companies", item.id));
+        setDbCompanies((prev) => prev.filter((c) => c.id !== item.id));
+      }
+      setListMsg(`Removed "${item.name}".`);
     } catch (err) {
-      setPartnerMsg(err instanceof Error ? err.message : "Failed to delete partner.");
+      setListMsg(err instanceof Error ? err.message : "Failed to delete.");
     }
   }
 
@@ -1026,18 +1042,24 @@ export default function RecordsPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {(tab === "pickups" || tab === "returns") && (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setPartnerMsg("");
-                  setNewPartnerName("");
-                  setPartnerModal(true);
-                }}
-              >
-                <Truck className="h-4 w-4" />
-                Delivery partners
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => openListModal("companies")}
+                >
+                  <ShoppingBag className="h-4 w-4" />
+                  Companies
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => openListModal("partners")}
+                >
+                  <Truck className="h-4 w-4" />
+                  Delivery partners
+                </button>
+              </>
             )}
             {tab === "pickups" && (
               <button type="button" className="btn btn-primary" onClick={openPickupAdd}>
@@ -1719,11 +1741,11 @@ export default function RecordsPage() {
         </>
       )}
 
-      {partnerModal && (
+      {listModal && (
         <>
           <div
             className="fixed inset-0 z-50 bg-black/40"
-            onClick={() => setPartnerModal(false)}
+            onClick={() => setListModal(null)}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
@@ -1732,65 +1754,67 @@ export default function RecordsPage() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-display text-lg font-bold">Delivery partners</h3>
+                  <h3 className="font-display text-lg font-bold">
+                    {listModal === "partners" ? "Delivery partners" : "Companies"}
+                  </h3>
                   <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-                    Partners you add here show up for staff in Pickup &amp; Return.
+                    Only what you add here shows for staff in Pickup &amp; Return. Staff cannot add
+                    {listModal === "partners" ? " partners" : " companies"}.
                   </p>
                 </div>
                 <button
                   type="button"
                   className="btn btn-ghost shrink-0 p-2"
-                  onClick={() => setPartnerModal(false)}
+                  onClick={() => setListModal(null)}
                   aria-label="Close"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <form onSubmit={addDeliveryPartner} className="flex gap-2">
+              <form onSubmit={addListItem} className="flex gap-2">
                 <input
                   className="input flex-1"
-                  placeholder="New partner name"
-                  value={newPartnerName}
-                  onChange={(e) => setNewPartnerName(e.target.value)}
-                  disabled={partnerSaving}
+                  placeholder={
+                    listModal === "partners" ? "New partner name" : "New company name"
+                  }
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  disabled={listSaving}
                 />
-                <button type="submit" className="btn btn-primary shrink-0" disabled={partnerSaving}>
+                <button type="submit" className="btn btn-primary shrink-0" disabled={listSaving}>
                   <Plus className="h-4 w-4" />
-                  {partnerSaving ? "Adding…" : "Add"}
+                  {listSaving ? "Adding…" : "Add"}
                 </button>
               </form>
 
-              {partnerMsg && (
-                <p className="text-sm text-[var(--text-muted)]">{partnerMsg}</p>
+              {listMsg && (
+                <p className="text-sm text-[var(--text-muted)]">{listMsg}</p>
               )}
 
               <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
-                {partnerOptions.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{p.name}</p>
-                      <p className="text-[11px] text-[var(--text-muted)]">
-                        {p.canDelete ? "Custom — visible to staff" : "Built-in"}
-                      </p>
-                    </div>
-                    {p.canDelete ? (
+                {(listModal === "partners" ? partnerOptions : companyOptions).length === 0 ? (
+                  <li className="px-3 py-3 text-sm text-[var(--text-muted)]">
+                    Nothing yet. Add one above — staff will see it immediately.
+                  </li>
+                ) : (
+                  (listModal === "partners" ? partnerOptions : companyOptions).map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm"
+                    >
+                      <p className="min-w-0 truncate font-medium">{item.name}</p>
                       <button
                         type="button"
                         className="btn btn-ghost shrink-0 p-2 text-red-600"
-                        onClick={() => deleteDeliveryPartner(p)}
-                        aria-label={`Delete ${p.name}`}
+                        onClick={() => deleteListItem(item)}
+                        aria-label={`Delete ${item.name}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
-                    ) : (
-                      <span className="shrink-0 text-[11px] text-[var(--text-muted)]">—</span>
-                    )}
-                  </li>
-                ))}
+                    </li>
+                  ))
+                )}
               </ul>
             </div>
           </div>
@@ -1835,12 +1859,14 @@ export default function RecordsPage() {
                   onChange={(e) => setPickupForm({ ...pickupForm, partner: e.target.value })}
                   required
                 >
-                  <option value="">Select company</option>
-                  {MARKETPLACE_COMPANIES.map((c) => (
+                  <option value="">
+                    {companyNames.length === 0 ? "Add companies first" : "Select company"}
+                  </option>
+                  {companyNames.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                   {pickupForm.partner &&
-                    !(MARKETPLACE_COMPANIES as readonly string[]).includes(pickupForm.partner) && (
+                    !companyNames.some((n) => nameEquals(n, pickupForm.partner)) && (
                       <option value={pickupForm.partner}>{pickupForm.partner}</option>
                     )}
                 </select>
@@ -1852,12 +1878,14 @@ export default function RecordsPage() {
                   value={pickupForm.deliveryPartner}
                   onChange={(e) => setPickupForm({ ...pickupForm, deliveryPartner: e.target.value })}
                 >
-                  <option value="">Select delivery partner</option>
+                  <option value="">
+                    {partnerNames.length === 0 ? "Add partners first" : "Select delivery partner"}
+                  </option>
                   {partnerNames.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                   {pickupForm.deliveryPartner &&
-                    !partnerNames.some((n) => partnerNameEquals(n, pickupForm.deliveryPartner)) && (
+                    !partnerNames.some((n) => nameEquals(n, pickupForm.deliveryPartner)) && (
                       <option value={pickupForm.deliveryPartner}>{pickupForm.deliveryPartner}</option>
                     )}
                 </select>
@@ -1924,12 +1952,14 @@ export default function RecordsPage() {
                   onChange={(e) => setReturnForm({ ...returnForm, partner: e.target.value })}
                   required
                 >
-                  <option value="">Select company</option>
-                  {MARKETPLACE_COMPANIES.map((c) => (
+                  <option value="">
+                    {companyNames.length === 0 ? "Add companies first" : "Select company"}
+                  </option>
+                  {companyNames.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                   {returnForm.partner &&
-                    !(MARKETPLACE_COMPANIES as readonly string[]).includes(returnForm.partner) && (
+                    !companyNames.some((n) => nameEquals(n, returnForm.partner)) && (
                       <option value={returnForm.partner}>{returnForm.partner}</option>
                     )}
                 </select>
@@ -1941,12 +1971,14 @@ export default function RecordsPage() {
                   value={returnForm.deliveryPartner}
                   onChange={(e) => setReturnForm({ ...returnForm, deliveryPartner: e.target.value })}
                 >
-                  <option value="">Select delivery partner</option>
+                  <option value="">
+                    {partnerNames.length === 0 ? "Add partners first" : "Select delivery partner"}
+                  </option>
                   {partnerNames.map((d) => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                   {returnForm.deliveryPartner &&
-                    !partnerNames.some((n) => partnerNameEquals(n, returnForm.deliveryPartner)) && (
+                    !partnerNames.some((n) => nameEquals(n, returnForm.deliveryPartner)) && (
                       <option value={returnForm.deliveryPartner}>{returnForm.deliveryPartner}</option>
                     )}
                 </select>
