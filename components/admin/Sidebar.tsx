@@ -4,17 +4,30 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import { LogOut, Sparkles } from "lucide-react";
-import { NAV_GROUPS, SIDEBAR_NAV } from "@/lib/navigation";
+import { NAV_GROUPS, SIDEBAR_NAV, type NavRoute } from "@/lib/navigation";
 import NavIcon from "./NavIcon";
 
 type Props = {
   sessionName: string;
   sessionPhone: string;
   onLogout: () => void;
+  navRoutes?: NavRoute[];
+  sessionKind?: "admin" | "supervisor";
 };
 
-export default function Sidebar({ sessionName, sessionPhone, onLogout }: Props) {
+export default function Sidebar({
+  sessionName,
+  sessionPhone,
+  onLogout,
+  navRoutes,
+  sessionKind = "admin",
+}: Props) {
   const pathname = usePathname();
+  const routes = navRoutes ?? SIDEBAR_NAV;
+
+  const groups = navRoutes
+    ? NAV_GROUPS.filter((g) => routes.some((r) => r.group === g.id))
+    : NAV_GROUPS;
 
   return (
     <aside className="atrium-sidebar">
@@ -24,7 +37,9 @@ export default function Sidebar({ sessionName, sessionPhone, onLogout }: Props) 
         </div>
         <div className="min-w-0">
           <p className="font-display text-sm font-bold tracking-wide text-white">Bliss Bombay</p>
-          <p className="truncate text-[11px] text-white/45">Operations Studio</p>
+          <p className="truncate text-[11px] text-white/45">
+            {sessionKind === "supervisor" ? "Supervisor" : "Operations Studio"}
+          </p>
         </div>
       </div>
 
@@ -36,8 +51,8 @@ export default function Sidebar({ sessionName, sessionPhone, onLogout }: Props) 
       </div>
 
       <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3 pb-4">
-        {NAV_GROUPS.map((group) => {
-          const items = SIDEBAR_NAV.filter((n) => n.group === group.id);
+        {groups.map((group) => {
+          const items = routes.filter((n) => n.group === group.id);
           if (!items.length) return null;
           return (
             <div key={group.id}>

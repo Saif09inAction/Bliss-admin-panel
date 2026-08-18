@@ -1,9 +1,28 @@
-export type Role = "STAFF" | "KAARIGER";
+import type { SupervisorAccess } from "./supervisor-access";
+
+export type Role = "STAFF" | "KAARIGER" | "SUPERVISOR";
 
 export interface AdminSession {
+  kind: "admin";
   phone: string;
   name: string;
 }
+
+export interface SupervisorSession {
+  kind: "supervisor";
+  phone: string;
+  name: string;
+  joiningDate: string;
+  monthlySalary: number;
+  dailySignInTime?: string;
+  dailySignOutTime?: string;
+  access: SupervisorAccess;
+}
+
+export type AppSession = AdminSession | SupervisorSession;
+
+/** @deprecated use AppSession */
+export type LegacyAdminSession = { phone: string; name: string };
 
 export interface Employee {
   id: string;
@@ -39,6 +58,8 @@ export interface Employee {
    */
   dailySignInTime?: string;
   dailySignOutTime?: string;
+  /** Web supervisor — admin toggles which dashboard sections are visible. */
+  supervisorAccess?: Partial<SupervisorAccess>;
 }
 
 export interface RawMaterial {

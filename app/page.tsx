@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowRight, Lock, Phone } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { supervisorDefaultPath } from "@/lib/supervisor-access";
 
 export default function LoginPage() {
   const { session, loading, login } = useAuth();
@@ -15,7 +16,13 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!loading && session) router.replace("/dashboard");
+    if (!loading && session) {
+      if (session.kind === "supervisor") {
+        router.replace(supervisorDefaultPath(session.access));
+      } else {
+        router.replace("/dashboard");
+      }
+    }
   }, [loading, session, router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -58,7 +65,7 @@ export default function LoginPage() {
             <h1 className="mt-5 font-display text-3xl font-extrabold tracking-tight text-white">
               Bliss Bombay
             </h1>
-            <p className="mt-1.5 text-sm text-white/45">Admin operations studio</p>
+            <p className="mt-1.5 text-sm text-white/45">Admin & supervisor studio</p>
           </div>
 
           <form onSubmit={handleSubmit} className="mt-9 space-y-4">

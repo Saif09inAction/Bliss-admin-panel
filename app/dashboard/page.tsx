@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { motion } from "framer-motion";
 import {
@@ -14,8 +15,9 @@ import {
 import { ArrowUpRight, Activity, IndianRupee, Users, Wallet } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { todayStr } from "@/lib/csv";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, isSupervisorSession } from "@/lib/auth-context";
 import { ADMIN_MODULES, greeting } from "@/lib/navigation";
+import { supervisorDefaultPath } from "@/lib/supervisor-access";
 import { useIsMobile } from "@/lib/use-is-mobile";
 import { ModuleRow, SectionHeader, StatCard } from "@/components/admin/DashboardCards";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
@@ -42,6 +44,7 @@ function moneyCompact(n: number): string {
 
 export default function DashboardPage() {
   const { session } = useAuth();
+  const router = useRouter();
   const isMobile = useIsMobile();
   const [stats, setStats] = useState({
     workers: 0,
@@ -59,6 +62,13 @@ export default function DashboardPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    if (!session || !isSupervisorSession(session)) return;
+    if (!session.access.overview) {
+      router.replace(supervisorDefaultPath(session.access));
+    }
+  }, [session, router]);
+
+  useEffect(() => {
     async function load() {
       const db = getDb();
       const [employees, materials, orders, attendance, payments, repairs] = await Promise.all([
@@ -72,7 +82,7 @@ export default function DashboardPage() {
 
       const staffList = employees.docs.filter((d) => {
         const role = d.data().role as string;
-        return role === "STAFF" || !role;
+        return role === "STAFF" || role === "SUPERVISOR" || !role;
       });
       const kaarigerList = employees.docs.filter((d) => d.data().role === "KAARIGER");
 
@@ -163,6 +173,10 @@ export default function DashboardPage() {
       (m) => m.title.toLowerCase().includes(q) || m.description.toLowerCase().includes(q)
     );
   }, [search]);
+
+  if (session && isSupervisorSession(session) && !session.access.overview) {
+    return null;
+  }
 
   const hero = (
     <div className="admin-hero">

@@ -46,7 +46,7 @@ import SearchSelect from "@/components/admin/SearchSelect";
 import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import BillWhatsAppModal from "@/components/BillWhatsAppModal";
 import { useSelection } from "@/lib/use-selection";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, isSupervisorSession } from "@/lib/auth-context";
 
 type OwnerFilter = "ALL" | "CLARIS" | "BLISS";
 
@@ -277,7 +277,15 @@ const money = formatRupee;
 
 export default function RecordsPage() {
   const { session } = useAuth();
-  const [tab, setTab] = useState<Tab>("kaariger");
+  const canSeeKaarigerTab =
+    !session ||
+    !isSupervisorSession(session) ||
+    session.access.recordsKaariger;
+  const visibleTabs = useMemo(
+    () => TABS.filter((t) => t.id !== "kaariger" || canSeeKaarigerTab),
+    [canSeeKaarigerTab]
+  );
+  const [tab, setTab] = useState<Tab>(() => (canSeeKaarigerTab ? "kaariger" : "pickups"));
   const [orders, setOrders] = useState<KaarigerOrder[]>([]);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [returns, setReturns] = useState<ReturnRecord[]>([]);
@@ -331,6 +339,12 @@ export default function RecordsPage() {
   const [billMsg, setBillMsg] = useState("");
   const [rawMaterials, setRawMaterials] = useState<{ id: string; name: string }[]>([]);
   const [showNewMaterial, setShowNewMaterial] = useState(false);
+
+  useEffect(() => {
+    if (!canSeeKaarigerTab && tab === "kaariger") {
+      setTab("pickups");
+    }
+  }, [canSeeKaarigerTab, tab]);
   const [newMaterialName, setNewMaterialName] = useState("");
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -1120,7 +1134,7 @@ export default function RecordsPage() {
       />
 
       <div className="mobile-chip-scroll flex flex-wrap gap-2">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {visibleTabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"

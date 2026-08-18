@@ -2,15 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BOTTOM_NAV } from "@/lib/navigation";
+import { BOTTOM_NAV, type NavRoute } from "@/lib/navigation";
 import NavIcon from "./NavIcon";
 
-export default function FloatingBottomNav() {
+type Props = {
+  navRoutes?: NavRoute[];
+};
+
+export default function FloatingBottomNav({ navRoutes }: Props) {
   const pathname = usePathname();
+  const items = navRoutes
+    ? navRoutes.slice(0, 4)
+    : BOTTOM_NAV;
+
+  if (items.length === 0) return null;
 
   return (
     <nav className="floating-bottom-nav" aria-label="Primary">
-      {BOTTOM_NAV.map((item) => {
+      {items.map((item) => {
         const active =
           item.href === "/dashboard"
             ? pathname === "/dashboard"

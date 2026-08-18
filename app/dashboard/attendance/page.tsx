@@ -66,7 +66,10 @@ export default function AttendancePage() {
       (snap) => {
         setStaff(
           snap.docs
-            .filter((d) => (d.data().role as string) === "STAFF" || !d.data().role)
+            .filter((d) => {
+              const role = d.data().role as string;
+              return role === "STAFF" || role === "SUPERVISOR" || !role;
+            })
             .map((d) => {
               const data = d.data();
               return {

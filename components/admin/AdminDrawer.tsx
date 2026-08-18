@@ -3,19 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut, X } from "lucide-react";
-import { NAV_GROUPS, SIDEBAR_NAV } from "@/lib/navigation";
+import { NAV_GROUPS, SIDEBAR_NAV, type NavRoute } from "@/lib/navigation";
+import type { AppSession } from "@/lib/types";
 import NavIcon from "./NavIcon";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  session: { name: string; phone: string };
+  session: AppSession;
   onLogout: () => void;
+  navRoutes?: NavRoute[];
 };
 
-export default function AdminDrawer({ open, onClose, session, onLogout }: Props) {
+export default function AdminDrawer({ open, onClose, session, onLogout, navRoutes }: Props) {
   const pathname = usePathname();
   if (!open) return null;
+
+  const routes = navRoutes ?? SIDEBAR_NAV;
+  const groups = navRoutes
+    ? NAV_GROUPS.filter((g) => routes.some((r) => r.group === g.id))
+    : NAV_GROUPS;
 
   return (
     <>
@@ -38,8 +45,8 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
         </div>
 
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
-          {NAV_GROUPS.map((group) => {
-            const items = SIDEBAR_NAV.filter((r) => r.group === group.id);
+          {groups.map((group) => {
+            const items = routes.filter((r) => r.group === group.id);
             if (items.length === 0) return null;
             return (
               <div key={group.id}>
@@ -65,11 +72,6 @@ export default function AdminDrawer({ open, onClose, session, onLogout }: Props)
                       >
                         <NavIcon name={item.icon} size={17} />
                         <span className="flex-1">{item.label}</span>
-                        {item.subtitle && (
-                          <span className="max-w-[88px] truncate text-[10px] font-normal text-white/30">
-                            {item.subtitle.split(" ")[0]}
-                          </span>
-                        )}
                       </Link>
                     );
                   })}

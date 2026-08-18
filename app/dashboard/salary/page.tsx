@@ -121,7 +121,7 @@ export default function SalaryPage() {
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
               };
             })
-            .filter((e) => e.role === "STAFF")
+            .filter((e) => e.role === "STAFF" || e.role === "SUPERVISOR")
             .sort((a, b) => a.name.localeCompare(b.name))
         );
         setPayments(paySnap.docs.map((d) => parsePayment(d.id, d.data())));

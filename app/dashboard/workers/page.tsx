@@ -19,6 +19,13 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Employee, Role } from "@/lib/types";
+import {
+  DEFAULT_SUPERVISOR_ACCESS,
+  SUPERVISOR_PERMISSION_LABELS,
+  normalizeSupervisorAccess,
+  type SupervisorAccess,
+  type SupervisorPermissionKey,
+} from "@/lib/supervisor-access";
 import { todayStr } from "@/lib/csv";
 import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
@@ -27,7 +34,7 @@ import PageToolbar from "@/components/admin/PageToolbar";
 import WorkerProfilePanel from "@/components/WorkerProfilePanel";
 import { useRouter } from "next/navigation";
 
-type FormMode = "closed" | "staff" | "kaariger" | "edit";
+type FormMode = "closed" | "staff" | "kaariger" | "supervisor" | "edit";
 
 const emptyForm = {
   name: "",
@@ -49,11 +56,9 @@ function WorkerAvatar({ name }: { name: string }) {
 }
 
 function RoleBadge({ role }: { role: Role }) {
-  return (
-    <span className={role === "KAARIGER" ? "badge badge-gold" : "badge badge-success"}>
-      {role === "KAARIGER" ? "Kaariger" : "Staff"}
-    </span>
-  );
+  if (role === "KAARIGER") return <span className="badge badge-gold">Kaariger</span>;
+  if (role === "SUPERVISOR") return <span className="badge badge-warn">Supervisor</span>;
+  return <span className="badge badge-success">Staff</span>;
 }
 
 export default function WorkersPage() {
@@ -65,6 +70,7 @@ export default function WorkersPage() {
   const [editingPhone, setEditingPhone] = useState<string | null>(null);
   const [profileEmployee, setProfileEmployee] = useState<Employee | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [supervisorAccess, setSupervisorAccess] = useState<SupervisorAccess>(DEFAULT_SUPERVISOR_ACCESS);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -84,6 +90,9 @@ export default function WorkersPage() {
           openingBalance: (data.openingBalance as number) || 0,
           dailySignInTime: (data.dailySignInTime as string) || "",
           dailySignOutTime: (data.dailySignOutTime as string) || "",
+          supervisorAccess: normalizeSupervisorAccess(
+            data.supervisorAccess as Partial<SupervisorAccess>
+          ),
         };
       });
       setEmployees(list.sort((a, b) => a.name.localeCompare(b.name)));
@@ -99,6 +108,14 @@ export default function WorkersPage() {
     setFormMode("staff");
     setEditingPhone(null);
     setForm(emptyForm);
+    setError("");
+  }
+
+  function openSupervisorForm() {
+    setFormMode("supervisor");
+    setEditingPhone(null);
+    setForm(emptyForm);
+    setSupervisorAccess({ ...DEFAULT_SUPERVISOR_ACCESS });
     setError("");
   }
 
@@ -131,6 +148,11 @@ export default function WorkersPage() {
         ? normalizeTime(employee.dailySignOutTime)
         : "",
     });
+    if (employee.role === "SUPERVISOR") {
+      setSupervisorAccess(
+        normalizeSupervisorAccess(employee.supervisorAccess)
+      );
+    }
     setError("");
   }
 
@@ -154,7 +176,7 @@ export default function WorkersPage() {
       return;
     }
 
-    const isNew = formMode === "staff" || formMode === "kaariger";
+    const isNew = formMode === "staff" || formMode === "kaariger" || formMode === "supervisor";
     if (isNew && password.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
@@ -173,7 +195,12 @@ export default function WorkersPage() {
 
     setSaving(true);
     try {
-      const role: Role = formMode === "kaariger" ? "KAARIGER" : existing?.role || "STAFF";
+      const role: Role =
+        formMode === "kaariger"
+          ? "KAARIGER"
+          : formMode === "supervisor"
+            ? "SUPERVISOR"
+            : existing?.role || "STAFF";
       const existingDoc = existing || employees.find((e) => e.phone === editingPhone);
 
       const resolvedRole: Role =
@@ -194,7 +221,7 @@ export default function WorkersPage() {
         data.openingBalance = Math.max(0, Number(form.openingBalance) || 0);
       }
 
-      if (resolvedRole === "STAFF") {
+      if (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR") {
         const inTime = form.dailySignInTime.trim();
         const outTime = form.dailySignOutTime.trim();
         if (inTime || outTime) {
@@ -204,6 +231,10 @@ export default function WorkersPage() {
           data.dailySignInTime = deleteField();
           data.dailySignOutTime = deleteField();
         }
+      }
+
+      if (resolvedRole === "SUPERVISOR") {
+        data.supervisorAccess = supervisorAccess;
       }
 
       if (isNew || password) {
@@ -254,22 +285,38 @@ export default function WorkersPage() {
       })
       .sort((a, b) => {
         // Staff first, then kaarigers; A–Z within each
-        if (a.role !== b.role) return a.role === "STAFF" ? -1 : 1;
+        if (a.role !== b.role) {
+          const order = { STAFF: 0, SUPERVISOR: 1, KAARIGER: 2 };
+          return (order[a.role] ?? 9) - (order[b.role] ?? 9);
+        }
         return a.name.localeCompare(b.name);
       });
   }, [employees, filter, search]);
 
   const staffCount = employees.filter((e) => e.role === "STAFF").length;
+  const supervisorCount = employees.filter((e) => e.role === "SUPERVISOR").length;
   const kaarigerCount = employees.filter((e) => e.role === "KAARIGER").length;
 
   const mobileSections = useMemo(() => {
     if (filter !== "ALL") {
-      return [{ label: filter === "STAFF" ? "Staff · A–Z" : "Kaarigers · A–Z", items: filtered }];
+      return [
+        {
+          label:
+            filter === "STAFF"
+              ? "Staff · A–Z"
+              : filter === "SUPERVISOR"
+                ? "Supervisors · A–Z"
+                : "Kaarigers · A–Z",
+          items: filtered,
+        },
+      ];
     }
     const staff = filtered.filter((e) => e.role === "STAFF");
+    const supervisors = filtered.filter((e) => e.role === "SUPERVISOR");
     const kaarigers = filtered.filter((e) => e.role === "KAARIGER");
     const sections: { label: string; items: Employee[] }[] = [];
     if (staff.length) sections.push({ label: `Staff · ${staff.length}`, items: staff });
+    if (supervisors.length) sections.push({ label: `Supervisors · ${supervisors.length}`, items: supervisors });
     if (kaarigers.length) sections.push({ label: `Kaarigers · ${kaarigers.length}`, items: kaarigers });
     return sections;
   }, [filtered, filter]);
@@ -277,11 +324,21 @@ export default function WorkersPage() {
   const formTitle =
     formMode === "staff"
       ? "Add Staff"
+      : formMode === "supervisor"
+        ? "Add Supervisor"
       : formMode === "kaariger"
         ? "Add Kaariger"
         : formMode === "edit"
           ? "Edit Brother"
           : "";
+
+  const editingRole = editingPhone ? employees.find((e) => e.phone === editingPhone)?.role : null;
+  const showPayrollFields =
+    formMode === "staff" ||
+    formMode === "supervisor" ||
+    (formMode === "edit" && (editingRole === "STAFF" || editingRole === "SUPERVISOR"));
+  const showSupervisorAccess =
+    formMode === "supervisor" || (formMode === "edit" && editingRole === "SUPERVISOR");
 
   return (
     <div className="space-y-5">
@@ -292,6 +349,10 @@ export default function WorkersPage() {
             <button type="button" className="btn btn-primary btn-sm" onClick={openStaffForm}>
               <UserPlus size={15} />
               Staff
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={openSupervisorForm}>
+              <UserPlus size={15} />
+              Supervisor
             </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={openKaarigerForm}>
               <HardHat size={15} />
@@ -304,6 +365,7 @@ export default function WorkersPage() {
           <Users size={14} className="text-[var(--text-muted)]" />
           <span>
             <span className="font-semibold text-jade-deep">{staffCount}</span> staff ·{" "}
+            <span className="font-semibold text-jade-deep">{supervisorCount}</span> supervisors ·{" "}
             <span className="font-semibold text-jade-deep">{kaarigerCount}</span> kaarigers
           </span>
         </p>
@@ -316,14 +378,20 @@ export default function WorkersPage() {
           placeholder="Search by name or mobile..."
         />
         <div className="mobile-chip-scroll flex flex-wrap gap-2 lg:flex-wrap">
-          {(["ALL", "STAFF", "KAARIGER"] as const).map((f) => (
+          {(["ALL", "STAFF", "SUPERVISOR", "KAARIGER"] as const).map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setFilter(f)}
               className={`filter-pill ${filter === f ? "active" : ""}`}
             >
-              {f === "ALL" ? "All" : f === "STAFF" ? "Staff" : "Kaarigers"}
+              {f === "ALL"
+                ? "All"
+                : f === "STAFF"
+                  ? "Staff"
+                  : f === "SUPERVISOR"
+                    ? "Supervisors"
+                    : "Kaarigers"}
             </button>
           ))}
         </div>
@@ -360,10 +428,10 @@ export default function WorkersPage() {
                   <RoleBadge role={e.role} />
                 </td>
                 <td>
-                  {e.role === "KAARIGER" ? (
-                    <span className="text-[var(--text-faint)]">—</span>
-                  ) : (
+                  {e.role !== "KAARIGER" ? (
                     <span className="font-medium">₹{e.monthlySalary.toLocaleString("en-IN")}</span>
+                  ) : (
+                    "—"
                   )}
                 </td>
                 <td className="text-[var(--text-muted)]">{e.joiningDate || "—"}</td>
@@ -424,7 +492,7 @@ export default function WorkersPage() {
                     </div>
                     <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                       {e.phone}
-                      {e.role === "STAFF" && e.monthlySalary > 0
+                      {e.role !== "KAARIGER" && e.monthlySalary > 0
                         ? ` · ₹${e.monthlySalary.toLocaleString("en-IN")}/mo`
                         : ""}
                     </p>
@@ -489,6 +557,12 @@ export default function WorkersPage() {
                       Logs in via the <strong className="text-[var(--text)]">Staff</strong> tab in the mobile app.
                     </p>
                   )}
+                  {formMode === "supervisor" && (
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">
+                      Logs in on the <strong className="text-[var(--text)]">web panel</strong> with
+                      the sections you enable below.
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -537,7 +611,7 @@ export default function WorkersPage() {
                     minLength={formMode === "edit" ? undefined : 6}
                   />
                 </div>
-                {formMode === "staff" && (
+                {showPayrollFields && (
                   <div>
                     <label className="label">Monthly Salary (₹)</label>
                     <input
@@ -549,7 +623,7 @@ export default function WorkersPage() {
                     />
                   </div>
                 )}
-                {(formMode === "staff" || (formMode === "edit" && editingPhone && employees.find((e) => e.phone === editingPhone)?.role === "STAFF")) && (
+                {showPayrollFields && (
                   <div>
                     <label className="label">Joining Date</label>
                     <input
@@ -560,15 +634,12 @@ export default function WorkersPage() {
                     />
                   </div>
                 )}
-                {(formMode === "staff" ||
-                  (formMode === "edit" &&
-                    editingPhone &&
-                    employees.find((e) => e.phone === editingPhone)?.role === "STAFF")) && (
+                {showPayrollFields && (
                   <div className="sm:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/50 p-3">
                     <label className="label">Shift time (optional)</label>
                     <p className="mb-2 text-xs text-[var(--text-muted)]">
-                      Leave blank to use the company default from Attendance. If set, late / early /
-                      salary cuts use this staff&apos;s shift.
+                      Leave blank to use the company default from Attendance. Late / early / salary
+                      cuts use this shift.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -596,6 +667,34 @@ export default function WorkersPage() {
                         {form.dailySignOutTime ? formatDisplayTime(form.dailySignOutTime) : "—"}
                       </p>
                     )}
+                  </div>
+                )}
+                {showSupervisorAccess && (
+                  <div className="sm:col-span-2 rounded-xl border border-[var(--border)] p-3">
+                    <label className="label">Web access — visible sections</label>
+                    <p className="mb-3 text-xs text-[var(--text-muted)]">
+                      Default on: Catalog, Materials, Pickup &amp; return. My attendance and My salary
+                      are always available.
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {(Object.keys(SUPERVISOR_PERMISSION_LABELS) as SupervisorPermissionKey[]).map(
+                        (key) => (
+                          <label key={key} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={supervisorAccess[key]}
+                              onChange={(e) =>
+                                setSupervisorAccess((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.checked,
+                                }))
+                              }
+                            />
+                            {SUPERVISOR_PERMISSION_LABELS[key]}
+                          </label>
+                        )
+                      )}
+                    </div>
                   </div>
                 )}
                 {(formMode === "kaariger" ||

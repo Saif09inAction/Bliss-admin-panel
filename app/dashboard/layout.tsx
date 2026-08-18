@@ -1,17 +1,29 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useRouter, usePathname } from "next/navigation";
+import { useAuth, isSupervisorSession } from "@/lib/auth-context";
 import AdminShell from "@/components/admin/AdminShell";
+import {
+  supervisorCanAccessPath,
+  supervisorDefaultPath,
+} from "@/lib/supervisor-access";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !session) router.replace("/");
   }, [loading, session, router]);
+
+  useEffect(() => {
+    if (!session || !isSupervisorSession(session)) return;
+    if (!supervisorCanAccessPath(pathname, session.access)) {
+      router.replace(supervisorDefaultPath(session.access));
+    }
+  }, [loading, session, pathname, router]);
 
   if (loading || !session) {
     return (

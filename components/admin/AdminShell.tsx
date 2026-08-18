@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, isSupervisorSession } from "@/lib/auth-context";
 import { getRouteMeta, greeting, todayHeading } from "@/lib/navigation";
+import { supervisorNavRoutes } from "@/lib/supervisor-access";
 import { useIsMobile } from "@/lib/use-is-mobile";
 import AdminDrawer from "./AdminDrawer";
 import FloatingBottomNav from "./FloatingBottomNav";
@@ -18,6 +19,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isMobile = useIsMobile();
   const meta = getRouteMeta(pathname);
+
+  const navRoutes =
+    session && isSupervisorSession(session)
+      ? supervisorNavRoutes(session.access)
+      : undefined;
 
   const subtitle =
     pathname === "/dashboard"
@@ -35,9 +41,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     <div className="atrium-app">
       <div className="atrium-shell">
         <Sidebar
-          sessionName={session.name || "Admin"}
+          sessionName={session.name || "User"}
           sessionPhone={session.phone}
           onLogout={handleLogout}
+          navRoutes={navRoutes}
+          sessionKind={session.kind}
         />
 
         <AdminDrawer
@@ -45,6 +53,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           onClose={() => setDrawerOpen(false)}
           session={session}
           onLogout={handleLogout}
+          navRoutes={navRoutes}
         />
 
         <div className="atrium-main">
@@ -74,7 +83,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             )}
           </main>
 
-          <FloatingBottomNav />
+          <FloatingBottomNav navRoutes={navRoutes} />
         </div>
       </div>
     </div>
