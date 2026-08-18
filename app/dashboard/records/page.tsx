@@ -60,6 +60,29 @@ function nameEquals(a: string, b: string) {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+/** Normalize a stored date (YYYY-MM-DD, dd/mm/yy, epoch) to YYYY-MM-DD for range comparison. */
+function toIsoDate(value?: string | number | null): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "number") {
+    if (!value) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(value));
+  }
+  const s = String(value).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (dmy) {
+    const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${y}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  return "";
+}
+
 function namedOptionsFromDb(fromDb: { id: string; name: string }[]): NamedOption[] {
   return fromDb
     .map((p) => ({ id: p.id, name: p.name.trim() }))
@@ -266,8 +289,9 @@ export default function RecordsPage() {
   const [listMsg, setListMsg] = useState("");
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("ALL");
-  /** YYYY-MM-DD calendar filter for pickups/returns; empty = all dates. */
-  const [dispatchDate, setDispatchDate] = useState("");
+  /** YYYY-MM-DD date range filter for pickups/returns; empty = all dates. */
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   /** null = closed; "add" = create; record = edit */
   const [pickupModal, setPickupModal] = useState<"add" | PickupRecord | null>(null);
   const [returnModal, setReturnModal] = useState<"add" | ReturnRecord | null>(null);
@@ -505,14 +529,11 @@ export default function RecordsPage() {
       const oq = ownerQtys(p);
       if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
       if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
-      if (dispatchDate) {
-        const raw = (p.date || "").trim();
-        // Stored as YYYY-MM-DD (or legacy display forms) — match calendar day.
-        if (raw !== dispatchDate && !raw.startsWith(dispatchDate)) {
-          const display = formatDisplayDate(raw);
-          const wanted = formatDisplayDate(dispatchDate);
-          if (display !== wanted) return false;
-        }
+      if (dateFrom || dateTo) {
+        const iso = toIsoDate(p.date);
+        if (!iso) return false;
+        if (dateFrom && iso < dateFrom) return false;
+        if (dateTo && iso > dateTo) return false;
       }
       if (!q) return true;
       return (
@@ -523,7 +544,7 @@ export default function RecordsPage() {
         formatDisplayDate(p.date).toLowerCase().includes(q)
       );
     });
-  }, [pickups, q, ownerFilter, dispatchDate]);
+  }, [pickups, q, ownerFilter, dateFrom, dateTo]);
 
   const partnerOptions = useMemo(() => namedOptionsFromDb(dbPartners), [dbPartners]);
   const partnerNames = useMemo(
@@ -541,13 +562,11 @@ export default function RecordsPage() {
       const oq = ownerQtys(r);
       if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
       if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
-      if (dispatchDate) {
-        const raw = (r.date || "").trim();
-        if (raw !== dispatchDate && !raw.startsWith(dispatchDate)) {
-          const display = formatDisplayDate(raw);
-          const wanted = formatDisplayDate(dispatchDate);
-          if (display !== wanted) return false;
-        }
+      if (dateFrom || dateTo) {
+        const iso = toIsoDate(r.date);
+        if (!iso) return false;
+        if (dateFrom && iso < dateFrom) return false;
+        if (dateTo && iso > dateTo) return false;
       }
       if (!q) return true;
       return (
@@ -559,7 +578,7 @@ export default function RecordsPage() {
         formatDisplayDate(r.date).toLowerCase().includes(q)
       );
     });
-  }, [returns, q, ownerFilter, dispatchDate]);
+  }, [returns, q, ownerFilter, dateFrom, dateTo]);
 
   const pickupCompanyTotals = useMemo(
     () => companyTotals(filteredPickups, ownerFilter),
@@ -588,7 +607,7 @@ export default function RecordsPage() {
   useEffect(() => {
     selection.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset selection when switching tabs / filters
-  }, [tab, search, ownerFilter, dispatchDate]);
+  }, [tab, search, ownerFilter, dateFrom, dateTo]);
 
   function emptyPickupForm() {
     return {
@@ -1136,21 +1155,30 @@ export default function RecordsPage() {
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div>
-              <label className="label !mb-1 !text-[10px]">
-                {tab === "pickups" ? "Pickup date" : "Return date"}
-              </label>
+              <label className="label !mb-1 !text-[10px]">From</label>
               <input
                 type="date"
                 className="input !w-auto !py-2"
-                value={dispatchDate}
-                onChange={(e) => setDispatchDate(e.target.value)}
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
               />
             </div>
-            {dispatchDate && (
+            <div>
+              <label className="label !mb-1 !text-[10px]">To</label>
+              <input
+                type="date"
+                className="input !w-auto !py-2"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+            </div>
+            {(dateFrom || dateTo) && (
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => setDispatchDate("")}
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
               >
                 All dates
               </button>
