@@ -33,15 +33,13 @@ import { clearKaarigerBusinessData } from "@/lib/delete-worker";
 import { isStandaloneRepair } from "@/lib/types";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
-  computeMonthAttendanceStats,
   defaultSettings,
   formatDisplayTime as formatShiftHint,
   hasCustomShift,
-  monthDateRange,
-  monthLabel,
   normalizeTime,
   parseAttendance,
   resolveShiftSettings,
+  dayStatus,
 } from "@/lib/attendance-utils";
 import {
   computeEarnedSalary,
@@ -49,14 +47,14 @@ import {
   parseCalendarOverride,
   type OverrideMap,
 } from "@/lib/deduction-utils";
+import { parsePayment, salaryStatus, todayDateStr } from "@/lib/salary-utils";
 import {
-  currentMonthParts,
-  monthKey,
-  parsePayment,
-  salaryPaidInMonth,
-  salaryStatus,
-  todayDateStr,
-} from "@/lib/salary-utils";
+  addDaysIso,
+  earnedAsOfDate,
+  formatPayPeriodLabel,
+  resolvePayPeriod,
+  salaryPaidInPeriod,
+} from "@/lib/pay-period-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
 import {
   SUPERVISOR_PERMISSION_LABELS,
@@ -82,8 +80,13 @@ export default function WorkerProfilePanel({
   onUpdated,
 }: Props) {
   const { session } = useAuth();
-  const { year, month } = currentMonthParts();
-  const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
+  const [periodOffset, setPeriodOffset] = useState(0);
+  const today = todayDateStr();
+  const payPeriod = useMemo(
+    () => resolvePayPeriod(employee.joiningDate, periodOffset, today),
+    [employee.joiningDate, periodOffset, today]
+  );
+  const { start, end } = payPeriod;
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
   const [overrides, setOverrides] = useState<OverrideMap>(new Map());
   const [settings, setSettings] = useState<AttendanceSettings>(
@@ -115,9 +118,7 @@ export default function WorkerProfilePanel({
   const [accessSaving, setAccessSaving] = useState(false);
   const [accessMsg, setAccessMsg] = useState("");
   const [clearingHisaab, setClearingHisaab] = useState(false);
-
-  const monthPrefix = monthKey(year, month);
-  const { start, end } = monthDateRange(year, month);
+  const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
 
   useEffect(() => {
     setLocalEmployee(employee);
@@ -131,6 +132,7 @@ export default function WorkerProfilePanel({
         : "",
     });
     setSupervisorAccessDraft(normalizeSupervisorAccess(employee.supervisorAccess));
+    setPeriodOffset(0);
   }, [employee]);
 
   const effectiveShift = useMemo(
@@ -210,20 +212,39 @@ export default function WorkerProfilePanel({
     };
   }, [employee.phone, employee.role, start, end, settingsProp]);
 
-  const monthStats = useMemo(
-    () => computeMonthAttendanceStats(attendanceRecords, year, month),
-    [attendanceRecords, year, month]
-  );
+  const monthStats = useMemo(() => {
+    const byDate = new Map(attendanceRecords.map((r) => [r.date, r]));
+    let present = 0;
+    let late = 0;
+    let absent = 0;
+    let workingDays = 0;
+    let cursor = start;
+    while (cursor <= end && cursor <= today) {
+      workingDays++;
+      const rec = byDate.get(cursor);
+      const st = dayStatus(rec, cursor);
+      if (st === "ABSENT") absent++;
+      else if (st === "LATE") late++;
+      else if (
+        st === "PRESENT" ||
+        st === "ON_TIME" ||
+        st === "LEFT_EARLY" ||
+        st === "HALF_DAY"
+      ) {
+        present++;
+      }
+      cursor = addDaysIso(cursor, 1);
+    }
+    const rate = workingDays ? Math.round((present / workingDays) * 100) : 0;
+    return { present, late, absent, workingDays, rate };
+  }, [attendanceRecords, start, end, today]);
 
   const earned = useMemo(() => {
-    const monthEnd = monthDateRange(year, month).end;
-    const today = todayDateStr();
-    const asOf = today < `${monthPrefix}-01` ? `${monthPrefix}-00` : today < monthEnd ? today : monthEnd;
+    const asOf = earnedAsOfDate(payPeriod, today);
     return computeEarnedSalary({
       monthlySalary: employee.monthlySalary,
-      year,
-      month,
-      joiningDate: employee.joiningDate,
+      periodStart: payPeriod.start,
+      periodEnd: payPeriod.end,
       asOfDate: asOf,
       records: attendanceRecords,
       settings: effectiveShift,
@@ -232,19 +253,17 @@ export default function WorkerProfilePanel({
     });
   }, [
     employee.monthlySalary,
-    employee.joiningDate,
     employee.phone,
-    year,
-    month,
-    monthPrefix,
+    payPeriod,
+    today,
     attendanceRecords,
     effectiveShift,
     overrides,
   ]);
 
   const paidThisMonth = useMemo(
-    () => salaryPaidInMonth(payments, monthPrefix),
-    [payments, monthPrefix]
+    () => salaryPaidInPeriod(payments, payPeriod.start, payPeriod.end),
+    [payments, payPeriod.start, payPeriod.end]
   );
   const netSalary = earned.earnedNet;
   const payStatus = salaryStatus(netSalary, paidThisMonth);
@@ -253,10 +272,10 @@ export default function WorkerProfilePanel({
   const recentPayments = useMemo(
     () =>
       [...payments]
-        .filter((p) => p.date.startsWith(monthPrefix))
+        .filter((p) => p.date >= payPeriod.start && p.date <= payPeriod.end)
         .sort((a, b) => `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`))
         .slice(0, 5),
-    [payments, monthPrefix]
+    [payments, payPeriod.start, payPeriod.end]
   );
 
   async function saveOpeningBalance(e: React.FormEvent) {
@@ -666,10 +685,28 @@ export default function WorkerProfilePanel({
 
               {isPayrollRole(employee.role) && (
                 <section>
-                  <h3 className="section-title flex items-center gap-2 text-base">
-                    <Banknote size={16} className="text-jade-deep" />
-                    Salary — {monthLabel(year, month)}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="section-title flex items-center gap-2 text-base">
+                      <Banknote size={16} className="text-jade-deep" />
+                      Salary — {formatPayPeriodLabel(payPeriod.start, payPeriod.end)}
+                    </h3>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm !px-2"
+                        onClick={() => setPeriodOffset((p) => p - 1)}
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm !px-2"
+                        onClick={() => setPeriodOffset((p) => p + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <StatTile
                       label="Monthly"
@@ -691,8 +728,8 @@ export default function WorkerProfilePanel({
                     />
                   </div>
                   <p className="mt-2 text-xs text-[var(--text-muted)]">
-                    {earned.daysWorked} days worked · {earned.calendarDaysInMonth} days/mo · ₹
-                    {Math.round(earned.perHourRate).toLocaleString("en-IN")}/hr · from join date
+                    {earned.daysWorked} days worked · {earned.daysInPeriod} days in period · ₹
+                    {Math.round(earned.perHourRate).toLocaleString("en-IN")}/hr · join-date month
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <StatTile
@@ -759,7 +796,7 @@ export default function WorkerProfilePanel({
                   </h3>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
                     Late / early leave cut from days worked · holidays &amp; Sundays excluded ·{" "}
-                    {earned.calendarDaysInMonth} days in month · rates use admin shift hours
+                    {earned.daysInPeriod} days in period · rates use admin shift hours
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <StatTile
@@ -828,7 +865,7 @@ export default function WorkerProfilePanel({
                   <div className="flex items-center justify-between">
                     <h3 className="section-title flex items-center gap-2 text-base">
                       <Calendar size={16} className="text-jade-deep" />
-                      Attendance — {monthLabel(year, month)}
+                      Attendance — {formatPayPeriodLabel(payPeriod.start, payPeriod.end)}
                     </h3>
                     <button
                       type="button"

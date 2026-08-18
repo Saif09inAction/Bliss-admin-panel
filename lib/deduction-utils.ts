@@ -7,6 +7,7 @@ import {
   normalizeTime,
   timeToMinutes,
 } from "./attendance-utils";
+import { addDaysIso, daysInclusive } from "./pay-period-utils";
 
 export type DayKind = "HOLIDAY" | "WORKING";
 export type HolidayScope = "ALL" | "SELECTED";
@@ -127,6 +128,22 @@ export function calendarDaysInMonth(year: number, month: number): number {
   return Math.max(daysInMonth(year, month), 1);
 }
 
+export function countWorkingDaysInRange(
+  start: string,
+  end: string,
+  overrides: OverrideSource,
+  employeePhone?: string
+): number {
+  if (!start || !end || end < start) return 1;
+  let count = 0;
+  let cursor = start;
+  while (cursor <= end) {
+    if (isWorkingDay(cursor, overrides, employeePhone)) count++;
+    cursor = addDaysIso(cursor, 1);
+  }
+  return Math.max(count, 1);
+}
+
 export function countWorkingDaysInMonth(
   year: number,
   month: number,
@@ -135,13 +152,12 @@ export function countWorkingDaysInMonth(
   employeePhone?: string
 ): number {
   const total = daysInMonth(year, month);
-  let count = 0;
-  for (let d = 1; d <= total; d++) {
-    const key = dateKey(year, month, d);
-    if (upToDate && key > upToDate) continue;
-    if (isWorkingDay(key, overrides, employeePhone)) count++;
-  }
-  return Math.max(count, 1);
+  const start = dateKey(year, month, 1);
+  const end =
+    upToDate && upToDate < dateKey(year, month, total)
+      ? upToDate
+      : dateKey(year, month, total);
+  return countWorkingDaysInRange(start, end, overrides, employeePhone);
 }
 
 export function formatDurationMinutes(totalMinutes: number): string {
@@ -177,25 +193,24 @@ export type MonthDeductionSummary = {
 };
 
 /**
- * Deduct salary for late arrival + early leave.
- * Rates = monthlySalary ÷ (calendar days in month × shift minutes).
+ * Deduct salary for late arrival + early leave within a join-based pay period.
+ * Rates = monthlySalary ÷ (days in pay period × shift minutes).
  */
-export function computeMonthDeductions(
+export function computePeriodDeductions(
   monthlySalary: number,
-  year: number,
-  month: number,
+  periodStart: string,
+  periodEnd: string,
   records: Attendance[],
   settings: AttendanceSettings,
   overrides: OverrideSource,
   employeePhone?: string
 ): MonthDeductionSummary {
   const byDate = new Map(records.map((r) => [r.date, r]));
-  const calendarDays = calendarDaysInMonth(year, month);
-  const workingDays = countWorkingDaysInMonth(
-    year,
-    month,
+  const calendarDays = Math.max(daysInclusive(periodStart, periodEnd), 1);
+  const workingDays = countWorkingDaysInRange(
+    periodStart,
+    periodEnd,
     overrides,
-    undefined,
     employeePhone
   );
   const shiftMins = shiftMinutes(settings);
@@ -206,13 +221,13 @@ export function computeMonthDeductions(
   let totalLate = 0;
   let totalEarly = 0;
 
-  const total = daysInMonth(year, month);
-  for (let d = 1; d <= total; d++) {
-    const key = dateKey(year, month, d);
+  let cursor = periodStart;
+  while (cursor <= periodEnd) {
+    const key = cursor;
+    cursor = addDaysIso(cursor, 1);
     if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
     const rec = byDate.get(key);
-    // Admin full/half-day credit forgives late/early — no time cut.
     if (rec?.dayCredit === "FULL" || rec?.dayCredit === "HALF") continue;
     if (!rec?.signInTime) continue;
 
@@ -256,6 +271,29 @@ export function computeMonthDeductions(
   };
 }
 
+/** @deprecated use computePeriodDeductions */
+export function computeMonthDeductions(
+  monthlySalary: number,
+  year: number,
+  month: number,
+  records: Attendance[],
+  settings: AttendanceSettings,
+  overrides: OverrideSource,
+  employeePhone?: string
+): MonthDeductionSummary {
+  const start = dateKey(year, month, 1);
+  const end = dateKey(year, month, daysInMonth(year, month));
+  return computePeriodDeductions(
+    monthlySalary,
+    start,
+    end,
+    records,
+    settings,
+    overrides,
+    employeePhone
+  );
+}
+
 export type EarnedDay = {
   date: string;
   dayGross: number;
@@ -267,9 +305,12 @@ export type EarnedDay = {
 };
 
 export type EarnedSalarySummary = {
-  /** Calendar days in month — July=31, June=30, etc. */
+  periodStart: string;
+  periodEnd: string;
+  /** Days in the join-based pay period (e.g. 18 Aug – 17 Sep = 31). */
+  daysInPeriod: number;
+  /** @deprecated alias for daysInPeriod */
   calendarDaysInMonth: number;
-  /** Working days for this employee (excludes their holidays / Sundays). */
   workingDaysInMonth: number;
   shiftMinutes: number;
   perDayRate: number;
@@ -287,16 +328,13 @@ export type EarnedSalarySummary = {
 };
 
 /**
- * Prorate monthly salary by calendar days in the month.
- * dayRate = monthly ÷ daysInMonth (31 in July).
- * hourRate uses admin shift length from attendance settings.
- * Only signed-in working days (for that employee) count as earned.
+ * Prorate monthly salary across the join-based pay period (join date → day before next anniversary).
+ * Only signed-in working days count as earned.
  */
 export function computeEarnedSalary(opts: {
   monthlySalary: number;
-  year: number;
-  month: number;
-  joiningDate?: string;
+  periodStart: string;
+  periodEnd: string;
   asOfDate: string;
   records: Attendance[];
   settings: AttendanceSettings;
@@ -305,9 +343,8 @@ export function computeEarnedSalary(opts: {
 }): EarnedSalarySummary {
   const {
     monthlySalary,
-    year,
-    month,
-    joiningDate,
+    periodStart,
+    periodEnd,
     asOfDate,
     records,
     settings,
@@ -315,24 +352,20 @@ export function computeEarnedSalary(opts: {
     employeePhone,
   } = opts;
 
-  const calendarDays = calendarDaysInMonth(year, month);
-  const workingDaysInMonth = countWorkingDaysInMonth(
-    year,
-    month,
+  const daysInPeriod = Math.max(daysInclusive(periodStart, periodEnd), 1);
+  const workingDaysInMonth = countWorkingDaysInRange(
+    periodStart,
+    periodEnd,
     overrides,
-    undefined,
     employeePhone
   );
   const shiftMins = shiftMinutes(settings);
-  const perDayRate = monthlySalary > 0 ? monthlySalary / calendarDays : 0;
+  const perDayRate = monthlySalary > 0 ? monthlySalary / daysInPeriod : 0;
   const perMinuteRate =
-    monthlySalary > 0 ? monthlySalary / (calendarDays * shiftMins) : 0;
+    monthlySalary > 0 ? monthlySalary / (daysInPeriod * shiftMins) : 0;
   const perHourRate = perMinuteRate * 60;
 
-  const monthStart = dateKey(year, month, 1);
-  const monthEnd = dateKey(year, month, daysInMonth(year, month));
-  const join = joiningDate && joiningDate >= monthStart ? joiningDate : monthStart;
-  const until = asOfDate < monthEnd ? asOfDate : monthEnd;
+  const until = asOfDate < periodEnd ? asOfDate : periodEnd;
 
   const byDate = new Map(records.map((r) => [r.date, r]));
   const days: EarnedDay[] = [];
@@ -341,11 +374,12 @@ export function computeEarnedSalary(opts: {
   let grossEarned = 0;
   let totalDeduction = 0;
 
-  if (until >= join && monthlySalary > 0) {
-    const total = daysInMonth(year, month);
-    for (let d = 1; d <= total; d++) {
-      const key = dateKey(year, month, d);
-      if (key < join || key > until) continue;
+  if (until >= periodStart && monthlySalary > 0) {
+    let cursor = periodStart;
+    while (cursor <= periodEnd) {
+      const key = cursor;
+      cursor = addDaysIso(cursor, 1);
+      if (key < periodStart || key > until) continue;
       if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
       const rec = byDate.get(key);
@@ -384,10 +418,10 @@ export function computeEarnedSalary(opts: {
     }
   }
 
-  const fullMonthDeductions = computeMonthDeductions(
+  const fullMonthDeductions = computePeriodDeductions(
     monthlySalary,
-    year,
-    month,
+    periodStart,
+    periodEnd,
     records,
     settings,
     overrides,
@@ -397,7 +431,10 @@ export function computeEarnedSalary(opts: {
   const earnedNet = Math.max(0, Math.round((grossEarned - totalDeduction) * 100) / 100);
 
   return {
-    calendarDaysInMonth: calendarDays,
+    periodStart,
+    periodEnd,
+    daysInPeriod,
+    calendarDaysInMonth: daysInPeriod,
     workingDaysInMonth,
     shiftMinutes: shiftMins,
     perDayRate: Math.round(perDayRate * 100) / 100,

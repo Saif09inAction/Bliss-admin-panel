@@ -18,16 +18,18 @@ import { useAuth } from "@/lib/auth-context";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import PageToolbar from "@/components/admin/PageToolbar";
 import {
-  currentMonthParts,
-  monthKey,
-  monthLabel,
   parsePayment,
-  salaryPaidInMonth,
   salaryStatus,
   todayDateStr,
   nowTimeStr,
   type SalaryFilter,
 } from "@/lib/salary-utils";
+import {
+  earnedAsOfDate,
+  formatPayPeriodLabel,
+  resolvePayPeriod,
+  salaryPaidInPeriod,
+} from "@/lib/pay-period-utils";
 import { defaultSettings, parseAttendance, resolveShiftSettings } from "@/lib/attendance-utils";
 import {
   computeEarnedSalary,
@@ -72,9 +74,7 @@ type SalaryRow = {
 
 export default function SalaryPage() {
   const { session } = useAuth();
-  const { year: initYear, month: initMonth } = currentMonthParts();
-  const [year, setYear] = useState(initYear);
-  const [month, setMonth] = useState(initMonth);
+  const [periodOffset, setPeriodOffset] = useState(0);
   const [staff, setStaff] = useState<Employee[]>([]);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
@@ -156,34 +156,35 @@ export default function SalaryPage() {
     };
   }, []);
 
-  const monthPrefix = monthKey(year, month);
   const today = todayDateStr();
-  const asOfDate = useMemo(() => {
-    const end = `${monthPrefix}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, "0")}`;
-    // Current month → up to today; past months → full month; future → nothing earned
-    if (today < `${monthPrefix}-01`) return `${monthPrefix}-00`; // before month
-    return today < end ? today : end;
-  }, [monthPrefix, year, month, today]);
 
-  function shiftMonth(delta: number) {
-    const d = new Date(year, month + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
+  function shiftPeriod(delta: number) {
+    setPeriodOffset((prev) => prev + delta);
   }
+
+  const periodNavLabel = useMemo(() => {
+    if (periodOffset === 0) return "Current pay period";
+    if (periodOffset === -1) return "Previous pay period";
+    if (periodOffset === 1) return "Next pay period";
+    return periodOffset < 0
+      ? `${Math.abs(periodOffset)} periods ago`
+      : `${periodOffset} periods ahead`;
+  }, [periodOffset]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const statusRank: Record<string, number> = { UNPAID: 0, PARTIAL: 1, NONE: 2, PAID: 3 };
     return staff
       .map((e): SalaryRow => {
+        const period = resolvePayPeriod(e.joiningDate, periodOffset, today);
+        const asOfDate = earnedAsOfDate(period, today);
         const empPayments = payments.filter((p) => p.employeeId === e.phone);
-        const paid = salaryPaidInMonth(empPayments, monthPrefix);
+        const paid = salaryPaidInPeriod(empPayments, period.start, period.end);
         const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
         const earned = computeEarnedSalary({
           monthlySalary: e.monthlySalary,
-          year,
-          month,
-          joiningDate: e.joiningDate,
+          periodStart: period.start,
+          periodEnd: period.end,
           asOfDate,
           records: empAtt,
           settings: resolveShiftSettings(e, settings),
@@ -214,23 +215,25 @@ export default function SalaryPage() {
         if (ra !== rb) return ra - rb;
         return a.employee.name.localeCompare(b.employee.name);
       });
-  }, [staff, payments, attendance, monthPrefix, search, filter, year, month, asOfDate, settings, overrides]);
+  }, [staff, payments, attendance, periodOffset, search, filter, today, settings, overrides]);
 
   const summary = useMemo(() => {
     let totalDue = 0;
     let totalPaid = 0;
     let unpaidCount = 0;
     for (const e of staff) {
-      const paid = salaryPaidInMonth(
+      const period = resolvePayPeriod(e.joiningDate, periodOffset, today);
+      const asOfDate = earnedAsOfDate(period, today);
+      const paid = salaryPaidInPeriod(
         payments.filter((p) => p.employeeId === e.phone),
-        monthPrefix
+        period.start,
+        period.end
       );
       const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
       const earned = computeEarnedSalary({
         monthlySalary: e.monthlySalary,
-        year,
-        month,
-        joiningDate: e.joiningDate,
+        periodStart: period.start,
+        periodEnd: period.end,
         asOfDate,
         records: empAtt,
         settings: resolveShiftSettings(e, settings),
@@ -242,7 +245,7 @@ export default function SalaryPage() {
       if (salaryStatus(earned.earnedNet, paid) !== "PAID" && e.monthlySalary > 0) unpaidCount++;
     }
     return { totalDue, totalPaid, unpaidCount };
-  }, [staff, payments, attendance, monthPrefix, year, month, asOfDate, settings, overrides]);
+  }, [staff, payments, attendance, periodOffset, today, settings, overrides]);
 
   function openPay(row: SalaryRow, mode: PayMode = "EARNED") {
     setPayTarget(row);
@@ -269,7 +272,8 @@ export default function SalaryPage() {
     setSaving(true);
     setMsg("");
     try {
-      const modeLabel = payMode === "EARNED" ? "earned till now" : "full month";
+      const modeLabel = payMode === "EARNED" ? "earned till now" : "full period";
+      const period = resolvePayPeriod(payTarget.employee.joiningDate, periodOffset, today);
       const payment: PaymentTransaction = {
         id: newPaymentId(),
         employeeId: payTarget.employee.phone,
@@ -277,7 +281,9 @@ export default function SalaryPage() {
         type: "SALARY_PAYMENT",
         date: todayDateStr(),
         time: nowTimeStr(),
-        remarks: payRemarks.trim() || `${monthLabel(year, month)} · ${modeLabel}`,
+        remarks:
+          payRemarks.trim() ||
+          `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
         createdBy: session?.name || "Admin",
       };
       await setDoc(doc(getDb(), "payments", payment.id), {
@@ -300,7 +306,7 @@ export default function SalaryPage() {
     <div className="space-y-5">
       <PageToolbar title="Salary">
         <p className="section-sub">
-          Earned from join date · late hours deducted · {summary.unpaidCount} pending
+          Join-date pay periods · late hours deducted · {summary.unpaidCount} pending
         </p>
       </PageToolbar>
 
@@ -310,7 +316,7 @@ export default function SalaryPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-jade-soft">
               <CheckCircle2 size={16} className="text-jade-deep" />
             </div>
-            <p className="stat-card-label !mt-0">Paid This Month</p>
+            <p className="stat-card-label !mt-0">Paid This Period</p>
           </div>
           <p className="stat-card-value mt-2">{money(summary.totalPaid)}</p>
         </div>
@@ -339,20 +345,21 @@ export default function SalaryPage() {
           <button
             type="button"
             className="btn-icon"
-            onClick={() => shiftMonth(-1)}
-            aria-label="Previous month"
+            onClick={() => shiftPeriod(-1)}
+            aria-label="Previous pay period"
           >
             <ChevronLeft size={18} />
           </button>
           <div className="flex items-center gap-2 text-center">
             <CalendarDays size={18} className="text-jade-deep" />
-            <h2 className="font-display text-lg font-bold">{monthLabel(year, month)}</h2>
+            <h2 className="font-display text-lg font-bold">{periodNavLabel}</h2>
+            <p className="text-xs text-[var(--text-muted)]">From each staff join date</p>
           </div>
           <button
             type="button"
             className="btn-icon"
-            onClick={() => shiftMonth(1)}
-            aria-label="Next month"
+            onClick={() => shiftPeriod(1)}
+            aria-label="Next pay period"
           >
             <ChevronRight size={18} />
           </button>
@@ -429,7 +436,7 @@ export default function SalaryPage() {
                       <td className="text-sm text-[var(--text-muted)]">{money(earned.perHourRate)}</td>
                       <td className="text-sm">
                         {earned.daysWorked}d
-                        <span className="text-[var(--text-faint)]"> / {earned.calendarDaysInMonth} days</span>
+                        <span className="text-[var(--text-faint)]"> / {earned.daysInPeriod} days</span>
                       </td>
                       <td className="font-medium text-danger">
                         {earned.totalDeduction > 0 ? `−${money(earned.totalDeduction)}` : "—"}
@@ -538,7 +545,8 @@ export default function SalaryPage() {
                 <div>
                   <h3 className="font-display text-xl font-bold">Pay Salary</h3>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
-                    {payTarget.employee.name} · {monthLabel(year, month)}
+                    {payTarget.employee.name} ·{" "}
+                    {formatPayPeriodLabel(payTarget.earned.periodStart, payTarget.earned.periodEnd)}
                   </p>
                 </div>
                 <button
@@ -557,7 +565,7 @@ export default function SalaryPage() {
                   <span className="font-semibold">{money(payTarget.employee.monthlySalary)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[var(--text-muted)]">Per day (month ÷ days)</span>
+                  <span className="text-[var(--text-muted)]">Per day (period ÷ days)</span>
                   <span className="font-semibold">{money(payTarget.earned.perDayRate)}</span>
                 </div>
                 <div className="flex justify-between">
@@ -567,7 +575,7 @@ export default function SalaryPage() {
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Days worked</span>
                   <span className="font-semibold">
-                    {payTarget.earned.daysWorked} worked / {payTarget.earned.calendarDaysInMonth} days in month
+                    {payTarget.earned.daysWorked} worked / {payTarget.earned.daysInPeriod} days in period
                   </span>
                 </div>
                 <div className="flex justify-between">

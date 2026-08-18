@@ -1,26 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, onSnapshot } from "firebase/firestore";
+import { collection, getDocs, onSnapshot } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, PaymentTransaction } from "@/lib/types";
 import { useAuth, isSupervisorSession } from "@/lib/auth-context";
 import PageToolbar from "@/components/admin/PageToolbar";
-import {
-  currentMonthParts,
-  monthKey,
-  monthLabel,
-  parsePayment,
-  salaryPaidInMonth,
-  salaryStatus,
-  todayDateStr,
-} from "@/lib/salary-utils";
+import { parsePayment, salaryStatus, todayDateStr } from "@/lib/salary-utils";
 import { defaultSettings, parseAttendance, resolveShiftSettings } from "@/lib/attendance-utils";
 import {
   computeEarnedSalary,
   parseCalendarOverride,
   type OverrideMap,
 } from "@/lib/deduction-utils";
+import {
+  earnedAsOfDate,
+  formatPayPeriodLabel,
+  paymentsInPeriod,
+  resolvePayPeriod,
+  salaryPaidInPeriod,
+} from "@/lib/pay-period-utils";
 
 function money(n: number) {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
@@ -28,9 +27,7 @@ function money(n: number) {
 
 export default function MySalaryPage() {
   const { session } = useAuth();
-  const { year: initYear, month: initMonth } = currentMonthParts();
-  const [year, setYear] = useState(initYear);
-  const [month, setMonth] = useState(initMonth);
+  const [periodOffset, setPeriodOffset] = useState(0);
   const [payments, setPayments] = useState<PaymentTransaction[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [settings, setSettings] = useState<AttendanceSettings>(defaultSettings());
@@ -38,13 +35,14 @@ export default function MySalaryPage() {
   const [loading, setLoading] = useState(true);
 
   const phone = session?.phone ?? "";
-  const prefix = monthKey(year, month);
   const today = todayDateStr();
-  const asOfDate = useMemo(() => {
-    const end = `${prefix}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, "0")}`;
-    if (today < `${prefix}-01`) return `${prefix}-00`;
-    return today < end ? today : end;
-  }, [prefix, year, month, today]);
+  const joinDate =
+    session && isSupervisorSession(session) ? session.joiningDate : "";
+  const period = useMemo(
+    () => resolvePayPeriod(joinDate, periodOffset, today),
+    [joinDate, periodOffset, today]
+  );
+  const asOfDate = useMemo(() => earnedAsOfDate(period, today), [period, today]);
 
   useEffect(() => {
     if (!phone) return;
@@ -109,28 +107,21 @@ export default function MySalaryPage() {
     );
     return computeEarnedSalary({
       monthlySalary: session.monthlySalary,
-      year,
-      month,
-      joiningDate: session.joiningDate,
+      periodStart: period.start,
+      periodEnd: period.end,
       asOfDate,
       records: attendance,
       settings: shift,
       overrides,
       employeePhone: phone,
     });
-  }, [session, phone, year, month, attendance, settings, overrides, asOfDate]);
+  }, [session, phone, period, attendance, settings, overrides, asOfDate]);
 
-  const paid = salaryPaidInMonth(payments, prefix);
+  const paid = salaryPaidInPeriod(payments, period.start, period.end);
   const monthlySalary =
     session && isSupervisorSession(session) ? session.monthlySalary : 0;
-  const status = salaryStatus(monthlySalary, paid);
-  const monthPayments = payments.filter((p) => p.date.startsWith(prefix));
-
-  function shiftMonth(delta: number) {
-    const d = new Date(year, month + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
-  }
+  const status = salaryStatus(earned?.earnedNet ?? monthlySalary, paid);
+  const periodPayments = paymentsInPeriod(payments, period.start, period.end);
 
   if (!session || !isSupervisorSession(session)) {
     return <p className="text-sm text-[var(--text-muted)]">Supervisor login required.</p>;
@@ -141,11 +132,23 @@ export default function MySalaryPage() {
       <PageToolbar title="My salary" />
 
       <div className="flex items-center justify-between gap-3">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => shiftMonth(-1)}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setPeriodOffset((p) => p - 1)}
+          disabled={periodOffset <= -100}
+        >
           Previous
         </button>
-        <p className="font-display text-lg font-bold">{monthLabel(year, month)}</p>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => shiftMonth(1)}>
+        <div className="text-center">
+          <p className="font-display text-lg font-bold">
+            {formatPayPeriodLabel(period.start, period.end)}
+          </p>
+          <p className="text-xs text-[var(--text-muted)]">
+            {periodOffset === 0 ? "Current pay period" : "Past pay period"} · {period.daysInPeriod} days
+          </p>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPeriodOffset((p) => p + 1)}>
           Next
         </button>
       </div>
@@ -164,7 +167,7 @@ export default function MySalaryPage() {
               <p className="mt-1 text-xl font-bold">{money(earned?.earnedNet ?? 0)}</p>
             </div>
             <div className="surface p-4">
-              <p className="text-xs text-[var(--text-muted)]">Paid this month</p>
+              <p className="text-xs text-[var(--text-muted)]">Paid this period</p>
               <p className="mt-1 text-xl font-bold">{money(paid)}</p>
             </div>
             <div className="surface p-4">
@@ -179,10 +182,10 @@ export default function MySalaryPage() {
                 Late / early deduction: <strong>{money(earned.totalDeduction)}</strong>
               </p>
               <p>
-                Days worked: <strong>{earned.daysWorked}</strong>
+                Days worked: <strong>{earned.daysWorked}</strong> / {earned.daysInPeriod} in period
               </p>
               <p className="text-[var(--text-muted)]">
-                Due till today: {money(Math.max(0, earned.earnedNet - paid))} · Full month net:{" "}
+                Due till today: {money(Math.max(0, earned.earnedNet - paid))} · Full period net:{" "}
                 {money(earned.fullMonthNet)}
               </p>
             </div>
@@ -199,14 +202,14 @@ export default function MySalaryPage() {
                 </tr>
               </thead>
               <tbody>
-                {monthPayments.length === 0 ? (
+                {periodPayments.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-8 text-center text-sm text-[var(--text-muted)]">
-                      No payments this month.
+                      No payments this period.
                     </td>
                   </tr>
                 ) : (
-                  monthPayments.map((p) => (
+                  periodPayments.map((p) => (
                     <tr key={p.id}>
                       <td>{p.date}</td>
                       <td>{p.type.replace(/_/g, " ")}</td>
