@@ -538,12 +538,13 @@ export default function WorkersPage() {
             onClick={closeForm}
             aria-hidden
           />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 sm:p-6">
             <form
               onSubmit={saveEmployee}
-              className="surface w-full max-w-lg space-y-5 p-5 sm:p-6"
+              className="surface flex max-h-[min(90dvh,800px)] w-full max-w-lg flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-display text-xl font-bold">{formTitle}</h2>
@@ -555,12 +556,6 @@ export default function WorkersPage() {
                   {formMode === "staff" && (
                     <p className="mt-1 text-sm text-[var(--text-muted)]">
                       Logs in via the <strong className="text-[var(--text)]">Staff</strong> tab in the mobile app.
-                    </p>
-                  )}
-                  {formMode === "supervisor" && (
-                    <p className="mt-1 text-sm text-[var(--text-muted)]">
-                      Logs in on the <strong className="text-[var(--text)]">web panel</strong> with
-                      the sections you enable below.
                     </p>
                   )}
                 </div>
@@ -637,11 +632,7 @@ export default function WorkersPage() {
                 {showPayrollFields && (
                   <div className="sm:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/50 p-3">
                     <label className="label">Shift time (optional)</label>
-                    <p className="mb-2 text-xs text-[var(--text-muted)]">
-                      Leave blank to use the company default from Attendance. Late / early / salary
-                      cuts use this shift.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="mt-2 grid grid-cols-2 gap-3">
                       <div>
                         <label className="label">Login</label>
                         <input
@@ -672,11 +663,7 @@ export default function WorkersPage() {
                 {showSupervisorAccess && (
                   <div className="sm:col-span-2 rounded-xl border border-[var(--border)] p-3">
                     <label className="label">Web access — visible sections</label>
-                    <p className="mb-3 text-xs text-[var(--text-muted)]">
-                      Default on: Catalog, Materials, Pickup &amp; return. My attendance and My salary
-                      are always available.
-                    </p>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       {(Object.keys(SUPERVISOR_PERMISSION_LABELS) as SupervisorPermissionKey[]).map(
                         (key) => (
                           <label key={key} className="flex items-center gap-2 text-sm">
@@ -724,8 +711,9 @@ export default function WorkersPage() {
               {error && (
                 <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{error}</p>
               )}
+              </div>
 
-              <div className="flex gap-3 pt-1">
+              <div className="flex shrink-0 gap-3 border-t border-[var(--border)] bg-white p-5 sm:p-6 pt-4">
                 <button type="button" className="btn btn-secondary flex-1" onClick={closeForm}>
                   Cancel
                 </button>
@@ -736,7 +724,9 @@ export default function WorkersPage() {
                       ? "Update Brother"
                       : formMode === "kaariger"
                         ? "Create Kaariger"
-                        : "Create Staff"}
+                        : formMode === "supervisor"
+                          ? "Create Supervisor"
+                          : "Create Staff"}
                 </button>
               </div>
             </form>
