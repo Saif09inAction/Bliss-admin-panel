@@ -1,12 +1,42 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { getDb } from "./firebase";
 import type { AppSession, AdminSession, SupervisorSession } from "./types";
 import { normalizeSupervisorAccess } from "./supervisor-access";
 
 const STORAGE_KEY = "laiza_admin_session";
+
+function supervisorSessionFromDoc(
+  phone: string,
+  data: Record<string, unknown>
+): SupervisorSession {
+  return {
+    kind: "supervisor",
+    phone,
+    name: (data.name as string) || phone,
+    joiningDate: (data.joiningDate as string) || "",
+    monthlySalary: (data.monthlySalary as number) || 0,
+    dailySignInTime: (data.dailySignInTime as string) || "",
+    dailySignOutTime: (data.dailySignOutTime as string) || "",
+    access: normalizeSupervisorAccess(
+      data.supervisorAccess as Partial<Record<string, boolean>>
+    ),
+  };
+}
+
+function sessionsEqual(a: SupervisorSession, b: SupervisorSession): boolean {
+  return (
+    a.phone === b.phone &&
+    a.name === b.name &&
+    a.joiningDate === b.joiningDate &&
+    a.monthlySalary === b.monthlySalary &&
+    a.dailySignInTime === b.dailySignInTime &&
+    a.dailySignOutTime === b.dailySignOutTime &&
+    JSON.stringify(a.access) === JSON.stringify(b.access)
+  );
+}
 
 function parseStoredSession(raw: string): AppSession | null {
   try {
@@ -59,6 +89,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  /** Keep supervisor permissions in sync when admin updates access in Firestore. */
+  useEffect(() => {
+    if (!session || session.kind !== "supervisor") return;
+
+    const phone = session.phone;
+    const unsub = onSnapshot(doc(getDb(), "employees", phone), (snap) => {
+      if (!snap.exists()) {
+        localStorage.removeItem(STORAGE_KEY);
+        setSession(null);
+        return;
+      }
+      const data = snap.data();
+      if ((data.role as string) !== "SUPERVISOR") {
+        localStorage.removeItem(STORAGE_KEY);
+        setSession(null);
+        return;
+      }
+      const next = supervisorSessionFromDoc(phone, data as Record<string, unknown>);
+      setSession((prev) => {
+        if (!prev || prev.kind !== "supervisor" || prev.phone !== phone) return prev;
+        if (sessionsEqual(prev, next)) return prev;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+    });
+
+    return () => unsub();
+  }, [session?.kind, session?.phone]);
+
   async function login(phone: string, password: string): Promise<string | null> {
     const trimPhone = phone.trim();
     if (!trimPhone || password.length < 6) {
@@ -95,18 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return "Incorrect password.";
     }
 
-    const supervisor: SupervisorSession = {
-      kind: "supervisor",
-      phone: trimPhone,
-      name: (emp.name as string) || trimPhone,
-      joiningDate: (emp.joiningDate as string) || "",
-      monthlySalary: (emp.monthlySalary as number) || 0,
-      dailySignInTime: (emp.dailySignInTime as string) || "",
-      dailySignOutTime: (emp.dailySignOutTime as string) || "",
-      access: normalizeSupervisorAccess(
-        emp.supervisorAccess as Partial<Record<string, boolean>>
-      ),
-    };
+    const supervisor = supervisorSessionFromDoc(trimPhone, emp as Record<string, unknown>);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(supervisor));
     setSession(supervisor);
     return null;

@@ -58,6 +58,13 @@ import {
   todayDateStr,
 } from "@/lib/salary-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
+import {
+  SUPERVISOR_PERMISSION_LABELS,
+  isPayrollRole,
+  normalizeSupervisorAccess,
+  type SupervisorAccess,
+  type SupervisorPermissionKey,
+} from "@/lib/supervisor-access";
 
 interface Props {
   employee: Employee;
@@ -102,6 +109,11 @@ export default function WorkerProfilePanel({
   });
   const [shiftSaving, setShiftSaving] = useState(false);
   const [shiftMsg, setShiftMsg] = useState("");
+  const [supervisorAccessDraft, setSupervisorAccessDraft] = useState<SupervisorAccess>(
+    normalizeSupervisorAccess(employee.supervisorAccess)
+  );
+  const [accessSaving, setAccessSaving] = useState(false);
+  const [accessMsg, setAccessMsg] = useState("");
   const [clearingHisaab, setClearingHisaab] = useState(false);
 
   const monthPrefix = monthKey(year, month);
@@ -118,6 +130,7 @@ export default function WorkerProfilePanel({
         ? normalizeTime(employee.dailySignOutTime)
         : "",
     });
+    setSupervisorAccessDraft(normalizeSupervisorAccess(employee.supervisorAccess));
   }, [employee]);
 
   const effectiveShift = useMemo(
@@ -300,6 +313,31 @@ export default function WorkerProfilePanel({
     }
   }
 
+  async function saveSupervisorAccess(next: SupervisorAccess) {
+    setAccessSaving(true);
+    setAccessMsg("");
+    try {
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), {
+        supervisorAccess: next,
+      });
+      const updated: Employee = { ...localEmployee, supervisorAccess: next };
+      setLocalEmployee(updated);
+      setSupervisorAccessDraft(next);
+      onUpdated?.(updated);
+      setAccessMsg("Permissions saved.");
+    } catch (err) {
+      setAccessMsg(err instanceof Error ? err.message : "Failed to save permissions.");
+    } finally {
+      setAccessSaving(false);
+    }
+  }
+
+  async function toggleSupervisorPermission(key: SupervisorPermissionKey, enabled: boolean) {
+    const next = { ...supervisorAccessDraft, [key]: enabled };
+    setSupervisorAccessDraft(next);
+    await saveSupervisorAccess(next);
+  }
+
   async function saveStaffShift(e: React.FormEvent) {
     e.preventDefault();
     const inTime = shiftDraft.dailySignInTime.trim();
@@ -407,10 +445,18 @@ export default function WorkerProfilePanel({
                   </p>
                   <span
                     className={`mt-2 inline-block badge ${
-                      employee.role === "KAARIGER" ? "badge-gold" : "badge-success"
+                      employee.role === "KAARIGER"
+                        ? "badge-gold"
+                        : employee.role === "SUPERVISOR"
+                          ? "badge-warn"
+                          : "badge-success"
                     }`}
                   >
-                    {employee.role === "KAARIGER" ? "Kaariger" : "Staff"}
+                    {employee.role === "KAARIGER"
+                      ? "Kaariger"
+                      : employee.role === "SUPERVISOR"
+                        ? "Supervisor"
+                        : "Staff"}
                   </span>
                 </div>
                 <button
@@ -440,7 +486,7 @@ export default function WorkerProfilePanel({
                   Basic Info
                 </h3>
                 <div className="mt-3 space-y-0 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40">
-                  {employee.role === "STAFF" && (
+                  {isPayrollRole(employee.role) && (
                     <>
                       <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
                       <InfoRow
@@ -453,6 +499,9 @@ export default function WorkerProfilePanel({
                           hasCustomShift(localEmployee) ? " (custom)" : " (default)"
                         }`}
                       />
+                      {employee.role === "SUPERVISOR" && (
+                        <InfoRow label="Login" value="Web panel" />
+                      )}
                     </>
                   )}
                   {localEmployee.role === "KAARIGER" && (
@@ -461,7 +510,34 @@ export default function WorkerProfilePanel({
                 </div>
               </section>
 
-              {localEmployee.role === "STAFF" && (
+              {localEmployee.role === "SUPERVISOR" && (
+                <section>
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    Web access
+                  </h3>
+                  <div className="mt-3 grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40 p-3 sm:grid-cols-2">
+                    {(Object.keys(SUPERVISOR_PERMISSION_LABELS) as SupervisorPermissionKey[]).map(
+                      (key) => (
+                        <label
+                          key={key}
+                          className={`flex items-center gap-2 text-sm ${accessSaving ? "opacity-60" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={supervisorAccessDraft[key]}
+                            disabled={accessSaving}
+                            onChange={(e) => toggleSupervisorPermission(key, e.target.checked)}
+                          />
+                          {SUPERVISOR_PERMISSION_LABELS[key]}
+                        </label>
+                      )
+                    )}
+                  </div>
+                  {accessMsg && <p className="mt-2 text-xs text-jade-deep">{accessMsg}</p>}
+                </section>
+              )}
+
+              {isPayrollRole(localEmployee.role) && (
                 <section>
                   <h3 className="section-title flex items-center gap-2 text-base">
                     <Clock size={16} className="text-jade-deep" />
@@ -588,7 +664,7 @@ export default function WorkerProfilePanel({
                 </section>
               )}
 
-              {employee.role === "STAFF" && (
+              {isPayrollRole(employee.role) && (
                 <section>
                   <h3 className="section-title flex items-center gap-2 text-base">
                     <Banknote size={16} className="text-jade-deep" />
@@ -675,7 +751,7 @@ export default function WorkerProfilePanel({
                 </section>
               )}
 
-              {employee.role === "STAFF" && (
+              {isPayrollRole(employee.role) && (
                 <section>
                   <h3 className="section-title flex items-center gap-2 text-base">
                     <Clock size={16} className="text-jade-deep" />
@@ -747,7 +823,7 @@ export default function WorkerProfilePanel({
                 </section>
               )}
 
-              {employee.role === "STAFF" && (
+              {isPayrollRole(employee.role) && (
                 <section>
                   <div className="flex items-center justify-between">
                     <h3 className="section-title flex items-center gap-2 text-base">
@@ -776,7 +852,7 @@ export default function WorkerProfilePanel({
         </div>
       </div>
 
-      {showCalendar && employee.role === "STAFF" && (
+      {showCalendar && isPayrollRole(employee.role) && (
         <EmployeeAttendancePanel
           employee={localEmployee}
           settings={settings}
