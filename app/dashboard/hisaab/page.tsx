@@ -373,16 +373,18 @@ export default function HisaabPage() {
   const openingBal = Math.max(0, selectedKaariger?.openingBalance || 0);
   const oldKharchaBal = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
-  const standaloneRepairTotal = useMemo(
+  const standaloneRepairs = useMemo(
     () =>
-      repairs
-        .filter(
-          (r) =>
-            isStandaloneRepair(r.orderId) &&
-            (!r.status || r.status === "APPROVED")
-        )
-        .reduce((s, r) => s + (r.totalRepairCost || 0), 0),
+      repairs.filter(
+        (r) =>
+          isStandaloneRepair(r.orderId) &&
+          (!r.status || r.status === "APPROVED")
+      ),
     [repairs]
+  );
+  const standaloneRepairTotal = useMemo(
+    () => standaloneRepairs.reduce((s, r) => s + (r.totalRepairCost || 0), 0),
+    [standaloneRepairs]
   );
   /** Legacy oldKharcha still on profile until next Saturday bill folds it into Remaining. */
   const runningBalance = openingBal + oldKharchaBal;
@@ -1304,6 +1306,77 @@ export default function HisaabPage() {
               </div>
             </>
           )}
+
+          {standaloneRepairs.length > 0 && (
+            <div className="surface space-y-4 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-display text-base font-bold">Standalone Repairs</p>
+                    <span className="badge badge-neutral">Approved</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                    Deducted directly from overall remaining balance (no bill)
+                  </p>
+                </div>
+                <div className="rounded-xl bg-red-50 px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-danger">Total Deducted</p>
+                  <p className="font-display text-sm font-bold text-danger">−{money(standaloneRepairTotal)}</p>
+                </div>
+              </div>
+
+              <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                {standaloneRepairs.map((r) => (
+                  <div key={r.id} className="p-2.5 text-sm">
+                    {/* Header row: product name + total */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[var(--text)]">
+                          {r.productName || "Repairing"}
+                        </p>
+                        {r.faultyQuantity > 0 && (
+                          <p className="text-xs text-[var(--text-muted)]">
+                            Faulty: {r.faultyQuantity} pcs × {money(r.faultyPricePerPiece)}
+                            {" "}= {money(r.faultyTotal)}
+                          </p>
+                        )}
+                        <p className="text-xs text-[var(--text-faint)]">
+                          {formatDate(r.createdAt)} · {r.createdBy}
+                          {r.notes ? ` · ${r.notes}` : ""}
+                        </p>
+                      </div>
+                      <span className="shrink-0 font-bold text-danger">−{money(r.totalRepairCost)}</span>
+                    </div>
+                    {/* Items breakdown */}
+                    {r.items && r.items.length > 0 && (
+                      <div className="mt-2 rounded-lg border border-[var(--border)] overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-[var(--surface-mist)]">
+                              <th className="px-2 py-1.5 text-left font-semibold text-[var(--text-muted)]">Item</th>
+                              <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Qty</th>
+                              <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Rate</th>
+                              <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {r.items.map((it, ii) => (
+                              <tr key={ii} className="border-t border-[var(--border)]">
+                                <td className="px-2 py-1.5 font-medium">{it.label}</td>
+                                <td className="px-2 py-1.5 text-right text-[var(--text-muted)]">{it.quantity}</td>
+                                <td className="px-2 py-1.5 text-right text-[var(--text-muted)]">{money(it.pricePerPiece)}</td>
+                                <td className="px-2 py-1.5 text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1784,17 +1857,51 @@ function OrderDetailCard({
           </p>
           <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
             {orderRepairs.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {r.faultyQuantity > 0 ? `${r.faultyQuantity} pcs × ${money(r.faultyPricePerPiece)}` : "—"}
-                  </p>
-                  <p className="text-xs text-[var(--text-muted)]">
-                    {formatDate(r.createdAt)} {formatTime(r.createdAt)} · by {r.createdBy}
-                    {r.notes ? ` · ${r.notes}` : ""}
-                  </p>
+              <div key={r.id} className="p-2.5 text-sm">
+                {/* Header row: product name + total */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[var(--text)]">
+                      {r.productName || "Repairing"}
+                    </p>
+                    {r.faultyQuantity > 0 && (
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Faulty: {r.faultyQuantity} pcs × {money(r.faultyPricePerPiece)}
+                        {" "}= {money(r.faultyTotal)}
+                      </p>
+                    )}
+                    <p className="text-xs text-[var(--text-faint)]">
+                      {formatDate(r.createdAt)} · {r.createdBy}
+                      {r.notes ? ` · ${r.notes}` : ""}
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-bold text-danger">−{money(r.totalRepairCost)}</span>
                 </div>
-                <span className="shrink-0 font-bold text-danger">−{money(r.totalRepairCost)}</span>
+                {/* Items breakdown */}
+                {r.items && r.items.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-[var(--border)] overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-[var(--surface-mist)]">
+                          <th className="px-2 py-1.5 text-left font-semibold text-[var(--text-muted)]">Item</th>
+                          <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Qty</th>
+                          <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Rate</th>
+                          <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.items.map((it, ii) => (
+                          <tr key={ii} className="border-t border-[var(--border)]">
+                            <td className="px-2 py-1.5 font-medium">{it.label}</td>
+                            <td className="px-2 py-1.5 text-right text-[var(--text-muted)]">{it.quantity}</td>
+                            <td className="px-2 py-1.5 text-right text-[var(--text-muted)]">{money(it.pricePerPiece)}</td>
+                            <td className="px-2 py-1.5 text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             ))}
             <div className="flex items-center justify-between bg-red-50 px-3 py-2 text-sm">
