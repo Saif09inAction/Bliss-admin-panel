@@ -113,6 +113,19 @@ export interface OrderProductLine {
   lineTotal: number;
 }
 
+/** One raw-material entry deducted from a kaariger bill. */
+export interface RawMaterialDeductionRef {
+  /** ID of the RawMaterialKaarigerEntry inside its bill */
+  entryId: string;
+  /** ID of the parent RawMaterialBill */
+  rawMaterialBillId: string;
+  billNo: string;
+  materialName: string;
+  totalQuantity: number;
+  ratePerPiece: number;
+  totalAmount: number;
+}
+
 export interface KaarigerOrder {
   id: string;
   kaarigerId: string;
@@ -146,6 +159,10 @@ export interface KaarigerOrder {
   materialDeductions?: RepairLineItem[];
   /** Sum of materialDeductions line totals. */
   materialDeductionsTotal?: number;
+  /** Raw-material entries explicitly deducted by admin when saving this bill. */
+  rawMaterialDeductions?: RawMaterialDeductionRef[];
+  /** Sum of rawMaterialDeductions totalAmount values. */
+  rawMaterialDeductionsTotal?: number;
   /**
    * This week's kharcha budget (set on Saturday bill create).
    * Full amount is cut from Remaining at create; Pay only fills/empties the Kharcha box.
@@ -351,6 +368,45 @@ export interface DeliveryPartner {
   name: string;
   createdAt: number;
 }
+
+// ─── Raw Material Billing ────────────────────────────────────────────────────
+
+export interface RawMaterialRoll {
+  rollNumber: number;
+  quantity: number; // pieces
+}
+
+export interface RawMaterialKaarigerEntry {
+  id: string;
+  /** Firestore employee phone (used as ID) */
+  kaarigerId: string;
+  kaarigerName: string;
+  materialName: string;
+  ratePerPiece: number;
+  rolls: RawMaterialRoll[];
+  totalQuantity: number;
+  totalAmount: number;
+  /** "pending" = not yet deducted from any bill; "adjusted" = already deducted */
+  adjustmentStatus: "pending" | "adjusted";
+  /** The kaariger_orders doc id this entry was deducted in */
+  adjustedInKaarigerBillId?: string;
+  adjustedAt?: number;
+}
+
+export interface RawMaterialBill {
+  id: string;
+  billNo: string;
+  date: string; // YYYY-MM-DD
+  kaarigers: RawMaterialKaarigerEntry[];
+  grandTotalQuantity: number;
+  grandTotalAmount: number;
+  status: "active" | "deleted";
+  createdAt: number;
+  createdBy: string;
+  deletedAt?: number;
+}
+
+// ─── Bill Report ─────────────────────────────────────────────────────────────
 
 /** Client's business entity that buys from suppliers (Bill Report). */
 export type BillOwner = "CLARIS" | "BLISS";

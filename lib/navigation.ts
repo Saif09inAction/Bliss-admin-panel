@@ -87,8 +87,8 @@ export const SIDEBAR_NAV: NavRoute[] = [
   },
   {
     href: "/dashboard/inventory",
-    label: "Inventory",
-    title: "Store Inventory",
+    label: "Raw Material",
+    title: "Raw Material",
     icon: "store",
     group: "catalog",
   },
@@ -190,7 +190,7 @@ export const ADMIN_MODULES = [
     icon: "catalog",
   },
   {
-    title: "Store Inventory",
+    title: "Raw Material",
     description: "",
     href: "/dashboard/inventory",
     icon: "store",

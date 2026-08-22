@@ -21,6 +21,8 @@ import type {
   Employee,
   KaarigerOrder,
   OrderProductLine,
+  RawMaterialBill,
+  RawMaterialDeductionRef,
   RepairItemType,
   RepairLineItem,
 } from "@/lib/types";
@@ -166,6 +168,39 @@ export default function OrdersPage() {
   /** Signed carry from active week(s) that will fold into next kharcha box only. */
   const [pendingKharchaCarry, setPendingKharchaCarry] = useState(0);
 
+  // ── Raw Material deductions ──────────────────────────────────────────────
+  /** All pending raw-material entries for the selected kaariger. */
+  type RmEntry = {
+    billId: string;
+    billNo: string;
+    entryId: string;
+    materialName: string;
+    totalQuantity: number;
+    ratePerPiece: number;
+    totalAmount: number;
+  };
+  const [rmEntries, setRmEntries] = useState<RmEntry[]>([]);
+  const [rmLoading, setRmLoading] = useState(false);
+  /** Entry IDs the admin has toggled on for deduction in this bill. */
+  const [rmSelected, setRmSelected] = useState<Set<string>>(new Set());
+
+  const rmDeductionTotal = useMemo(
+    () =>
+      rmEntries
+        .filter((e) => rmSelected.has(e.entryId))
+        .reduce((s, e) => s + e.totalAmount, 0),
+    [rmEntries, rmSelected]
+  );
+
+  function toggleRmEntry(entryId: string) {
+    setRmSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return next;
+    });
+  }
+
   function resetForm() {
     setKaarigerId("");
     setProductLines([emptyProductLine()]);
@@ -176,6 +211,8 @@ export default function OrdersPage() {
     setFormMsg("");
     setOutstanding(null);
     setPendingKharchaCarry(0);
+    setRmEntries([]);
+    setRmSelected(new Set());
     clearBillDraft();
   }
 
@@ -286,6 +323,49 @@ export default function OrdersPage() {
   useEffect(() => {
     loadMeta();
   }, []);
+
+  /** Fetch pending raw-material entries for the selected kaariger. */
+  useEffect(() => {
+    if (!kaarigerId) {
+      setRmEntries([]);
+      setRmSelected(new Set());
+      return;
+    }
+    let cancelled = false;
+    setRmLoading(true);
+    (async () => {
+      try {
+        const snap = await getDocs(collection(getDb(), "raw_material_bills"));
+        const entries: RmEntry[] = [];
+        snap.docs.forEach((d) => {
+          const bill = d.data() as RawMaterialBill & { id: string };
+          if (bill.status !== "active") return;
+          (bill.kaarigers || []).forEach((k) => {
+            if (k.kaarigerId !== kaarigerId) return;
+            if (k.adjustmentStatus === "adjusted") return;
+            entries.push({
+              billId: d.id,
+              billNo: bill.billNo,
+              entryId: k.id,
+              materialName: k.materialName,
+              totalQuantity: k.totalQuantity,
+              ratePerPiece: k.ratePerPiece,
+              totalAmount: k.totalAmount,
+            });
+          });
+        });
+        if (!cancelled) {
+          setRmEntries(entries);
+          setRmSelected(new Set());
+        }
+      } catch {
+        if (!cancelled) setRmEntries([]);
+      } finally {
+        if (!cancelled) setRmLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kaarigerId]);
 
   /** Always refresh balances when selecting a kaariger (Pay on Hisaab may have changed them). */
   useEffect(() => {
@@ -451,10 +531,13 @@ export default function OrdersPage() {
     const deductionLines: RepairLineItem[] = [...chargeLines, ...materialItemLines];
     const deductionsTotal = deductionLines.reduce((s, it) => s + it.lineTotal, 0);
 
-    const afterDeductions = Math.max(0, productsTotal - deductionsTotal);
+    // Raw-material deductions selected by admin for this bill
+    const totalAllDeductions = deductionsTotal + rmDeductionTotal;
+
+    const afterDeductions = Math.max(0, productsTotal - totalAllDeductions);
     const kharchaAmount = Number(kharcha) || 0;
-    // ADD = MAAL − deductions (kharcha budget is stored separately).
-    const addBalance = productsTotal - deductionsTotal;
+    // ADD = MAAL − all deductions (kharcha budget is stored separately).
+    const addBalance = productsTotal - totalAllDeductions;
     // Opening = outstanding Remaining (Pay does not change it; unpaid week does not fold in).
     const grossOpening = currentOpening + currentOldKharcha;
     const netOpening = totalRemainingAmount({
@@ -497,6 +580,7 @@ export default function OrdersPage() {
     currentOldKharcha,
     currentCredit,
     pendingKharchaCarry,
+    rmDeductionTotal,
   ]);
 
   function addMaterialLine() {
@@ -668,6 +752,20 @@ export default function OrdersPage() {
 
       const createdAt = Date.now();
       const weekMeta = weekLabelFromDate(createdAt);
+
+      // Build raw-material deduction refs for selected entries
+      const selectedRmEntries = rmEntries.filter((e) => rmSelected.has(e.entryId));
+      const rawMaterialDeductions: RawMaterialDeductionRef[] = selectedRmEntries.map((e) => ({
+        entryId: e.entryId,
+        rawMaterialBillId: e.billId,
+        billNo: e.billNo,
+        materialName: e.materialName,
+        totalQuantity: e.totalQuantity,
+        ratePerPiece: e.ratePerPiece,
+        totalAmount: e.totalAmount,
+      }));
+      const rawMaterialDeductionsTotal = rawMaterialDeductions.reduce((s, r) => s + r.totalAmount, 0);
+
       const order: KaarigerOrder = {
         id,
         kaarigerId: kaariger.phone,
@@ -688,6 +786,8 @@ export default function OrdersPage() {
         productsTotal: calc.productsTotal,
         materialDeductions: calc.deductionLines,
         materialDeductionsTotal: calc.deductionsTotal,
+        rawMaterialDeductions,
+        rawMaterialDeductionsTotal,
         kharchaGiven: calc.kharchaAmount,
         kharchaCarryIn: carryIn,
         kharchaCarriedForward: 0,
@@ -704,6 +804,37 @@ export default function OrdersPage() {
       order.closingAtCreation = closingAtCreation;
 
       await setDoc(doc(db, "kaariger_orders", id), order);
+
+      // Mark each selected raw-material entry as adjusted
+      if (selectedRmEntries.length > 0) {
+        // Group by bill to do one read+update per bill
+        const byBill = new Map<string, string[]>();
+        selectedRmEntries.forEach((e) => {
+          if (!byBill.has(e.billId)) byBill.set(e.billId, []);
+          byBill.get(e.billId)!.push(e.entryId);
+        });
+        await Promise.all(
+          Array.from(byBill.entries()).map(async ([billId, entryIds]) => {
+            const billSnap = await getDocs(
+              query(collection(db, "raw_material_bills"), where("__name__", "==", billId))
+            );
+            if (billSnap.empty) return;
+            const billData = billSnap.docs[0].data() as RawMaterialBill;
+            const updatedKaarigers = billData.kaarigers.map((k) => {
+              if (!entryIds.includes(k.id)) return k;
+              return {
+                ...k,
+                adjustmentStatus: "adjusted" as const,
+                adjustedInKaarigerBillId: id,
+                adjustedAt: createdAt,
+              };
+            });
+            await updateDoc(doc(db, "raw_material_bills", billId), {
+              kaarigers: updatedKaarigers,
+            });
+          })
+        );
+      }
       await updateDoc(doc(db, "employees", kaariger.phone), {
         openingBalance: Math.max(0, closingAtCreation),
         oldKharcha: 0,
@@ -1055,6 +1186,75 @@ export default function OrdersPage() {
           </div>
         </div>
 
+        {/* ── Raw Material Deductions ─────────────────────────────────── */}
+        {kaarigerId && (
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Package className="h-3.5 w-3.5 text-[var(--jade-deep)]" />
+              <p className="label mb-0">Raw Material Deductions</p>
+            </div>
+            {rmLoading ? (
+              <p className="rounded-xl border border-[var(--border)] px-3 py-3 text-sm text-[var(--text-muted)]">
+                Loading…
+              </p>
+            ) : rmEntries.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-3 text-center text-xs text-[var(--text-muted)]">
+                No pending raw-material entries for this kaariger.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {rmEntries.map((e) => {
+                  const added = rmSelected.has(e.entryId);
+                  return (
+                    <div
+                      key={e.entryId}
+                      className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition ${
+                        added
+                          ? "border-danger/30 bg-red-50"
+                          : "border-[var(--border)] bg-[var(--surface-raised)]"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">
+                          {e.materialName}
+                          <span className="ml-1.5 text-xs font-normal text-[var(--text-muted)]">
+                            RM-{e.billNo}
+                          </span>
+                        </p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {e.totalQuantity.toLocaleString("en-IN")} pcs × ₹{e.ratePerPiece}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className={`font-bold ${added ? "text-danger" : "text-[var(--text)]"}`}>
+                          {added ? "−" : ""}₹{e.totalAmount.toLocaleString("en-IN")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleRmEntry(e.entryId)}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                            added
+                              ? "bg-danger/10 text-danger hover:bg-danger/20"
+                              : "bg-[var(--jade-soft)] text-[var(--jade-deep)] hover:bg-[var(--jade-soft)]/80"
+                          }`}
+                        >
+                          {added ? "✕ Remove" : "+ Add"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {rmDeductionTotal > 0 && (
+              <div className="mt-2.5 flex items-center justify-between rounded-xl bg-red-50 px-3 py-2.5 text-sm">
+                <span className="font-medium text-danger">Raw Material Total</span>
+                <span className="font-bold text-danger">−{money(rmDeductionTotal)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="label">
             <span className="inline-flex items-center gap-1.5">
@@ -1103,6 +1303,9 @@ export default function OrdersPage() {
             )}
             <Row label="MAAL (products)" value={money(calc.productsTotal)} />
             <Row label="Less: Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} />
+            {rmDeductionTotal > 0 && (
+              <Row label="Less: Raw Material deductions" value={`−${money(rmDeductionTotal)}`} />
+            )}
             <div className="my-2 border-t border-jade/20" />
             <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
             <Row label="Running balance after ADD" value={money(calc.runningAfterAdd)} bold />
