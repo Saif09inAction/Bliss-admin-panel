@@ -1964,7 +1964,7 @@ function GrandTotalBox({
   const weekKharcha = Math.max(0, order.kharchaGiven || 0);
   const addBalance =
     order.addBalance != null
-      ? order.addBalance
+      ? (order.status !== "COMPLETED" ? order.addBalance - activeStandaloneTotal : order.addBalance)
       : productsTotal - deductionsTotal - repairTotal - activeStandaloneTotal;
   const opening =
     order.openingAtCreation != null
