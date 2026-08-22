@@ -1306,77 +1306,6 @@ export default function HisaabPage() {
               </div>
             </>
           )}
-
-          {standaloneRepairs.length > 0 && (
-            <div className="surface space-y-4 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-display text-base font-bold">Standalone Repairs</p>
-                    <span className="badge badge-neutral">Approved</span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                    Deducted directly from overall remaining balance (no bill)
-                  </p>
-                </div>
-                <div className="rounded-xl bg-red-50 px-3 py-2">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-danger">Total Deducted</p>
-                  <p className="font-display text-sm font-bold text-danger">−{money(standaloneRepairTotal)}</p>
-                </div>
-              </div>
-
-              <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                {standaloneRepairs.map((r) => (
-                  <div key={r.id} className="p-2.5 text-sm">
-                    {/* Header row: product name + total */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-[var(--text)]">
-                          {r.productName || "Repairing"}
-                        </p>
-                        {r.faultyQuantity > 0 && (
-                          <p className="text-xs text-[var(--text-muted)]">
-                            Faulty: {r.faultyQuantity} pcs × {money(r.faultyPricePerPiece)}
-                            {" "}= {money(r.faultyTotal)}
-                          </p>
-                        )}
-                        <p className="text-xs text-[var(--text-faint)]">
-                          {formatDate(r.createdAt)} · {r.createdBy}
-                          {r.notes ? ` · ${r.notes}` : ""}
-                        </p>
-                      </div>
-                      <span className="shrink-0 font-bold text-danger">−{money(r.totalRepairCost)}</span>
-                    </div>
-                    {/* Items breakdown */}
-                    {r.items && r.items.length > 0 && (
-                      <div className="mt-2 rounded-lg border border-[var(--border)] overflow-hidden">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="bg-[var(--surface-mist)]">
-                              <th className="px-2 py-1.5 text-left font-semibold text-[var(--text-muted)]">Item</th>
-                              <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Qty</th>
-                              <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Rate</th>
-                              <th className="px-2 py-1.5 text-right font-semibold text-[var(--text-muted)]">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {r.items.map((it, ii) => (
-                              <tr key={ii} className="border-t border-[var(--border)]">
-                                <td className="px-2 py-1.5 font-medium">{it.label}</td>
-                                <td className="px-2 py-1.5 text-right text-[var(--text-muted)]">{it.quantity}</td>
-                                <td className="px-2 py-1.5 text-right text-[var(--text-muted)]">{money(it.pricePerPiece)}</td>
-                                <td className="px-2 py-1.5 text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -1706,7 +1635,18 @@ function OrderDetailCard({
     .sort((a, b) => `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`));
   const orderRepairs = repairs.filter((r) => r.orderId === order.id && isApprovedRepair(r));
 
-  const net = orderNetDeal(order);
+  const activeStandaloneRepairs = useMemo(
+    () => repairs.filter((r) => isStandaloneRepair(r.orderId) && isApprovedRepair(r)),
+    [repairs]
+  );
+  const activeStandaloneTotal = useMemo(
+    () => activeStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0),
+    [activeStandaloneRepairs]
+  );
+
+  const net = order.status !== "COMPLETED"
+    ? Math.max(0, (order.originalDealAmount ?? order.totalDealAmount) - (order.repairDeductionTotal || 0) - activeStandaloneTotal)
+    : orderNetDeal(order);
   const paid = orderPayments.reduce((s, p) => s + p.amount, 0);
   const box = orderKharchaBalance(order, paid);
   const balance = box;
@@ -1817,7 +1757,8 @@ function OrderDetailCard({
         </div>
       )}
 
-      {order.materialDeductions && order.materialDeductions.length > 0 && (
+      {((order.materialDeductions && order.materialDeductions.length > 0) ||
+        (order.status !== "COMPLETED" && activeStandaloneRepairs.length > 0)) && (
         <div>
           <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
             <Package className="h-3.5 w-3.5" />
@@ -1826,7 +1767,7 @@ function OrderDetailCard({
           <div className="overflow-hidden rounded-xl border border-[var(--border)]">
             <table className="w-full text-sm">
               <tbody>
-                {order.materialDeductions.map((it, i) => (
+                {order.materialDeductions?.map((it, i) => (
                   <tr key={i} className={i % 2 === 1 ? "bg-[var(--surface-mist)]" : undefined}>
                     <td className="px-3 py-2 font-medium">{it.label}</td>
                     <td className="px-3 py-2 text-[var(--text-muted)]">
@@ -1835,12 +1776,34 @@ function OrderDetailCard({
                     <td className="px-3 py-2 text-right font-semibold text-danger">−{money(it.lineTotal)}</td>
                   </tr>
                 ))}
+                {order.status !== "COMPLETED" &&
+                  activeStandaloneRepairs.map((r, i) => (
+                    <tr
+                      key={r.id}
+                      className={
+                        ((order.materialDeductions?.length || 0) + i) % 2 === 1
+                          ? "bg-[var(--surface-mist)]"
+                          : undefined
+                      }
+                    >
+                      <td className="px-3 py-2 font-medium">Repairing - {r.productName}</td>
+                      <td className="px-3 py-2 text-[var(--text-muted)]">
+                        {r.faultyQuantity} × ₹{r.faultyPricePerPiece}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold text-danger">
+                        −{money(r.totalRepairCost)}
+                      </td>
+                    </tr>
+                  ))}
                 <tr className="bg-red-50">
                   <td colSpan={2} className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-danger">
                     Deductions Total
                   </td>
                   <td className="px-3 py-2 text-right font-bold text-danger">
-                    −{money(order.materialDeductionsTotal ?? 0)}
+                    −{money(
+                      (order.materialDeductionsTotal ?? 0) +
+                        (order.status !== "COMPLETED" ? activeStandaloneTotal : 0)
+                    )}
                   </td>
                 </tr>
               </tbody>
@@ -1967,6 +1930,7 @@ function OrderDetailCard({
         payments={orderPayments}
         openingBalance={openingBalance}
         oldKharcha={oldKharcha}
+        activeStandaloneRepairs={order.status !== "COMPLETED" ? activeStandaloneRepairs : []}
       />
     </div>
   );
@@ -1982,23 +1946,26 @@ function GrandTotalBox({
   payments,
   openingBalance = 0,
   oldKharcha = 0,
+  activeStandaloneRepairs = [],
 }: {
   order: KaarigerOrder;
   payments: KaarigerPayment[];
   openingBalance?: number;
   oldKharcha?: number;
+  activeStandaloneRepairs?: OrderRepair[];
 }) {
   const productsTotal = order.productsTotal ?? 0;
   const deductionLines = order.materialDeductions || [];
   const deductionsTotal =
     order.materialDeductionsTotal ??
     deductionLines.reduce((s, it) => s + (it.lineTotal || 0), 0);
+  const activeStandaloneTotal = activeStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
   const repairTotal = order.repairDeductionTotal || 0;
   const weekKharcha = Math.max(0, order.kharchaGiven || 0);
   const addBalance =
     order.addBalance != null
       ? order.addBalance
-      : productsTotal - deductionsTotal - repairTotal;
+      : productsTotal - deductionsTotal - repairTotal - activeStandaloneTotal;
   const opening =
     order.openingAtCreation != null
       ? Math.max(0, order.openingAtCreation)
@@ -2036,6 +2003,13 @@ function GrandTotalBox({
                 value={`−${money(deductionsTotal)}`}
               />
             )}
+        {activeStandaloneRepairs.map((r, i) => (
+          <Row
+            key={`grand-standalone-${r.id}-${i}`}
+            label={`Less: Repairing - ${r.productName || "Repairing"}`}
+            value={`−${money(r.totalRepairCost)}`}
+          />
+        ))}
         {repairTotal > 0 && (
           <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
         )}

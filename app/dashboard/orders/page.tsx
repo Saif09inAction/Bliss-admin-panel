@@ -25,6 +25,7 @@ import type {
   RawMaterialDeductionRef,
   RepairItemType,
   RepairLineItem,
+  OrderRepair,
 } from "@/lib/types";
 import { isStandaloneRepair } from "@/lib/types";
 import { formatRupee, uuid } from "@/lib/csv";
@@ -167,6 +168,7 @@ export default function OrdersPage() {
   const [outstandingLoading, setOutstandingLoading] = useState(false);
   /** Signed carry from active week(s) that will fold into next kharcha box only. */
   const [pendingKharchaCarry, setPendingKharchaCarry] = useState(0);
+  const [activeStandaloneRepairs, setActiveStandaloneRepairs] = useState<OrderRepair[]>([]);
 
   // ── Raw Material deductions ──────────────────────────────────────────────
   /** All pending raw-material entries for the selected kaariger. */
@@ -213,6 +215,7 @@ export default function OrdersPage() {
     setPendingKharchaCarry(0);
     setRmEntries([]);
     setRmSelected(new Set());
+    setActiveStandaloneRepairs([]);
     clearBillDraft();
   }
 
@@ -460,14 +463,31 @@ export default function OrdersPage() {
           carryOut += orderKharchaCarryOut(order, paidByOrder.get(order.id) || 0);
         });
 
-        const standaloneRepairTotal = repairSnap.docs.reduce((s, d) => {
-          const data = d.data();
-          const orderId = (data.orderId as string) || "";
-          const status = (data.status as string) || "APPROVED";
-          if (!isStandaloneRepair(orderId)) return s;
-          if (status && status !== "APPROVED") return s;
-          return s + ((data.totalRepairCost as number) || 0);
-        }, 0);
+        const approvedStandaloneRepairs = repairSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              orderId: (data.orderId as string) || "",
+              kaarigerId: kaarigerId,
+              kaarigerName: data.kaarigerName as string,
+              productName: data.productName as string,
+              faultyQuantity: (data.faultyQuantity as number) || 0,
+              faultyPricePerPiece: (data.faultyPricePerPiece as number) || 0,
+              faultyTotal: (data.faultyTotal as number) || 0,
+              totalRepairCost: (data.totalRepairCost as number) || 0,
+              items: data.items || [],
+              createdAt: data.createdAt as number,
+              createdBy: data.createdBy as string,
+              notes: data.notes as string | undefined,
+              status: data.status as any,
+              originalDealAmount: (data.originalDealAmount as number) || 0,
+              dealAfterThisRepair: (data.dealAfterThisRepair as number) || 0,
+            } satisfies OrderRepair;
+          })
+          .filter((r) => isStandaloneRepair(r.orderId) && (r.status === "APPROVED" || !r.status));
+
+        const standaloneRepairTotal = approvedStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
 
         const openingBalance = Math.max(0, selectedKaariger.openingBalance || 0);
         const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
@@ -480,6 +500,7 @@ export default function OrdersPage() {
         if (!cancelled) {
           setPendingKharchaCarry(carryOut);
           setOutstanding(total);
+          setActiveStandaloneRepairs(approvedStandaloneRepairs);
         }
       } catch {
         if (!cancelled) {
@@ -531,8 +552,9 @@ export default function OrdersPage() {
     const deductionLines: RepairLineItem[] = [...chargeLines, ...materialItemLines];
     const deductionsTotal = deductionLines.reduce((s, it) => s + it.lineTotal, 0);
 
+    const standaloneRepairsTotal = activeStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
     // Raw-material deductions selected by admin for this bill
-    const totalAllDeductions = deductionsTotal + rmDeductionTotal;
+    const totalAllDeductions = deductionsTotal + rmDeductionTotal + standaloneRepairsTotal;
 
     const afterDeductions = Math.max(0, productsTotal - totalAllDeductions);
     const kharchaAmount = Number(kharcha) || 0;
@@ -581,6 +603,7 @@ export default function OrdersPage() {
     currentCredit,
     pendingKharchaCarry,
     rmDeductionTotal,
+    activeStandaloneRepairs,
   ]);
 
   function addMaterialLine() {
@@ -766,6 +789,8 @@ export default function OrdersPage() {
       }));
       const rawMaterialDeductionsTotal = rawMaterialDeductions.reduce((s, r) => s + r.totalAmount, 0);
 
+      const standaloneRepairsCost = activeStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
+
       const order: KaarigerOrder = {
         id,
         kaarigerId: kaariger.phone,
@@ -788,6 +813,7 @@ export default function OrdersPage() {
         materialDeductionsTotal: calc.deductionsTotal,
         rawMaterialDeductions,
         rawMaterialDeductionsTotal,
+        repairDeductionTotal: standaloneRepairsCost,
         kharchaGiven: calc.kharchaAmount,
         kharchaCarryIn: carryIn,
         kharchaCarriedForward: 0,
@@ -804,6 +830,17 @@ export default function OrdersPage() {
       order.closingAtCreation = closingAtCreation;
 
       await setDoc(doc(db, "kaariger_orders", id), order);
+
+      // Link standalone repairs to this finalized order
+      if (activeStandaloneRepairs.length > 0) {
+        await Promise.all(
+          activeStandaloneRepairs.map((r) =>
+            updateDoc(doc(db, "order_repairs", r.id), {
+              orderId: id,
+            })
+          )
+        );
+      }
 
       // Mark each selected raw-material entry as adjusted
       if (selectedRmEntries.length > 0) {
@@ -1306,6 +1343,13 @@ export default function OrdersPage() {
             {rmDeductionTotal > 0 && (
               <Row label="Less: Raw Material deductions" value={`−${money(rmDeductionTotal)}`} />
             )}
+            {activeStandaloneRepairs.map((r, i) => (
+              <Row
+                key={`preview-standalone-${r.id}-${i}`}
+                label={`Less: Repairing - ${r.productName}`}
+                value={`−${money(r.totalRepairCost)}`}
+              />
+            ))}
             <div className="my-2 border-t border-jade/20" />
             <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
             <Row label="Running balance after ADD" value={money(calc.runningAfterAdd)} bold />
