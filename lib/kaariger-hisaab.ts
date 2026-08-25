@@ -1,4 +1,5 @@
-import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
+import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
+import { isStandaloneRepair } from "@/lib/types";
 
 /**
  * Simple Remaining + Kharcha:
@@ -246,6 +247,10 @@ type RawEvent = {
  * Bill ADD +, week kharcha budget − Remaining once and fills the box (net of carryIn).
  * Pay lines: deltaRemaining = 0, deltaKharcha = −paid.
  */
+function isApprovedRepair(r: OrderRepair) {
+  return !r.status || r.status === "APPROVED";
+}
+
 export function buildHisaabLedger(opts: {
   orders: KaarigerOrder[];
   payments: KaarigerPayment[];
@@ -253,6 +258,7 @@ export function buildHisaabLedger(opts: {
   oldKharcha?: number;
   creditBalance?: number;
   standaloneRepairTotal?: number;
+  repairs?: OrderRepair[];
 }): HisaabLedgerLine[] {
   const orders = [...opts.orders].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const payments = [...opts.payments].sort((a, b) => paymentSortKey(a) - paymentSortKey(b));
@@ -302,16 +308,34 @@ export function buildHisaabLedger(opts: {
     });
   }
 
-  const repair = Math.max(0, opts.standaloneRepairTotal || 0);
-  if (repair > 0) {
-    events.push({
-      id: "standalone_repair",
-      kind: "repair",
-      title: "Repairing (no bill)",
-      deltaRemaining: -repair,
-      deltaKharcha: 0,
-      at: startAt + 3,
+  const approvedStandaloneRepairs = (opts.repairs || []).filter(
+    (r) => isStandaloneRepair(r.orderId) && isApprovedRepair(r)
+  );
+
+  if (approvedStandaloneRepairs.length > 0) {
+    approvedStandaloneRepairs.forEach((r, idx) => {
+      events.push({
+        id: `standalone_repair_${r.id}`,
+        kind: "repair",
+        title: `Repairing - ${r.productName || "Repairing"}`,
+        subtitle: r.faultyQuantity > 0 ? `${r.faultyQuantity} × ₹${r.faultyPricePerPiece}` : undefined,
+        deltaRemaining: -r.totalRepairCost,
+        deltaKharcha: 0,
+        at: startAt + 3 + idx * 0.01,
+      });
     });
+  } else {
+    const repair = Math.max(0, opts.standaloneRepairTotal || 0);
+    if (repair > 0) {
+      events.push({
+        id: "standalone_repair",
+        kind: "repair",
+        title: "Repairing (no bill)",
+        deltaRemaining: -repair,
+        deltaKharcha: 0,
+        at: startAt + 3,
+      });
+    }
   }
 
   for (let i = 0; i < orders.length; i++) {

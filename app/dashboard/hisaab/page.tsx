@@ -497,8 +497,9 @@ export default function HisaabPage() {
         oldKharcha: oldKharchaBal,
         creditBalance: creditBal,
         standaloneRepairTotal,
+        repairs,
       }),
-    [orders, payments, openingBal, oldKharchaBal, creditBal, standaloneRepairTotal]
+    [orders, payments, openingBal, oldKharchaBal, creditBal, standaloneRepairTotal, repairs]
   );
 
   /** Remaining breakdown: only lines that move Total Remaining (no kharcha-only Pays). */
