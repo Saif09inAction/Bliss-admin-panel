@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 import {
   AlertCircle,
   Banknote,
@@ -246,6 +246,18 @@ export default function SalaryPage() {
     }
     return { totalDue, totalPaid, unpaidCount };
   }, [staff, payments, attendance, periodOffset, today, settings, overrides]);
+
+  // Sync computed remaining salary to Firestore so mobile app can read it directly
+  useEffect(() => {
+    if (periodOffset !== 0) return; // Only sync current period
+    rows.forEach((r) => {
+      if (r.employee.phone && r.employee.salaryRemaining !== r.earnedDue) {
+        updateDoc(doc(getDb(), "employees", r.employee.phone), {
+          salaryRemaining: r.earnedDue
+        }).catch(() => {});
+      }
+    });
+  }, [rows, periodOffset]);
 
   function openPay(row: SalaryRow, mode: PayMode = "EARNED") {
     setPayTarget(row);

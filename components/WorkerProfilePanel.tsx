@@ -269,6 +269,15 @@ export default function WorkerProfilePanel({
   const payStatus = salaryStatus(netSalary, paidThisMonth);
   const salaryRemaining = Math.max(0, netSalary - paidThisMonth);
 
+  useEffect(() => {
+    const roundedRemaining = Math.round(salaryRemaining * 100) / 100;
+    if (employee?.phone && Number.isFinite(roundedRemaining) && employee.salaryRemaining !== roundedRemaining) {
+      updateDoc(doc(getDb(), "employees", employee.phone), {
+        salaryRemaining: roundedRemaining
+      }).catch(() => {});
+    }
+  }, [employee?.phone, employee?.salaryRemaining, salaryRemaining]);
+
   const recentPayments = useMemo(
     () =>
       [...payments]

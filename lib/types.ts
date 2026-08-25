@@ -58,6 +58,7 @@ export interface Employee {
    */
   dailySignInTime?: string;
   dailySignOutTime?: string;
+  salaryRemaining?: number;
   /** Web supervisor — admin toggles which dashboard sections are visible. */
   supervisorAccess?: Partial<SupervisorAccess>;
 }
