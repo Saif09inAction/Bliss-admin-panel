@@ -398,6 +398,7 @@ export interface RawMaterialBill {
   id: string;
   billNo: string;
   date: string; // YYYY-MM-DD
+  companyName?: string;
   kaarigers: RawMaterialKaarigerEntry[];
   grandTotalQuantity: number;
   grandTotalAmount: number;

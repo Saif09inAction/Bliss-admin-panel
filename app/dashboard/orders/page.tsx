@@ -175,6 +175,7 @@ export default function OrdersPage() {
   type RmEntry = {
     billId: string;
     billNo: string;
+    companyName?: string;
     entryId: string;
     materialName: string;
     totalQuantity: number;
@@ -349,6 +350,7 @@ export default function OrdersPage() {
             entries.push({
               billId: d.id,
               billNo: bill.billNo,
+              companyName: bill.companyName,
               entryId: k.id,
               materialName: k.materialName,
               totalQuantity: k.totalQuantity,
@@ -1255,7 +1257,7 @@ export default function OrdersPage() {
                         <p className="text-sm font-semibold">
                           {e.materialName}
                           <span className="ml-1.5 text-xs font-normal text-[var(--text-muted)]">
-                            RM-{e.billNo}
+                            RM-{e.billNo}{e.companyName ? ` (${e.companyName})` : ""}
                           </span>
                         </p>
                         <p className="text-xs text-[var(--text-muted)]">

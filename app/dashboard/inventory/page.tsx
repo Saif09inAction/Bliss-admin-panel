@@ -282,6 +282,7 @@ function BillDetailModal({
           <div>
             <h3 className="font-display text-lg font-bold">Bill #{bill.billNo}</h3>
             <p className="text-sm text-[var(--text-muted)]">
+              {bill.companyName && <span className="font-semibold text-[var(--text)]">{bill.companyName} · </span>}
               {fmtDate(bill.date)} · {bill.kaarigers.length} Kaariger
               {bill.kaarigers.length !== 1 ? "s" : ""}
             </p>
@@ -491,6 +492,9 @@ function BillCard({
       <button type="button" onClick={onView} className="flex flex-1 flex-col gap-1 text-left">
         <div className="flex items-center gap-2">
           <span className="font-display font-bold">#{bill.billNo}</span>
+          {bill.companyName && (
+            <span className="text-xs text-[var(--text-muted)]">({bill.companyName})</span>
+          )}
           <span className="rounded-full bg-[var(--jade-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--jade-deep)]">
             Active
           </span>
@@ -562,6 +566,9 @@ function HistoryBillCard({
       <button type="button" onClick={onView} className="flex flex-1 flex-col gap-1 text-left">
         <div className="flex items-center gap-2">
           <span className="font-display font-bold">#{bill.billNo}</span>
+          {bill.companyName && (
+            <span className="text-xs text-[var(--text-muted)]">({bill.companyName})</span>
+          )}
           <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">
             Archived
           </span>
@@ -631,6 +638,7 @@ function AddBillModal({
 
   const [billNo, setBillNo] = useState(initialBill?.billNo ?? "");
   const [date, setDate] = useState(initialBill?.date ?? today());
+  const [companyName, setCompanyName] = useState(initialBill?.companyName ?? "");
   const [kaarigerEntries, setKaarigerEntries] = useState<FormKaariger[]>(() => {
     if (initialBill?.kaarigers?.length) {
       return initialBill.kaarigers.map((k) => ({
@@ -719,6 +727,7 @@ function AddBillModal({
     onSave({
       billNo: billNo.trim(),
       date,
+      companyName: companyName.trim(),
       kaarigers: builtKaarigers,
       grandTotalQuantity,
       grandTotalAmount,
@@ -755,7 +764,7 @@ function AddBillModal({
           onClick={(e) => e.stopPropagation()}
         >
           {/* Bill info */}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <label className="label">Bill No. *</label>
               <input
@@ -773,6 +782,15 @@ function AddBillModal({
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Company Name</label>
+              <input
+                className="input"
+                placeholder="e.g. Bliss Fabrics"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
               />
             </div>
           </div>
@@ -909,6 +927,7 @@ export default function RawMaterialPage() {
         (b) =>
           !q ||
           b.billNo.toLowerCase().includes(q) ||
+          (b.companyName && b.companyName.toLowerCase().includes(q)) ||
           b.kaarigers.some(
             (k) =>
               k.kaarigerName.toLowerCase().includes(q) ||
@@ -925,6 +944,7 @@ export default function RawMaterialPage() {
         (b) =>
           !q ||
           b.billNo.toLowerCase().includes(q) ||
+          (b.companyName && b.companyName.toLowerCase().includes(q)) ||
           b.kaarigers.some(
             (k) =>
               k.kaarigerName.toLowerCase().includes(q) ||
@@ -1003,6 +1023,7 @@ export default function RawMaterialPage() {
       await updateDoc(doc(getDb(), "raw_material_bills", billId), {
         billNo: partial.billNo,
         date: partial.date,
+        companyName: partial.companyName ?? "",
         kaarigers: partial.kaarigers,
         grandTotalQuantity: partial.grandTotalQuantity,
         grandTotalAmount: partial.grandTotalAmount,
@@ -1135,6 +1156,7 @@ export default function RawMaterialPage() {
                 <tr>
                   <th>Bill No.</th>
                   <th>Date</th>
+                  <th>Company</th>
                   <th>Kaarigers</th>
                   <th>Total Qty</th>
                   <th>Total Amount</th>
@@ -1145,7 +1167,7 @@ export default function RawMaterialPage() {
               <tbody>
                 {activeBills.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-sm text-[var(--text-muted)]">
+                    <td colSpan={8} className="py-12 text-center text-sm text-[var(--text-muted)]">
                       {search ? "No bills match your search." : "No raw material bills yet. Click \"+ Add Raw Material\" to create one."}
                     </td>
                   </tr>
@@ -1175,6 +1197,7 @@ export default function RawMaterialPage() {
                           </div>
                         </td>
                         <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
+                        <td>{bill.companyName || "—"}</td>
                         <td>{bill.kaarigers.length}</td>
                         <td className="font-semibold">
                           {bill.grandTotalQuantity.toLocaleString("en-IN")} pcs
@@ -1221,6 +1244,7 @@ export default function RawMaterialPage() {
                           <tr key={`${bill.id}-k${ki}`} className="bg-[var(--jade-soft)]/30 text-sm">
                             <td className="pl-8 text-[var(--text-muted)]">└ {k.kaarigerName}</td>
                             <td className="text-[var(--text-muted)]">{k.materialName}</td>
+                            <td />
                             <td className="text-[var(--text-muted)]">{rupee(k.ratePerPiece)}/pc</td>
                             <td className="font-medium">{k.totalQuantity.toLocaleString("en-IN")} pcs</td>
                             <td className="font-medium text-[var(--jade-deep)]">{rupee(k.totalAmount)}</td>
@@ -1253,6 +1277,7 @@ export default function RawMaterialPage() {
                 <tr>
                   <th>Bill No.</th>
                   <th>Date</th>
+                  <th>Company</th>
                   <th>Archived On</th>
                   <th>Kaarigers</th>
                   <th>Total Qty</th>
@@ -1263,7 +1288,7 @@ export default function RawMaterialPage() {
               <tbody>
                 {historyBills.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-sm text-[var(--text-muted)]">
+                    <td colSpan={8} className="py-12 text-center text-sm text-[var(--text-muted)]">
                       {search ? "No archived bills match." : "No archived bills yet. Deleted bills appear here."}
                     </td>
                   </tr>
@@ -1272,6 +1297,7 @@ export default function RawMaterialPage() {
                     <tr key={bill.id} className="opacity-75">
                       <td><span className="font-semibold">#{bill.billNo}</span></td>
                       <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
+                      <td>{bill.companyName || "—"}</td>
                       <td className="text-[var(--text-muted)]">{bill.deletedAt ? fmtTs(bill.deletedAt) : "—"}</td>
                       <td>{bill.kaarigers.length}</td>
                       <td>{bill.grandTotalQuantity.toLocaleString("en-IN")} pcs</td>
