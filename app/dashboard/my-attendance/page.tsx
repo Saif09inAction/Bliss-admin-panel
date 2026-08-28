@@ -39,6 +39,18 @@ export default function MyAttendancePage() {
   const [msg, setMsg] = useState("");
   const [gpsError, setGpsError] = useState<string | null>(null);
 
+  const isIOS = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }, []);
+
+  const [guideTab, setGuideTab] = useState<"ios" | "desktop">("desktop");
+
+  useEffect(() => {
+    if (isIOS) setGuideTab("ios");
+  }, [isIOS]);
+
   const today = todayStr();
   const phone = session?.phone ?? "";
 
@@ -244,14 +256,44 @@ export default function MyAttendancePage() {
                 </div>
 
                 {gpsError.toLowerCase().includes("permission denied") ? (
-                  <div className="rounded-lg bg-white/60 p-3 text-xs text-red-800 space-y-1.5 border border-red-200">
-                    <p className="font-semibold">How to enable location:</p>
-                    <ol className="list-decimal list-inside space-y-1 pl-1">
-                      <li>Click the <strong>lock/settings icon</strong> (or blocked location icon) next to the website URL in your address bar.</li>
-                      <li>Change the <strong>Location</strong> setting to <strong>Allow</strong>.</li>
-                      <li>Click <strong>"Reload Page"</strong> or refresh your browser.</li>
-                    </ol>
-                    <div className="pt-1.5">
+                  <div className="rounded-lg bg-white/60 p-3 text-xs text-red-800 space-y-2 border border-red-200">
+                    <div className="flex gap-1.5 border-b border-red-200/50 pb-1.5 mb-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setGuideTab("desktop")}
+                        className={`px-2 py-0.5 rounded font-semibold transition ${
+                          guideTab === "desktop" ? "bg-red-200/60 text-red-900" : "text-red-700/80 hover:text-red-900"
+                        }`}
+                      >
+                        Desktop / Android
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGuideTab("ios")}
+                        className={`px-2 py-0.5 rounded font-semibold transition ${
+                          guideTab === "ios" ? "bg-red-200/60 text-red-900" : "text-red-700/80 hover:text-red-900"
+                        }`}
+                      >
+                        iPhone (iOS)
+                      </button>
+                    </div>
+
+                    {guideTab === "ios" ? (
+                      <ol className="list-decimal list-inside space-y-1 pl-1">
+                        <li>Open your iPhone <strong>Settings</strong> app.</li>
+                        <li>Scroll down and tap on your browser (e.g., <strong>Chrome</strong> or <strong>Safari</strong>).</li>
+                        <li>Tap <strong>Location</strong> and select <strong>While Using the App</strong>.</li>
+                        <li>Return here and click <strong>"Reload Page"</strong> below.</li>
+                      </ol>
+                    ) : (
+                      <ol className="list-decimal list-inside space-y-1 pl-1">
+                        <li>Click the <strong>lock/settings icon</strong> (or blocked location icon) next to the website URL in your address bar.</li>
+                        <li>Change the <strong>Location</strong> setting to <strong>Allow</strong>.</li>
+                        <li>Click <strong>"Reload Page"</strong> or refresh your browser.</li>
+                      </ol>
+                    )}
+
+                    <div className="pt-1">
                       <button
                         type="button"
                         onClick={() => window.location.reload()}
