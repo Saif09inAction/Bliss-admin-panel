@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
-import { Clock, LogIn, LogOut } from "lucide-react";
+import { Clock, LogIn, LogOut, MapPin } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth, isSupervisorSession } from "@/lib/auth-context";
 import type { Attendance, AttendanceSettings } from "@/lib/types";
@@ -37,6 +37,7 @@ export default function MyAttendancePage() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [msg, setMsg] = useState("");
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
   const today = todayStr();
   const phone = session?.phone ?? "";
@@ -82,20 +83,24 @@ export default function MyAttendancePage() {
   const lateMin = computeLateMinutes(record?.signInTime, shift.dailySignInTime);
   const earlyMin = computeEarlyLeaveMinutes(record?.signOutTime, shift.dailySignOutTime);
 
-  function getCoordinates(): Promise<string | undefined> {
-    return new Promise((resolve) => {
+  function getCoordinates(): Promise<string> {
+    return new Promise((resolve, reject) => {
       if (typeof window === "undefined" || !navigator.geolocation) {
-        resolve(undefined);
+        reject(new Error("Geolocation is not supported by this browser."));
         return;
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           resolve(`${pos.coords.latitude},${pos.coords.longitude}`);
         },
-        () => {
-          resolve(undefined);
+        (err) => {
+          if (err.code === 1) {
+            reject(new Error("Location permission denied. Please allow location access to mark attendance."));
+          } else {
+            reject(new Error("Failed to fetch location. Please ensure location services/GPS are enabled on your device."));
+          }
         },
-        { enableHighAccuracy: true, timeout: 5000 }
+        { enableHighAccuracy: true, timeout: 8000 }
       );
     });
   }
@@ -104,6 +109,7 @@ export default function MyAttendancePage() {
     if (!session) return;
     setActing(true);
     setMsg("Fetching location…");
+    setGpsError(null);
     try {
       const gps = await getCoordinates();
       const signInTime = nowTimeStr();
@@ -119,11 +125,14 @@ export default function MyAttendancePage() {
         lateMinutes,
         workingHours: 0,
         punchSource: "supervisor_web",
-        ...(gps ? { signInGps: gps, signInAddress: `Web coordinates: ${gps}` } : {}),
+        signInGps: gps,
+        signInAddress: `Web coordinates: ${gps}`,
       });
-      setMsg(gps ? "Logged in with location — attendance marked." : "Logged in (location not resolved) — attendance marked.");
+      setMsg("Logged in with location — attendance marked.");
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Failed to log in.");
+      const errMsg = err instanceof Error ? err.message : "Failed to log in.";
+      setGpsError(errMsg);
+      setMsg("");
     } finally {
       setActing(false);
     }
@@ -133,6 +142,7 @@ export default function MyAttendancePage() {
     if (!session || !record?.signInTime) return;
     setActing(true);
     setMsg("Fetching location…");
+    setGpsError(null);
     try {
       const gps = await getCoordinates();
       const signOutTime = nowTimeStr();
@@ -152,13 +162,16 @@ export default function MyAttendancePage() {
           lateMinutes,
           workingHours,
           punchSource: "supervisor_web",
-          ...(gps ? { signOutGps: gps, signOutAddress: `Web coordinates: ${gps}` } : {}),
+          signOutGps: gps,
+          signOutAddress: `Web coordinates: ${gps}`,
         },
         { merge: true }
       );
-      setMsg(gps ? "Logged out with location — attendance updated." : "Logged out (location not resolved) — attendance updated.");
+      setMsg("Logged out with location — attendance updated.");
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Failed to log out.");
+      const errMsg = err instanceof Error ? err.message : "Failed to log out.";
+      setGpsError(errMsg);
+      setMsg("");
     } finally {
       setActing(false);
     }
@@ -218,6 +231,33 @@ export default function MyAttendancePage() {
             {lateMin > 0 && <p className="text-sm text-amber-700">{formatLateDuration(lateMin)}</p>}
             {earlyMin > 0 && (
               <p className="text-sm text-orange-700">{formatEarlyLeaveDuration(earlyMin)}</p>
+            )}
+
+            {gpsError && (
+              <div className="rounded-xl border border-danger/30 bg-red-50 p-4 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <MapPin size={18} className="text-danger shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-danger">Location Required</p>
+                    <p className="text-xs text-danger mt-0.5">{gpsError}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGpsError(null);
+                    if (!record?.signInTime) {
+                      clockIn();
+                    } else {
+                      clockOut();
+                    }
+                  }}
+                  className="btn btn-sm bg-danger text-white hover:bg-red-600 font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 w-fit"
+                >
+                  <MapPin size={12} />
+                  Grant Location & Try Again
+                </button>
+              </div>
             )}
 
             <div className="flex flex-wrap gap-2 pt-2">
