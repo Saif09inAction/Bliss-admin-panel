@@ -242,21 +242,42 @@ export default function MyAttendancePage() {
                     <p className="text-xs text-danger mt-0.5">{gpsError}</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGpsError(null);
-                    if (!record?.signInTime) {
-                      clockIn();
-                    } else {
-                      clockOut();
-                    }
-                  }}
-                  className="btn btn-sm bg-danger text-white hover:bg-red-600 font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 w-fit"
-                >
-                  <MapPin size={12} />
-                  Grant Location & Try Again
-                </button>
+
+                {gpsError.toLowerCase().includes("permission denied") ? (
+                  <div className="rounded-lg bg-white/60 p-3 text-xs text-red-800 space-y-1.5 border border-red-200">
+                    <p className="font-semibold">How to enable location:</p>
+                    <ol className="list-decimal list-inside space-y-1 pl-1">
+                      <li>Click the <strong>lock/settings icon</strong> (or blocked location icon) next to the website URL in your address bar.</li>
+                      <li>Change the <strong>Location</strong> setting to <strong>Allow</strong>.</li>
+                      <li>Click <strong>"Reload Page"</strong> or refresh your browser.</li>
+                    </ol>
+                    <div className="pt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        className="btn btn-sm bg-danger text-white hover:bg-red-600 font-semibold text-xs py-1 px-2.5 rounded-md"
+                      >
+                        Reload Page
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGpsError(null);
+                      if (!record?.signInTime) {
+                        clockIn();
+                      } else {
+                        clockOut();
+                      }
+                    }}
+                    className="btn btn-sm bg-danger text-white hover:bg-red-600 font-semibold text-xs py-1.5 px-3 rounded-lg flex items-center gap-1 w-fit"
+                  >
+                    <MapPin size={12} />
+                    Try Again
+                  </button>
+                )}
               </div>
             )}
 
