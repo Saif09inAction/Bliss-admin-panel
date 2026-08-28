@@ -82,11 +82,30 @@ export default function MyAttendancePage() {
   const lateMin = computeLateMinutes(record?.signInTime, shift.dailySignInTime);
   const earlyMin = computeEarlyLeaveMinutes(record?.signOutTime, shift.dailySignOutTime);
 
+  function getCoordinates(): Promise<string | undefined> {
+    return new Promise((resolve) => {
+      if (typeof window === "undefined" || !navigator.geolocation) {
+        resolve(undefined);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve(`${pos.coords.latitude},${pos.coords.longitude}`);
+        },
+        () => {
+          resolve(undefined);
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    });
+  }
+
   async function clockIn() {
     if (!session) return;
     setActing(true);
-    setMsg("");
+    setMsg("Fetching location…");
     try {
+      const gps = await getCoordinates();
       const signInTime = nowTimeStr();
       const lateMinutes = computeLateMinutes(signInTime, shift.dailySignInTime);
       const status = lateMinutes > 0 ? "LATE" : "ON_TIME";
@@ -100,8 +119,9 @@ export default function MyAttendancePage() {
         lateMinutes,
         workingHours: 0,
         punchSource: "supervisor_web",
+        ...(gps ? { signInGps: gps, signInAddress: `Web coordinates: ${gps}` } : {}),
       });
-      setMsg("Logged in — attendance marked.");
+      setMsg(gps ? "Logged in with location — attendance marked." : "Logged in (location not resolved) — attendance marked.");
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to log in.");
     } finally {
@@ -112,8 +132,9 @@ export default function MyAttendancePage() {
   async function clockOut() {
     if (!session || !record?.signInTime) return;
     setActing(true);
-    setMsg("");
+    setMsg("Fetching location…");
     try {
+      const gps = await getCoordinates();
       const signOutTime = nowTimeStr();
       const lateMinutes = computeLateMinutes(record.signInTime, shift.dailySignInTime);
       const earlyMinutes = computeEarlyLeaveMinutes(signOutTime, shift.dailySignOutTime);
@@ -131,10 +152,11 @@ export default function MyAttendancePage() {
           lateMinutes,
           workingHours,
           punchSource: "supervisor_web",
+          ...(gps ? { signOutGps: gps, signOutAddress: `Web coordinates: ${gps}` } : {}),
         },
         { merge: true }
       );
-      setMsg("Logged out — attendance updated.");
+      setMsg(gps ? "Logged out with location — attendance updated." : "Logged out (location not resolved) — attendance updated.");
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to log out.");
     } finally {
