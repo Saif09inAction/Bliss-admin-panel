@@ -23,9 +23,9 @@ import type {
   RepairStatus,
 } from "@/lib/types";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
-import { formatRupee, uuid, formatClockTime } from "@/lib/csv";
+import { formatRupee, uuid, formatClockTime, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
-import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import SearchSelect from "@/components/admin/SearchSelect";
 import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import { useSelection } from "@/lib/use-selection";
@@ -135,6 +135,8 @@ export default function RepairingPage() {
   const [repairs, setRepairs] = useState<OrderRepair[]>([]);
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [tab, setTab] = useState<FilterTab>("PENDING");
   const [editRepair, setEditRepair] = useState<OrderRepair | null>(null);
   const [editForm, setEditForm] = useState({
@@ -314,14 +316,18 @@ export default function RepairingPage() {
     return repairs.filter((r) => {
       const status = repairStatus(r);
       const matchTab = tab === "ALL" || status === tab;
+      if (dateFrom || dateTo) {
+        if (!dateInRange(r.createdAt, dateFrom, dateTo)) return false;
+      }
       const matchSearch =
         !q ||
         r.kaarigerName.toLowerCase().includes(q) ||
         r.productName.toLowerCase().includes(q) ||
-        r.createdBy.toLowerCase().includes(q);
+        r.createdBy.toLowerCase().includes(q) ||
+        dateMatchesSearch(r.createdAt, q);
       return matchTab && matchSearch;
     });
-  }, [repairs, search, tab]);
+  }, [repairs, search, tab, dateFrom, dateTo]);
 
   const visibleIds = useMemo(() => filtered.map((r) => r.id), [filtered]);
   const selection = useSelection(visibleIds);
@@ -329,7 +335,7 @@ export default function RepairingPage() {
   useEffect(() => {
     selection.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, search]);
+  }, [tab, search, dateFrom, dateTo]);
 
   function openEdit(r: OrderRepair) {
     setEditRepair(r);
@@ -559,10 +565,14 @@ export default function RepairingPage() {
         </div>
       </div>
 
-      <AdminSearchBar
-        value={search}
-        onChange={setSearch}
-        placeholder="Search by kaariger, product or staff name…"
+      <AdminSearchWithDateFilter
+        search={search}
+        onSearchChange={setSearch}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        placeholder="Search kaariger, product, staff, date (dd/mm/yy)…"
       />
 
       <div className="mobile-chip-scroll flex flex-wrap gap-2">

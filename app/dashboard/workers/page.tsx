@@ -26,10 +26,10 @@ import {
   type SupervisorAccess,
   type SupervisorPermissionKey,
 } from "@/lib/supervisor-access";
-import { todayStr } from "@/lib/csv";
+import { todayStr, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
-import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import PageToolbar from "@/components/admin/PageToolbar";
 import WorkerProfilePanel from "@/components/WorkerProfilePanel";
 import { useRouter } from "next/navigation";
@@ -66,6 +66,8 @@ export default function WorkersPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<"ALL" | Role>("ALL");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [formMode, setFormMode] = useState<FormMode>("closed");
   const [editingPhone, setEditingPhone] = useState<string | null>(null);
   const [profileEmployee, setProfileEmployee] = useState<Employee | null>(null);
@@ -276,11 +278,15 @@ export default function WorkersPage() {
     return employees
       .filter((e) => {
         const matchFilter = filter === "ALL" || e.role === filter;
+        if (dateFrom || dateTo) {
+          if (!dateInRange(e.joiningDate, dateFrom, dateTo)) return false;
+        }
         const matchSearch =
           !q ||
           e.name.toLowerCase().includes(q) ||
           e.phone.includes(q) ||
-          e.role.toLowerCase().includes(q);
+          e.role.toLowerCase().includes(q) ||
+          dateMatchesSearch(e.joiningDate, q);
         return matchFilter && matchSearch;
       })
       .sort((a, b) => {
@@ -291,7 +297,7 @@ export default function WorkersPage() {
         }
         return a.name.localeCompare(b.name);
       });
-  }, [employees, filter, search]);
+  }, [employees, filter, search, dateFrom, dateTo]);
 
   const staffCount = employees.filter((e) => e.role === "STAFF").length;
   const supervisorCount = employees.filter((e) => e.role === "SUPERVISOR").length;
@@ -372,10 +378,14 @@ export default function WorkersPage() {
       </PageToolbar>
 
       <div className="surface space-y-3 p-3.5 sm:space-y-4 sm:p-5">
-        <AdminSearchBar
-          value={search}
-          onChange={setSearch}
-          placeholder="Search by name or mobile..."
+        <AdminSearchWithDateFilter
+          search={search}
+          onSearchChange={setSearch}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          placeholder="Search name, mobile, join date (dd/mm/yy)…"
         />
         <div className="mobile-chip-scroll flex flex-wrap gap-2 lg:flex-wrap">
           {(["ALL", "STAFF", "SUPERVISOR", "KAARIGER"] as const).map((f) => (

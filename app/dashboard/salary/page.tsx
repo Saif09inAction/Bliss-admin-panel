@@ -15,8 +15,9 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
-import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import PageToolbar from "@/components/admin/PageToolbar";
+import { dateInRange, dateMatchesSearch } from "@/lib/csv";
 import {
   parsePayment,
   salaryStatus,
@@ -81,6 +82,8 @@ export default function SalaryPage() {
   const [settings, setSettings] = useState<AttendanceSettings>(defaultSettings());
   const [overrides, setOverrides] = useState<OverrideMap>(new Map());
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [filter, setFilter] = useState<SalaryFilter>("ALL");
   const [payTarget, setPayTarget] = useState<SalaryRow | null>(null);
   const [payMode, setPayMode] = useState<PayMode>("EARNED");
@@ -198,10 +201,19 @@ export default function SalaryPage() {
         return { employee: e, paid, earned, earnedDue, fullDue, status };
       })
       .filter(({ employee, status }) => {
+        const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
+        const periodLabel = formatPayPeriodLabel(period.start, period.end).toLowerCase();
+        if (dateFrom || dateTo) {
+          if (!dateInRange(employee.joiningDate, dateFrom, dateTo)) return false;
+        }
         const matchSearch =
           !q ||
           employee.name.toLowerCase().includes(q) ||
-          employee.phone.includes(q);
+          employee.phone.includes(q) ||
+          periodLabel.includes(q) ||
+          dateMatchesSearch(employee.joiningDate, q) ||
+          dateMatchesSearch(period.start, q) ||
+          dateMatchesSearch(period.end, q);
         const matchFilter =
           filter === "ALL" ||
           (filter === "PAID" && status === "PAID") ||
@@ -215,7 +227,7 @@ export default function SalaryPage() {
         if (ra !== rb) return ra - rb;
         return a.employee.name.localeCompare(b.employee.name);
       });
-  }, [staff, payments, attendance, periodOffset, search, filter, today, settings, overrides]);
+  }, [staff, payments, attendance, periodOffset, search, filter, today, settings, overrides, dateFrom, dateTo]);
 
   const summary = useMemo(() => {
     let totalDue = 0;
@@ -377,7 +389,15 @@ export default function SalaryPage() {
           </button>
         </div>
 
-        <AdminSearchBar value={search} onChange={setSearch} placeholder="Search staff..." />
+        <AdminSearchWithDateFilter
+          search={search}
+          onSearchChange={setSearch}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateFromChange={setDateFrom}
+          onDateToChange={setDateTo}
+          placeholder="Search staff, pay period, join date (dd/mm/yy)…"
+        />
 
         <div className="mobile-chip-scroll flex flex-wrap gap-2">
           {(["ALL", "UNPAID", "PARTIAL", "PAID"] as SalaryFilter[]).map((f) => (

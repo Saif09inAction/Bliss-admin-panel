@@ -92,6 +92,59 @@ export function dateMatchesSearch(
   return false;
 }
 
+/** Normalize a stored date (YYYY-MM-DD, dd/mm/yy, epoch) to YYYY-MM-DD for range comparison. */
+export function toIsoDate(value?: string | number | null): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "number") {
+    if (!value) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(value));
+  }
+  const s = String(value).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (dmy) {
+    const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${y}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  return "";
+}
+
+/** True when stored date falls within an inclusive YYYY-MM-DD range (empty bound = open). */
+export function dateInRange(
+  stored?: string | number | null,
+  from?: string,
+  to?: string
+): boolean {
+  const iso = toIsoDate(stored);
+  if (!iso) return !from && !to;
+  if (from && iso < from) return false;
+  if (to && iso > to) return false;
+  return true;
+}
+
+/** Parse a search query as a calendar date (dd/mm/yy etc.) → YYYY-MM-DD, or null. */
+export function searchQueryToIsoDate(query?: string): string | null {
+  const qRaw = query?.trim().toLowerCase() || "";
+  if (!qRaw) return null;
+  const q = qRaw.replace(/[-.]/g, "/");
+  const full = q.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (full) {
+    const day = full[1].padStart(2, "0");
+    const month = full[2].padStart(2, "0");
+    let year = full[3];
+    if (year.length === 2) year = Number(year) >= 70 ? `19${year}` : `20${year}`;
+    return `${year}-${month}-${day}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qRaw)) return qRaw;
+  return null;
+}
+
 function todayStrFromEpoch(ts: number): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",

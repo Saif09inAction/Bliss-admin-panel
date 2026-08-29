@@ -408,6 +408,13 @@ export interface RawMaterialBill {
   deletedAt?: number;
 }
 
+/** Supplier company list for Raw Material bills — Firestore `raw_material_companies`. */
+export interface RawMaterialCompany {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
 // ─── Bill Report ─────────────────────────────────────────────────────────────
 
 /** Client's business entity that buys from suppliers (Bill Report). */

@@ -28,6 +28,7 @@ import type {
   ReturnRecord,
 } from "@/lib/types";
 import {
+  dateInRange,
   dateMatchesSearch,
   downloadCsv,
   formatDisplayDate,
@@ -41,7 +42,7 @@ import {
 import { exportBillExcel } from "@/lib/bill-export";
 import { orderWeekMeta } from "@/lib/kaariger-hisaab";
 import PageToolbar from "@/components/admin/PageToolbar";
-import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import SearchSelect from "@/components/admin/SearchSelect";
 import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import BillWhatsAppModal from "@/components/BillWhatsAppModal";
@@ -58,29 +59,6 @@ type NamedOption = {
 
 function nameEquals(a: string, b: string) {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
-/** Normalize a stored date (YYYY-MM-DD, dd/mm/yy, epoch) to YYYY-MM-DD for range comparison. */
-function toIsoDate(value?: string | number | null): string {
-  if (value == null || value === "") return "";
-  if (typeof value === "number") {
-    if (!value) return "";
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Kolkata",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(value));
-  }
-  const s = String(value).trim();
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (dmy) {
-    const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
-    return `${y}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
-  }
-  return "";
 }
 
 function namedOptionsFromDb(fromDb: { id: string; name: string }[]): NamedOption[] {
@@ -524,9 +502,12 @@ export default function RecordsPage() {
 
   const q = search.trim().toLowerCase();
   const filteredOrders = useMemo(() => {
-    if (!q) return orders;
-    return orders.filter(
-      (o) =>
+    return orders.filter((o) => {
+      if (dateFrom || dateTo) {
+        if (!dateInRange(o.createdAt, dateFrom, dateTo)) return false;
+      }
+      if (!q) return true;
+      return (
         orderProductsLabel(o).toLowerCase().includes(q) ||
         orderWeekMeta(o).label.toLowerCase().includes(q) ||
         o.productName.toLowerCase().includes(q) ||
@@ -535,8 +516,9 @@ export default function RecordsPage() {
         o.status.toLowerCase().includes(q) ||
         dateMatchesSearch(o.createdAt, q) ||
         formatDisplayDate(o.createdAt).toLowerCase().includes(q)
-    );
-  }, [orders, q]);
+      );
+    });
+  }, [orders, q, dateFrom, dateTo]);
 
   const filteredPickups = useMemo(() => {
     return pickups.filter((p) => {
@@ -544,10 +526,7 @@ export default function RecordsPage() {
       if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
       if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
       if (dateFrom || dateTo) {
-        const iso = toIsoDate(p.date);
-        if (!iso) return false;
-        if (dateFrom && iso < dateFrom) return false;
-        if (dateTo && iso > dateTo) return false;
+        if (!dateInRange(p.date, dateFrom, dateTo)) return false;
       }
       if (!q) return true;
       return (
@@ -577,10 +556,7 @@ export default function RecordsPage() {
       if (ownerFilter === "CLARIS" && oq.claris <= 0) return false;
       if (ownerFilter === "BLISS" && oq.bliss <= 0) return false;
       if (dateFrom || dateTo) {
-        const iso = toIsoDate(r.date);
-        if (!iso) return false;
-        if (dateFrom && iso < dateFrom) return false;
-        if (dateTo && iso > dateTo) return false;
+        if (!dateInRange(r.date, dateFrom, dateTo)) return false;
       }
       if (!q) return true;
       return (
@@ -1127,9 +1103,13 @@ export default function RecordsPage() {
         <p className="section-sub">{count} record{count !== 1 ? "s" : ""}</p>
       </PageToolbar>
 
-      <AdminSearchBar
-        value={search}
-        onChange={setSearch}
+      <AdminSearchWithDateFilter
+        search={search}
+        onSearchChange={setSearch}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
         placeholder="Search name, partner, date (dd/mm/yy)…"
       />
 
@@ -1148,56 +1128,23 @@ export default function RecordsPage() {
       </div>
 
       {(tab === "pickups" || tab === "returns") && (
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="mobile-chip-scroll flex flex-wrap gap-2">
-            {(
-              [
-                { id: "ALL" as const, label: "All" },
-                { id: "CLARIS" as const, label: "Claris" },
-                { id: "BLISS" as const, label: "Bliss" },
-              ] as const
-            ).map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setOwnerFilter(f.id)}
-                className={`filter-pill ${ownerFilter === f.id ? "active" : ""}`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-end gap-2">
-            <div>
-              <label className="label !mb-1 !text-[10px]">From</label>
-              <input
-                type="date"
-                className="input !w-auto !py-2"
-                value={dateFrom}
-                max={dateTo || undefined}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label !mb-1 !text-[10px]">To</label>
-              <input
-                type="date"
-                className="input !w-auto !py-2"
-                value={dateTo}
-                min={dateFrom || undefined}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-            {(dateFrom || dateTo) && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => { setDateFrom(""); setDateTo(""); }}
-              >
-                All dates
-              </button>
-            )}
-          </div>
+        <div className="mobile-chip-scroll flex flex-wrap gap-2">
+          {(
+            [
+              { id: "ALL" as const, label: "All" },
+              { id: "CLARIS" as const, label: "Claris" },
+              { id: "BLISS" as const, label: "Bliss" },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setOwnerFilter(f.id)}
+              className={`filter-pill ${ownerFilter === f.id ? "active" : ""}`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
       )}
 

@@ -3,13 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
   setDoc,
   updateDoc,
-} from "firebase/firestore";import {
+} from "firebase/firestore";
+import {
   Archive,
+  Building2,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -28,12 +31,14 @@ import { useAuth } from "@/lib/auth-context";
 import type {
   Employee,
   RawMaterialBill,
+  RawMaterialCompany,
   RawMaterialKaarigerEntry,
   RawMaterialRoll,
 } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
-import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import SearchSelect from "@/components/admin/SearchSelect";
+import { dateInRange, dateMatchesSearch } from "@/lib/csv";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -619,6 +624,216 @@ function HistoryBillCard({
   );
 }
 
+// ─── Manage Companies Modal ───────────────────────────────────────────────────
+
+function CompaniesManageModal({
+  companies,
+  onClose,
+}: {
+  companies: RawMaterialCompany[];
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  function nameExists(candidate: string, exceptId?: string) {
+    const n = candidate.trim().toLowerCase();
+    return companies.some(
+      (c) => c.id !== exceptId && c.name.trim().toLowerCase() === n
+    );
+  }
+
+  async function addCompany(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setMsg("Enter a company name.");
+      return;
+    }
+    if (nameExists(trimmed)) {
+      setMsg("That company is already in the list.");
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      const id = crypto.randomUUID();
+      await setDoc(doc(getDb(), "raw_material_companies", id), {
+        id,
+        name: trimmed,
+        createdAt: Date.now(),
+      });
+      setName("");
+      setMsg(`Added "${trimmed}".`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Failed to add.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveEdit(company: RawMaterialCompany) {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setMsg("Name cannot be empty.");
+      return;
+    }
+    if (nameExists(trimmed, company.id)) {
+      setMsg("That company is already in the list.");
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      await updateDoc(doc(getDb(), "raw_material_companies", company.id), {
+        name: trimmed,
+      });
+      setEditingId(null);
+      setEditName("");
+      setMsg(`Updated to "${trimmed}".`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Failed to update.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteCompany(company: RawMaterialCompany) {
+    if (!confirm(`Remove "${company.name}" from the list? Existing bills keep this name.`)) {
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      await deleteDoc(doc(getDb(), "raw_material_companies", company.id));
+      if (editingId === company.id) {
+        setEditingId(null);
+        setEditName("");
+      }
+      setMsg(`Removed "${company.name}".`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Failed to delete.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          className="surface max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-display text-lg font-bold">Companies</h3>
+              <p className="mt-0.5 text-sm text-[var(--text-muted)]">
+                Add suppliers here, then pick them from the dropdown when creating a bill.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost shrink-0 p-2"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <form onSubmit={addCompany} className="flex gap-2">
+            <input
+              className="input flex-1"
+              placeholder="New company name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={saving}
+            />
+            <button type="submit" className="btn btn-primary shrink-0" disabled={saving}>
+              <Plus className="h-4 w-4" />
+              {saving ? "…" : "Add"}
+            </button>
+          </form>
+
+          {msg && <p className="text-sm text-[var(--text-muted)]">{msg}</p>}
+
+          <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
+            {companies.length === 0 ? (
+              <li className="px-3 py-6 text-center text-sm text-[var(--text-muted)]">
+                No companies yet. Add one above.
+              </li>
+            ) : (
+              companies.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 px-3 py-2.5 text-sm">
+                  {editingId === c.id ? (
+                    <>
+                      <input
+                        className="input flex-1 !py-1.5"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        autoFocus
+                        disabled={saving}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm shrink-0"
+                        disabled={saving}
+                        onClick={() => saveEdit(c)}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm shrink-0"
+                        disabled={saving}
+                        onClick={() => {
+                          setEditingId(null);
+                          setEditName("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="min-w-0 flex-1 truncate font-medium">{c.name}</p>
+                      <button
+                        type="button"
+                        className="btn btn-ghost shrink-0 p-2"
+                        onClick={() => {
+                          setEditingId(c.id);
+                          setEditName(c.name);
+                          setMsg("");
+                        }}
+                        aria-label={`Edit ${c.name}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost shrink-0 p-2 text-red-600"
+                        onClick={() => deleteCompany(c)}
+                        aria-label={`Delete ${c.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Add Bill Modal ───────────────────────────────────────────────────────────
 
 function AddBillModal({
@@ -626,12 +841,14 @@ function AddBillModal({
   onSave,
   saving,
   kaarigers,
+  companies,
   initialBill,
 }: {
   onClose: () => void;
   onSave: (bill: Omit<RawMaterialBill, "id" | "createdAt" | "createdBy">) => void;
   saving: boolean;
   kaarigers: Employee[];
+  companies: RawMaterialCompany[];
   initialBill?: RawMaterialBill;
 }) {
   const isEdit = !!initialBill;
@@ -658,6 +875,16 @@ function AddBillModal({
     label: k.name,
     sublabel: k.phone,
   }));
+
+  const companyOptions = useMemo(() => {
+    const opts = companies.map((c) => ({ id: c.name, label: c.name }));
+    // Keep legacy typed names selectable when editing an old bill
+    const current = companyName.trim();
+    if (current && !opts.some((o) => o.id.toLowerCase() === current.toLowerCase())) {
+      opts.unshift({ id: current, label: `${current} (saved)` });
+    }
+    return opts;
+  }, [companies, companyName]);
 
   function updateKaariger(idx: number, updated: FormKaariger) {
     setKaarigerEntries((ks) => ks.map((k, i) => (i === idx ? updated : k)));
@@ -785,13 +1012,20 @@ function AddBillModal({
               />
             </div>
             <div>
-              <label className="label">Company Name</label>
-              <input
-                className="input"
-                placeholder="e.g. shaafin pvt ltd"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-              />
+              <label className="label">Company</label>
+              {companyOptions.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-mist)] px-3 py-2.5 text-sm text-[var(--text-muted)]">
+                  No companies yet. Close this form and tap <strong>Companies</strong> to add suppliers.
+                </p>
+              ) : (
+                <SearchSelect
+                  value={companyName}
+                  onSelect={(id) => setCompanyName(id)}
+                  options={companyOptions}
+                  placeholder="Select company…"
+                  emptyText="No company matches"
+                />
+              )}
             </div>
           </div>
 
@@ -875,10 +1109,14 @@ function AddBillModal({
 export default function RawMaterialPage() {
   const { session } = useAuth();
   const [bills, setBills] = useState<RawMaterialBill[]>([]);
+  const [companies, setCompanies] = useState<RawMaterialCompany[]>([]);
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [tab, setTab] = useState<"active" | "history">("active");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCompaniesModal, setShowCompaniesModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewBill, setViewBill] = useState<RawMaterialBill | null>(null);
   const [editBill, setEditBill] = useState<RawMaterialBill | null>(null);
@@ -905,6 +1143,7 @@ export default function RawMaterialPage() {
       );
     });
   }, []);
+
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "raw_material_bills"), (snap) => {
       setBills(
@@ -919,39 +1158,68 @@ export default function RawMaterialPage() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    const unsub = onSnapshot(collection(getDb(), "raw_material_companies"), (snap) => {
+      setCompanies(
+        snap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              name: (data.name as string) || "",
+              createdAt: (data.createdAt as number) || 0,
+            } satisfies RawMaterialCompany;
+          })
+          .filter((c) => c.name.trim().length > 0)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    });
+    return () => unsub();
+  }, []);
+
   const activeBills = useMemo(() => {
     const q = search.trim().toLowerCase();
     return bills
       .filter((b) => b.status === "active")
-      .filter(
-        (b) =>
-          !q ||
+      .filter((b) => {
+        if (dateFrom || dateTo) {
+          if (!dateInRange(b.date, dateFrom, dateTo)) return false;
+        }
+        if (!q) return true;
+        return (
           b.billNo.toLowerCase().includes(q) ||
           (b.companyName && b.companyName.toLowerCase().includes(q)) ||
+          dateMatchesSearch(b.date, q) ||
           b.kaarigers.some(
             (k) =>
               k.kaarigerName.toLowerCase().includes(q) ||
               k.materialName.toLowerCase().includes(q)
           )
-      );
-  }, [bills, search]);
+        );
+      });
+  }, [bills, search, dateFrom, dateTo]);
 
   const historyBills = useMemo(() => {
     const q = search.trim().toLowerCase();
     return bills
       .filter((b) => b.status === "deleted")
-      .filter(
-        (b) =>
-          !q ||
+      .filter((b) => {
+        if (dateFrom || dateTo) {
+          if (!dateInRange(b.date, dateFrom, dateTo)) return false;
+        }
+        if (!q) return true;
+        return (
           b.billNo.toLowerCase().includes(q) ||
           (b.companyName && b.companyName.toLowerCase().includes(q)) ||
+          dateMatchesSearch(b.date, q) ||
           b.kaarigers.some(
             (k) =>
               k.kaarigerName.toLowerCase().includes(q) ||
               k.materialName.toLowerCase().includes(q)
           )
-      );
-  }, [bills, search]);
+        );
+      });
+  }, [bills, search, dateFrom, dateTo]);
 
   // Stat summaries
   const activeStats = useMemo(() => ({
@@ -1041,14 +1309,24 @@ export default function RawMaterialPage() {
       <PageToolbar
         title="Raw Material"
         actions={
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setShowAddModal(true)}
-          >
-            <Plus size={15} />
-            Add Raw Material
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowCompaniesModal(true)}
+            >
+              <Building2 size={15} />
+              Companies
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setShowAddModal(true)}
+            >
+              <Plus size={15} />
+              Add Raw Material
+            </button>
+          </>
         }
       >
         <p className="section-sub">
@@ -1141,10 +1419,14 @@ export default function RawMaterialPage() {
       </div>
 
       {/* Search */}
-      <AdminSearchBar
-        value={search}
-        onChange={setSearch}
-        placeholder="Search by bill no., kaariger name, material..."
+      <AdminSearchWithDateFilter
+        search={search}
+        onSearchChange={setSearch}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        placeholder="Search bill no., company, kaariger, material, date (dd/mm/yy)…"
       />
 
       {/* Active bills — single unified table (no duplicate card view) */}
@@ -1325,12 +1607,20 @@ export default function RawMaterialPage() {
       )}
 
       {/* Modals */}
+      {showCompaniesModal && (
+        <CompaniesManageModal
+          companies={companies}
+          onClose={() => setShowCompaniesModal(false)}
+        />
+      )}
+
       {showAddModal && (
         <AddBillModal
           onClose={() => setShowAddModal(false)}
           onSave={handleSaveBill}
           saving={saving}
           kaarigers={kaarigers}
+          companies={companies}
         />
       )}
 
@@ -1340,6 +1630,7 @@ export default function RawMaterialPage() {
           onSave={(partial) => handleUpdateBill(editBill.id, partial)}
           saving={saving}
           kaarigers={kaarigers}
+          companies={companies}
           initialBill={editBill}
         />
       )}

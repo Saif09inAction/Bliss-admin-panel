@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
-import { todayStr } from "@/lib/csv";
+import { todayStr, searchQueryToIsoDate, dateMatchesSearch } from "@/lib/csv";
 import { computeEarlyLeaveMinutes,
   computeLateMinutes,
   defaultSettings,
@@ -28,7 +28,7 @@ import { computeEarlyLeaveMinutes,
   resolveShiftSettings,
 } from "@/lib/attendance-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
-import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 
 function badgeClass(status: string): string {
   switch (status) {
@@ -126,6 +126,11 @@ export default function AttendancePage() {
     return () => unsub();
   }, [date]);
 
+  useEffect(() => {
+    const iso = searchQueryToIsoDate(search);
+    if (iso) setDate(iso);
+  }, [search]);
+
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault();
     setSavingSettings(true);
@@ -152,7 +157,12 @@ export default function AttendancePage() {
     const q = search.trim().toLowerCase();
     const list = !q
       ? staff
-      : staff.filter((e) => e.name.toLowerCase().includes(q) || e.phone.includes(q));
+      : staff.filter(
+          (e) =>
+            e.name.toLowerCase().includes(q) ||
+            e.phone.includes(q) ||
+            dateMatchesSearch(e.joiningDate, q)
+        );
 
     // Needs attention first: Absent → Late → Left early → Present → A–Z
     const rank = (st: string) => {
@@ -232,13 +242,16 @@ export default function AttendancePage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1">
                 <label className="label">Search Staff</label>
-                <AdminSearchBar
-                  value={search}
-                  onChange={setSearch}
-                  placeholder="Search by name or mobile..."
+                <AdminSearchWithDateFilter
+                  search={search}
+                  onSearchChange={setSearch}
+                  dateFrom={date}
+                  onDateFromChange={setDate}
+                  dateFilterMode="single"
+                  placeholder="Search name, mobile, date (dd/mm/yy)…"
                 />
               </div>
-              <div className="sm:w-44">
+              <div className="sm:w-44 hidden sm:block">
                 <label className="label">Date</label>
                 <input
                   className="input"

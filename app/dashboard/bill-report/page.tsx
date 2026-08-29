@@ -22,10 +22,20 @@ import {
   X,
 } from "lucide-react";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import PageToolbar from "@/components/admin/PageToolbar";
 import { useAuth } from "@/lib/auth-context";
 import { companyTotals, exportBillReportCsv } from "@/lib/bill-report";
-import { formatDisplayTime, formatRupee, nowTimeStr, timeSortKey, todayStr, uuid } from "@/lib/csv";
+import {
+  dateInRange,
+  dateMatchesSearch,
+  formatDisplayTime,
+  formatRupee,
+  nowTimeStr,
+  timeSortKey,
+  todayStr,
+  uuid,
+} from "@/lib/csv";
 import { getDb } from "@/lib/firebase";
 import type { BillCompany, BillEntry, BillEntryType, BillOwner } from "@/lib/types";
 
@@ -768,6 +778,27 @@ function CompanyLedger({
   onToggleTransferDone: (e: BillEntry) => void;
   onExport: () => void;
 }) {
+  const [entrySearch, setEntrySearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const filteredEntries = useMemo(() => {
+    const q = entrySearch.trim().toLowerCase();
+    return entries.filter((entry) => {
+      if (dateFrom || dateTo) {
+        if (!dateInRange(entry.date, dateFrom, dateTo)) return false;
+      }
+      if (!q) return true;
+      return (
+        (entry.remarks || "").toLowerCase().includes(q) ||
+        (entry.driveLink || "").toLowerCase().includes(q) ||
+        entry.type.toLowerCase().includes(q) ||
+        String(entry.amount).includes(q) ||
+        dateMatchesSearch(entry.date, q)
+      );
+    });
+  }, [entries, entrySearch, dateFrom, dateTo]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -807,13 +838,30 @@ function CompanyLedger({
       </div>
 
       <div className="surface overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-          <p className="font-display text-sm font-bold">Records</p>
-          <p className="text-xs text-[var(--text-muted)]">{entries.length} entries</p>
+        <div className="space-y-3 border-b border-[var(--border)] px-4 py-3">
+          <div className="flex items-center justify-between">
+            <p className="font-display text-sm font-bold">Records</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              {filteredEntries.length} of {entries.length} entries
+            </p>
+          </div>
+          <AdminSearchWithDateFilter
+            search={entrySearch}
+            onSearchChange={setEntrySearch}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            placeholder="Search amount, remarks, date (dd/mm/yy)…"
+          />
         </div>
         {entries.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">
             No extra bills or transfers yet. Use the buttons above.
+          </p>
+        ) : filteredEntries.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">
+            No entries match your search or date filter.
           </p>
         ) : (
           <>
@@ -831,7 +879,7 @@ function CompanyLedger({
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.map((entry) => (
+                  {filteredEntries.map((entry) => (
                     <tr key={entry.id}>
                       <td>
                         <div>{formatDisplayDate(entry.date)}</div>
@@ -901,7 +949,7 @@ function CompanyLedger({
             </div>
 
             <div className="space-y-2 p-3 md:hidden">
-              {entries.map((entry) => (
+              {filteredEntries.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-[var(--border)] p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div>
