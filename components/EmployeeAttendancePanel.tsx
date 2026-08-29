@@ -527,7 +527,11 @@ function DetailBlock({
       <p className="font-display text-xl font-bold text-ink">{time || "—"}</p>
       {extra && <p className={extraClass}>{extra}</p>}
       {footer && <p className="mt-1 text-sm text-[var(--text-muted)]">{footer}</p>}
-      {address && <p className="mt-2 text-sm text-[var(--text-muted)]">{address}</p>}
+      {address && address !== "Address not resolved" ? (
+        <p className="mt-2 text-sm text-[var(--text-muted)]">{address}</p>
+      ) : (
+        <p className="mt-2 text-sm text-warning italic">Location not enabled</p>
+      )}
       {mapUrl && (
         <a
           href={mapUrl}
