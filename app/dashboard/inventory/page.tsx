@@ -788,7 +788,7 @@ function AddBillModal({
               <label className="label">Company Name</label>
               <input
                 className="input"
-                placeholder="e.g. Bliss Fabrics"
+                placeholder="e.g. shaafin pvt ltd"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
               />

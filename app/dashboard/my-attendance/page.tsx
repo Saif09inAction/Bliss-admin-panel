@@ -293,6 +293,10 @@ export default function MyAttendancePage() {
                       </ol>
                     )}
 
+                    <div className="border-t border-red-200/30 my-2 pt-1 text-[11px] font-medium text-red-900 italic">
+                      "Or LO developers se pange 🙂↔️"
+                    </div>
+
                     <div className="pt-1">
                       <button
                         type="button"
