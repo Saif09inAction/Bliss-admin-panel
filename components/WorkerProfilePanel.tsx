@@ -31,7 +31,19 @@ import { useAuth } from "@/lib/auth-context";
 import { payKaarigerKharcha } from "@/lib/kaariger-pay";
 import { clearKaarigerBusinessData } from "@/lib/delete-worker";
 import { isStandaloneRepair } from "@/lib/types";
-import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
+import type {
+  Attendance,
+  AttendanceSettings,
+  Employee,
+  KaarigerOrder,
+  KaarigerPayment,
+  PaymentTransaction,
+} from "@/lib/types";
+import {
+  grossOpeningBeforePays,
+  storedOpeningFromGross,
+  totalRemainingAmount,
+} from "@/lib/kaariger-hisaab";
 import {
   defaultSettings,
   formatDisplayTime as formatShiftHint,
@@ -119,10 +131,30 @@ export default function WorkerProfilePanel({
   const [accessMsg, setAccessMsg] = useState("");
   const [clearingHisaab, setClearingHisaab] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
+  const [kaarigerOrders, setKaarigerOrders] = useState<KaarigerOrder[]>([]);
+  const [kaarigerPayments, setKaarigerPayments] = useState<KaarigerPayment[]>([]);
+  const [hisaabLoading, setHisaabLoading] = useState(false);
+
+  const grossOpening = useMemo(() => {
+    if (localEmployee.role !== "KAARIGER") return Math.max(0, localEmployee.openingBalance || 0);
+    return grossOpeningBeforePays({
+      orders: kaarigerOrders,
+      payments: kaarigerPayments,
+      openingBalance: localEmployee.openingBalance || 0,
+    });
+  }, [localEmployee, kaarigerOrders, kaarigerPayments]);
+
+  const totalRemaining = useMemo(() => {
+    if (localEmployee.role !== "KAARIGER") return 0;
+    return totalRemainingAmount({
+      openingBalance:
+        Math.max(0, localEmployee.openingBalance || 0) + Math.max(0, localEmployee.oldKharcha || 0),
+      creditBalance: localEmployee.creditBalance || 0,
+    });
+  }, [localEmployee]);
 
   useEffect(() => {
     setLocalEmployee(employee);
-    setOpeningDraft(String(employee.openingBalance || ""));
     setShiftDraft({
       dailySignInTime: employee.dailySignInTime
         ? normalizeTime(employee.dailySignInTime)
@@ -134,6 +166,80 @@ export default function WorkerProfilePanel({
     setSupervisorAccessDraft(normalizeSupervisorAccess(employee.supervisorAccess));
     setPeriodOffset(0);
   }, [employee]);
+
+  useEffect(() => {
+    if (localEmployee.role !== "KAARIGER") return;
+    setOpeningDraft(String(Math.round(grossOpening * 100) / 100));
+  }, [localEmployee.role, grossOpening]);
+
+  useEffect(() => {
+    if (employee.role !== "KAARIGER") {
+      setKaarigerOrders([]);
+      setKaarigerPayments([]);
+      return;
+    }
+    let cancelled = false;
+    setHisaabLoading(true);
+    const phone = employee.phone;
+    Promise.all([
+      getDocs(query(collection(getDb(), "kaariger_orders"), where("kaarigerId", "==", phone))),
+      getDocs(query(collection(getDb(), "kaariger_payments"), where("kaarigerId", "==", phone))),
+    ])
+      .then(([orderSnap, paySnap]) => {
+        if (cancelled) return;
+        setKaarigerOrders(
+          orderSnap.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              kaarigerId: data.kaarigerId as string,
+              kaarigerName: (data.kaarigerName as string) || "",
+              productName: (data.productName as string) || "",
+              targetQuantity: (data.targetQuantity as number) || 0,
+              color: "",
+              rawMaterials: [],
+              totalDealAmount: (data.totalDealAmount as number) || 0,
+              pricingType: "PER_PIECE",
+              status: (data.status as string) || "ASSIGNED",
+              approvedQuantity: 0,
+              createdBy: "",
+              createdAt: (data.createdAt as number) || 0,
+              kharchaGiven: data.kharchaGiven as number | undefined,
+              kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
+              kharchaCarryIn: data.kharchaCarryIn as number | undefined,
+              addBalance: data.addBalance as number | undefined,
+              openingAtCreation: data.openingAtCreation as number | undefined,
+              closingAtCreation: data.closingAtCreation as number | undefined,
+              productsTotal: data.productsTotal as number | undefined,
+              materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+            } satisfies KaarigerOrder;
+          })
+        );
+        setKaarigerPayments(
+          paySnap.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              orderId: (data.orderId as string) || "",
+              kaarigerId: (data.kaarigerId as string) || phone,
+              amount: (data.amount as number) || 0,
+              date: (data.date as string) || "",
+              time: (data.time as string) || "",
+              remarks: data.remarks as string | undefined,
+              createdBy: (data.createdBy as string) || "",
+              createdAt: data.createdAt as number | undefined,
+            } satisfies KaarigerPayment;
+          })
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setHisaabLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employee.phone, employee.role]);
 
   const effectiveShift = useMemo(
     () => resolveShiftSettings(localEmployee, settings),
@@ -289,14 +395,22 @@ export default function WorkerProfilePanel({
 
   async function saveOpeningBalance(e: React.FormEvent) {
     e.preventDefault();
-    const amount = Math.max(0, Number(openingDraft) || 0);
+    const gross = Math.max(0, Number(openingDraft) || 0);
+    const stored =
+      localEmployee.role === "KAARIGER" && kaarigerOrders.length > 0
+        ? storedOpeningFromGross({
+            orders: kaarigerOrders,
+            payments: kaarigerPayments,
+            grossOpening: gross,
+          })
+        : gross;
     setOpeningSaving(true);
     setOpeningMsg("");
     try {
       await updateDoc(doc(getDb(), "employees", localEmployee.phone), {
-        openingBalance: amount,
+        openingBalance: stored,
       });
-      const next = { ...localEmployee, openingBalance: amount };
+      const next = { ...localEmployee, openingBalance: stored };
       setLocalEmployee(next);
       onUpdated?.(next);
       setOpeningMsg("Opening balance saved.");
@@ -438,8 +552,34 @@ export default function WorkerProfilePanel({
         openingBalance: (data.openingBalance as number) || 0,
         creditBalance: (data.creditBalance as number) || 0,
       };
+      const paySnap = await getDocs(
+        query(collection(getDb(), "kaariger_payments"), where("kaarigerId", "==", localEmployee.phone))
+      );
+      const freshPayments = paySnap.docs.map((d) => {
+        const p = d.data();
+        return {
+          id: (p.id as string) || d.id,
+          orderId: (p.orderId as string) || "",
+          kaarigerId: (p.kaarigerId as string) || localEmployee.phone,
+          amount: (p.amount as number) || 0,
+          date: (p.date as string) || "",
+          time: (p.time as string) || "",
+          remarks: p.remarks as string | undefined,
+          createdBy: (p.createdBy as string) || "",
+          createdAt: p.createdAt as number | undefined,
+        } satisfies KaarigerPayment;
+      });
+      setKaarigerPayments(freshPayments);
       setLocalEmployee(next);
-      setOpeningDraft(String(next.openingBalance || ""));
+      setOpeningDraft(
+        String(
+          grossOpeningBeforePays({
+            orders: kaarigerOrders,
+            payments: freshPayments,
+            openingBalance: next.openingBalance || 0,
+          })
+        )
+      );
       onUpdated?.(next);
       setPayMsg(result.message);
       setPayForm({ amount: "", remarks: "" });
@@ -630,15 +770,26 @@ export default function WorkerProfilePanel({
                     Opening balance
                   </h3>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    Carries into Hisaab remaining: opening + unpaid bills − credit. Pay reduces opening/bills
-                    first; extra kharcha becomes credit for the next bill.
+                    Starting amount before any bills (stays fixed). Total remaining on Hisaab includes
+                    bills and credit — it updates when you create bills.
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <StatTile
                       label="Opening balance"
-                      value={`₹${Math.round(localEmployee.openingBalance || 0).toLocaleString("en-IN")}`}
+                      value={
+                        hisaabLoading
+                          ? "…"
+                          : `₹${Math.round(grossOpening).toLocaleString("en-IN")}`
+                      }
                       accent="warn"
                     />
+                    <StatTile
+                      label="Total remaining"
+                      value={`₹${Math.round(totalRemaining).toLocaleString("en-IN")}`}
+                      accent="jade"
+                    />
+                  </div>
+                  <div className="mt-2">
                     <StatTile
                       label="Credit"
                       value={`₹${Math.round(localEmployee.creditBalance || 0).toLocaleString("en-IN")}`}

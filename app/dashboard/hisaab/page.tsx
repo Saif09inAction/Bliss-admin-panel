@@ -1278,7 +1278,7 @@ export default function HisaabPage() {
                   <p className="stat-card-value">{money(activeTotals.balance)}</p>
                   <p className="mt-1 text-[10px] text-[var(--text-muted)]">
                     Remaining {money(totalRemaining)}
-                    {openingBal > 0 ? ` · opening ${money(openingBal)}` : ""}
+                    {originalOpening > 0 ? ` · starting opening ${money(originalOpening)}` : ""}
                     {activeTotals.balance < 0 ? " · extra paid" : ""}
                   </p>
                 </div>
@@ -1990,7 +1990,7 @@ function GrandTotalBox({
     <div className="rounded-2xl border border-jade/20 bg-jade-soft/30 p-4">
       <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">Grand Total</p>
       <div className="space-y-1 text-sm">
-        <Row label="Opening / running balance" value={money(opening)} accent="amber" />
+        <Row label="Balance before this bill" value={money(opening)} accent="amber" />
         <Row label="MAAL (product cost)" value={money(productsTotal)} />
         {deductionLines.length > 0
           ? deductionLines.map((it, i) => (

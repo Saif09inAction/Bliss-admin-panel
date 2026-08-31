@@ -535,3 +535,28 @@ export function grossOpeningBeforePays(opts: {
     Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
   );
 }
+
+/**
+ * Inverse of grossOpeningBeforePays — when admin sets the starting opening to
+ * `grossOpening`, write this value to `employees.openingBalance` (running fold).
+ */
+export function storedOpeningFromGross(opts: {
+  orders: KaarigerOrder[];
+  payments: KaarigerPayment[];
+  grossOpening: number;
+}): number {
+  const openingPays = opts.payments.filter(payIsOpening);
+  const openingPaidTotal = openingPays.reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
+  const billNetTotal = opts.orders.reduce(
+    (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
+    0
+  );
+  const foldTotal = opts.orders.reduce(
+    (s, o) => s + Math.max(0, o.kharchaCarriedForward || 0),
+    0
+  );
+  return Math.max(
+    0,
+    Math.max(0, opts.grossOpening) - openingPaidTotal + billNetTotal + foldTotal
+  );
+}
