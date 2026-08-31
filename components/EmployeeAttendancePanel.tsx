@@ -24,6 +24,7 @@ import {
   resolveShiftSettings,
   statusLabel,
 } from "@/lib/attendance-utils";
+import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
 
 interface Props {
   employee: Employee;
@@ -82,10 +83,22 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
   );
   const [creditSaving, setCreditSaving] = useState(false);
   const [creditMsg, setCreditMsg] = useState("");
-  const shift = useMemo(
-    () => resolveShiftSettings(employee, settings),
-    [employee, settings]
-  );
+  const [overrides, setOverrides] = useState<OverrideMap>(new Map());
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
+      const map: OverrideMap = new Map();
+      snap.docs.forEach((d) => {
+        const parsed = parseCalendarOverride(d.id, d.data() as Record<string, unknown>);
+        if (parsed) map.set(parsed.date, parsed);
+      });
+      setOverrides(map);
+    });
+    return () => unsub();
+  }, []);
+
+  const shiftForDate = (dateStr: string) =>
+    resolveShiftSettings(employee, settings, dateStr, overrides, employee.phone);
 
   useEffect(() => {
     setLoading(true);
@@ -135,7 +148,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
       const day = new Date(year, month, d);
       if (day > new Date(today.getFullYear(), today.getMonth(), today.getDate())) continue;
       workingDays++;
-      const st = effectiveDayStatus(byDate.get(key), key, shift);
+      const st = effectiveDayStatus(byDate.get(key), key, shiftForDate(key));
       if (st === "ABSENT") absent++;
       else if (st === "LATE") late++;
       else if (st === "PRESENT" || st === "ON_TIME" || st === "LEFT_EARLY" || st === "HALF_DAY")
@@ -143,14 +156,15 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
     }
     const rate = workingDays ? Math.round(((present + late) / workingDays) * 100) : 0;
     return { present, late, absent, workingDays, rate };
-  }, [byDate, year, month, shift]);
+  }, [byDate, year, month, overrides, employee, settings]);
 
   const selected = selectedDate ? byDate.get(selectedDate) : undefined;
   const selectedStatus = selectedDate
-    ? effectiveDayStatus(selected, selectedDate, shift)
+    ? effectiveDayStatus(selected, selectedDate, shiftForDate(selectedDate))
     : "NONE";
-  const selectedLate = computeLateMinutes(selected?.signInTime, shift.dailySignInTime);
-  const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, shift.dailySignOutTime);
+  const selectedShift = selectedDate ? shiftForDate(selectedDate) : resolveShiftSettings(employee, settings);
+  const selectedLate = computeLateMinutes(selected?.signInTime, selectedShift.dailySignInTime);
+  const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, selectedShift.dailySignOutTime);
   const showCreditActions =
     selectedDate &&
     selectedStatus !== "FUTURE" &&
@@ -328,7 +342,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                       if (!day) return <div key={di} />;
                       const key = dateKey(year, month, day);
                       const rec = byDate.get(key);
-                      const st = effectiveDayStatus(rec, key, shift);
+                      const st = effectiveDayStatus(rec, key, shiftForDate(key));
                       const isSelected = selectedDate === key;
                       return (
                         <button
@@ -379,12 +393,12 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         ? selectedLate > 0
                           ? `Was late (${formatLateDuration(selectedLate)}) — forgiven by admin`
                           : selected.signInTime
-                            ? `On time (expected ${formatDisplayTime(shift.dailySignInTime)})`
+                            ? `On time (expected ${formatDisplayTime(selectedShift.dailySignInTime)})`
                             : undefined
                         : selectedLate > 0
-                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${formatDisplayTime(shift.dailySignInTime)})`
+                          ? `Delayed: ${formatLateDuration(selectedLate)} (expected ${formatDisplayTime(selectedShift.dailySignInTime)})`
                           : selected.signInTime
-                            ? `On time (expected ${formatDisplayTime(shift.dailySignInTime)})`
+                            ? `On time (expected ${formatDisplayTime(selectedShift.dailySignInTime)})`
                             : undefined
                     }
                     extraTone={
@@ -406,8 +420,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                         ? selected.dayCredit && selectedEarly > 0
                           ? `Left early (${formatEarlyLeaveDuration(selectedEarly)}) — forgiven by admin`
                           : selectedEarly > 0
-                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${formatDisplayTime(shift.dailySignOutTime)})`
-                            : `On time (expected ${formatDisplayTime(shift.dailySignOutTime)})`
+                            ? `Left early: ${formatEarlyLeaveDuration(selectedEarly)} (expected ${formatDisplayTime(selectedShift.dailySignOutTime)})`
+                            : `On time (expected ${formatDisplayTime(selectedShift.dailySignOutTime)})`
                         : undefined
                     }
                     extraTone={

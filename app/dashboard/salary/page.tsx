@@ -190,9 +190,10 @@ export default function SalaryPage() {
           periodEnd: period.end,
           asOfDate,
           records: empAtt,
-          settings: resolveShiftSettings(e, settings),
+          settings: settings,
           overrides,
           employeePhone: e.phone,
+          employeeShift: e,
         });
         const earnedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
         const fullDue = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
@@ -248,9 +249,10 @@ export default function SalaryPage() {
         periodEnd: period.end,
         asOfDate,
         records: empAtt,
-        settings: resolveShiftSettings(e, settings),
+        settings,
         overrides,
         employeePhone: e.phone,
+        employeeShift: e,
       });
       totalPaid += paid;
       totalDue += Math.max(0, earned.earnedNet - paid);

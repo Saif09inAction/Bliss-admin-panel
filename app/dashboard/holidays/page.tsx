@@ -9,13 +9,15 @@ import {
   onSnapshot,
   setDoc,
 } from "firebase/firestore";
-import { ChevronLeft, ChevronRight, Palmtree, Sparkles, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Palmtree, Sparkles, Users } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { Employee } from "@/lib/types";
+import type { AttendanceSettings, Employee } from "@/lib/types";
 import {
   dateKey,
   daysInMonth,
+  formatDisplayTime,
   monthLabel,
+  normalizeTime,
 } from "@/lib/attendance-utils";
 import {
   parseCalendarOverride,
@@ -54,6 +56,42 @@ export default function HolidaysPage() {
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  const [attendanceSettings, setAttendanceSettings] = useState<AttendanceSettings>({
+    dailySignInTime: "09:00",
+    dailySignOutTime: "18:00",
+  });
+  const [sundayShiftForm, setSundayShiftForm] = useState({
+    sundaySignInTime: "",
+    sundaySignOutTime: "",
+  });
+  const [savingSundayShift, setSavingSundayShift] = useState(false);
+  const [dayShiftForm, setDayShiftForm] = useState({
+    dailySignInTime: "",
+    dailySignOutTime: "",
+  });
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(getDb(), "settings", "attendance"), (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const s: AttendanceSettings = {
+        dailySignInTime: normalizeTime((data.dailySignInTime as string) || "09:00"),
+        dailySignOutTime: normalizeTime((data.dailySignOutTime as string) || "18:00"),
+        sundaySignInTime: data.sundaySignInTime
+          ? normalizeTime(data.sundaySignInTime as string)
+          : undefined,
+        sundaySignOutTime: data.sundaySignOutTime
+          ? normalizeTime(data.sundaySignOutTime as string)
+          : undefined,
+      };
+      setAttendanceSettings(s);
+      setSundayShiftForm({
+        sundaySignInTime: s.sundaySignInTime || "",
+        sundaySignOutTime: s.sundaySignOutTime || "",
+      });
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
@@ -100,6 +138,10 @@ export default function HolidaysPage() {
       setScope("ALL");
       setSelectedEmployees([]);
     }
+    setDayShiftForm({
+      dailySignInTime: ov?.dailySignInTime || "",
+      dailySignOutTime: ov?.dailySignOutTime || "",
+    });
   }, [selected, overrides]);
 
   const firstDow = new Date(year, month, 1).getDay();
@@ -160,6 +202,77 @@ export default function HolidaysPage() {
     );
   }
 
+  async function saveSundayShift(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingSundayShift(true);
+    setToast("");
+    try {
+      const payload = {
+        ...attendanceSettings,
+        ...(sundayShiftForm.sundaySignInTime
+          ? { sundaySignInTime: normalizeTime(sundayShiftForm.sundaySignInTime) }
+          : { sundaySignInTime: "" }),
+        ...(sundayShiftForm.sundaySignOutTime
+          ? { sundaySignOutTime: normalizeTime(sundayShiftForm.sundaySignOutTime) }
+          : { sundaySignOutTime: "" }),
+      };
+      await setDoc(doc(getDb(), "settings", "attendance"), payload, { merge: true });
+      setAttendanceSettings(payload);
+      setToast("Sunday shift saved for all working Sundays.");
+    } catch {
+      setToast("Could not save Sunday shift.");
+    } finally {
+      setSavingSundayShift(false);
+      setTimeout(() => setToast(""), 2500);
+    }
+  }
+
+  async function saveDayShift(dateStr: string) {
+    if (!dateStr || selectedKind !== "WORKING") return;
+    setSaving(true);
+    setToast("");
+    try {
+      const ov = overrides.get(dateStr);
+      const [y, m, d] = dateStr.split("-").map(Number);
+      const isSunday = new Date(y, m - 1, d).getDay() === 0;
+      const defaultKind: DayKind = isSunday ? "HOLIDAY" : "WORKING";
+      const inT = dayShiftForm.dailySignInTime.trim();
+      const outT = dayShiftForm.dailySignOutTime.trim();
+      const hasShift = Boolean(inT || outT);
+
+      if (!hasShift && !ov) {
+        setToast("Set shift times or mark the day first.");
+        setSaving(false);
+        return;
+      }
+
+      const kind = ov?.kind || (defaultKind === "HOLIDAY" ? "WORKING" : defaultKind);
+      const appliesTo = ov?.appliesTo || "ALL";
+      const employeeIds = ov?.employeeIds || [];
+
+      if (!hasShift && kind === defaultKind && appliesTo === "ALL") {
+        await deleteDoc(doc(getDb(), "calendar_days", dateStr));
+        setToast("Per-day shift cleared.");
+      } else {
+        await setDoc(doc(getDb(), "calendar_days", dateStr), {
+          date: dateStr,
+          kind,
+          appliesTo,
+          employeeIds,
+          ...(inT ? { dailySignInTime: normalizeTime(inT) } : {}),
+          ...(outT ? { dailySignOutTime: normalizeTime(outT) } : {}),
+          updatedAt: Date.now(),
+        });
+        setToast("Shift times saved for this day.");
+      }
+    } catch {
+      setToast("Could not save shift times.");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(""), 2500);
+    }
+  }
+
   async function setKind(
     dateStr: string,
     kind: DayKind,
@@ -194,6 +307,12 @@ export default function HolidaysPage() {
           kind,
           appliesTo,
           employeeIds,
+          ...(dayShiftForm.dailySignInTime
+            ? { dailySignInTime: normalizeTime(dayShiftForm.dailySignInTime) }
+            : {}),
+          ...(dayShiftForm.dailySignOutTime
+            ? { dailySignOutTime: normalizeTime(dayShiftForm.dailySignOutTime) }
+            : {}),
           updatedAt: Date.now(),
         });
         if (kind === "HOLIDAY") {
@@ -435,10 +554,99 @@ export default function HolidaysPage() {
                   </button>
                 </div>
                 {toast && <p className="mt-3 text-xs text-jade-glow">{toast}</p>}
+
+                {selectedKind === "WORKING" && (
+                  <div className="mt-4 rounded-xl bg-white/5 p-3">
+                    <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-white/45">
+                      <Clock size={12} /> Shift for this day
+                    </p>
+                    <p className="mb-2 text-[10px] text-white/50">
+                      {selectedIsSunday
+                        ? "Optional — overrides default Sunday shift below."
+                        : "Optional — leave empty to use weekday shift from Attendance."}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label !mb-1 !text-[10px] !text-white/50">Login</label>
+                        <input
+                          type="time"
+                          className="input !py-2"
+                          value={dayShiftForm.dailySignInTime}
+                          onChange={(e) =>
+                            setDayShiftForm((f) => ({ ...f, dailySignInTime: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="label !mb-1 !text-[10px] !text-white/50">Logout</label>
+                        <input
+                          type="time"
+                          className="input !py-2"
+                          value={dayShiftForm.dailySignOutTime}
+                          onChange={(e) =>
+                            setDayShiftForm((f) => ({ ...f, dailySignOutTime: e.target.value }))
+                          }
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      className="btn btn-secondary btn-sm mt-2 w-full"
+                      onClick={() => selected && saveDayShift(selected)}
+                    >
+                      Save shift for this day
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <p className="mt-4 text-sm text-white/50">Select a date on the calendar</p>
             )}
+          </div>
+
+          <div className="surface p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
+                <Clock size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-[var(--text)]">Sunday shift (all working Sundays)</p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                  Weekday shift: {formatDisplayTime(attendanceSettings.dailySignInTime)} –{" "}
+                  {formatDisplayTime(attendanceSettings.dailySignOutTime)} (from Attendance settings)
+                </p>
+                <form onSubmit={saveSundayShift} className="mt-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label !text-[10px]">Sunday login</label>
+                      <input
+                        type="time"
+                        className="input !py-2"
+                        value={sundayShiftForm.sundaySignInTime}
+                        onChange={(e) =>
+                          setSundayShiftForm((f) => ({ ...f, sundaySignInTime: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="label !text-[10px]">Sunday logout</label>
+                      <input
+                        type="time"
+                        className="input !py-2"
+                        value={sundayShiftForm.sundaySignOutTime}
+                        onChange={(e) =>
+                          setSundayShiftForm((f) => ({ ...f, sundaySignOutTime: e.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn btn-secondary btn-sm w-full" disabled={savingSundayShift}>
+                    {savingSundayShift ? "Saving…" : "Save Sunday shift"}
+                  </button>
+                </form>
+              </div>
+            </div>
           </div>
 
           <div className="surface p-5">
@@ -452,7 +660,8 @@ export default function HolidaysPage() {
                   <li>Salary day rate = monthly ÷ days in month ({monthStats.calendarDays} this month).</li>
                   <li>Choose All staff or pick specific employees for a holiday.</li>
                   <li>Sundays are holidays by default unless marked working.</li>
-                  <li>Late deductions use admin working hours from Attendance settings.</li>
+                  <li>Set a default Sunday shift above, or per-day shift when marking working.</li>
+                  <li>Late deductions use the shift for that calendar day.</li>
                 </ul>
               </div>
             </div>

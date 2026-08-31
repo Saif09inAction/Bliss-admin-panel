@@ -278,6 +278,9 @@ export interface OrderRepair {
 export interface AttendanceSettings {
   dailySignInTime: string;
   dailySignOutTime: string;
+  /** When a Sunday is a working day, use these times instead of weekday shift. */
+  sundaySignInTime?: string;
+  sundaySignOutTime?: string;
 }
 
 export interface Attendance {

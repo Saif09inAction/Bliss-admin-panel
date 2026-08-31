@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { Clock, LogIn, LogOut, MapPin } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import { useAuth, isSupervisorSession } from "@/lib/auth-context";
@@ -21,6 +21,7 @@ import {
   statusLabel,
   timeToMinutes,
 } from "@/lib/attendance-utils";
+import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
 import PageToolbar from "@/components/admin/PageToolbar";
 
 function computeWorkingHours(signIn?: string, signOut?: string): number {
@@ -38,6 +39,7 @@ export default function MyAttendancePage() {
   const [acting, setActing] = useState(false);
   const [msg, setMsg] = useState("");
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<OverrideMap>(new Map());
 
   const isIOS = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -55,6 +57,18 @@ export default function MyAttendancePage() {
   const phone = session?.phone ?? "";
 
   useEffect(() => {
+    const unsub = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
+      const map: OverrideMap = new Map();
+      snap.docs.forEach((d) => {
+        const parsed = parseCalendarOverride(d.id, d.data() as Record<string, unknown>);
+        if (parsed) map.set(parsed.date, parsed);
+      });
+      setOverrides(map);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     if (!phone) return;
     const unsubSettings = onSnapshot(doc(getDb(), "settings", "attendance"), (snap) => {
       if (snap.exists()) {
@@ -62,6 +76,8 @@ export default function MyAttendancePage() {
         setSettings({
           dailySignInTime: (d.dailySignInTime as string) || "09:00",
           dailySignOutTime: (d.dailySignOutTime as string) || "18:00",
+          sundaySignInTime: (d.sundaySignInTime as string) || undefined,
+          sundaySignOutTime: (d.sundaySignOutTime as string) || undefined,
         });
       }
     });
@@ -82,14 +98,8 @@ export default function MyAttendancePage() {
 
   const shift = useMemo(() => {
     if (!session || !isSupervisorSession(session)) return settings;
-    return resolveShiftSettings(
-      {
-        dailySignInTime: session.dailySignInTime,
-        dailySignOutTime: session.dailySignOutTime,
-      },
-      settings
-    );
-  }, [session, settings]);
+    return resolveShiftSettings(session, settings, today, overrides, phone);
+  }, [session, settings, today, overrides, phone]);
 
   const dayStatus = effectiveDayStatus(record ?? undefined, today, shift);
   const lateMin = computeLateMinutes(record?.signInTime, shift.dailySignInTime);

@@ -6,6 +6,7 @@ import {
   daysInMonth,
   normalizeTime,
   timeToMinutes,
+  type ShiftSource,
 } from "./attendance-utils";
 import { addDaysIso, daysInclusive } from "./pay-period-utils";
 
@@ -20,6 +21,9 @@ export interface CalendarDayOverride {
   appliesTo: HolidayScope;
   /** Employee phones when appliesTo === SELECTED */
   employeeIds: string[];
+  /** Optional shift for this working day (e.g. Sunday overtime). */
+  dailySignInTime?: string;
+  dailySignOutTime?: string;
 }
 
 export type OverrideMap = Map<string, CalendarDayOverride>;
@@ -43,11 +47,21 @@ export function parseCalendarOverride(
         .map((x) => String(x).trim())
         .filter(Boolean)
     : [];
+  const dailySignInTime =
+    typeof data.dailySignInTime === "string" && data.dailySignInTime.trim()
+      ? normalizeTime(data.dailySignInTime)
+      : undefined;
+  const dailySignOutTime =
+    typeof data.dailySignOutTime === "string" && data.dailySignOutTime.trim()
+      ? normalizeTime(data.dailySignOutTime)
+      : undefined;
   return {
     date: (data.date as string) || date,
     kind,
     appliesTo,
     employeeIds,
+    ...(dailySignInTime ? { dailySignInTime } : {}),
+    ...(dailySignOutTime ? { dailySignOutTime } : {}),
   };
 }
 
@@ -57,7 +71,7 @@ function defaultKindForDate(dateStr: string): DayKind {
   return dow === 0 ? "HOLIDAY" : "WORKING";
 }
 
-function lookupOverride(
+export function lookupCalendarOverride(
   dateStr: string,
   overrides: OverrideSource
 ): CalendarDayOverride | null {
@@ -73,7 +87,14 @@ function lookupOverride(
     kind: raw.kind,
     appliesTo: raw.appliesTo === "SELECTED" ? "SELECTED" : "ALL",
     employeeIds: raw.employeeIds || [],
+    dailySignInTime: raw.dailySignInTime,
+    dailySignOutTime: raw.dailySignOutTime,
   };
+}
+
+export function isSundayDate(dateStr: string): boolean {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay() === 0;
 }
 
 /**
@@ -86,7 +107,7 @@ export function resolveDayKind(
   overrides: OverrideSource,
   employeePhone?: string
 ): DayKind {
-  const override = lookupOverride(dateStr, overrides);
+  const override = lookupCalendarOverride(dateStr, overrides);
   if (!override) return defaultKindForDate(dateStr);
 
   if (override.appliesTo === "ALL" || !employeePhone) {
@@ -111,6 +132,53 @@ export function isWorkingDay(
 
 export function overrideAppliesToAll(override: CalendarDayOverride | null): boolean {
   return !override || override.appliesTo === "ALL";
+}
+
+/**
+ * Per-staff shift if set, otherwise company default.
+ * When date is passed, calendar-day or Sunday shift times apply (unless staff has custom shift).
+ */
+export function resolveShiftSettings(
+  employee: ShiftSource,
+  global: AttendanceSettings,
+  date?: string,
+  overrides?: OverrideSource,
+  employeePhone?: string
+): AttendanceSettings {
+  const hasEmployeeShift = Boolean(
+    employee?.dailySignInTime?.trim() || employee?.dailySignOutTime?.trim()
+  );
+
+  let base: AttendanceSettings;
+  if (!hasEmployeeShift) {
+    base = global;
+  } else {
+    base = {
+      dailySignInTime: normalizeTime(employee!.dailySignInTime?.trim() || global.dailySignInTime),
+      dailySignOutTime: normalizeTime(employee!.dailySignOutTime?.trim() || global.dailySignOutTime),
+    };
+  }
+
+  if (!date || hasEmployeeShift) return base;
+
+  if (!isWorkingDay(date, overrides ?? new Map(), employeePhone)) return base;
+
+  const ov = lookupCalendarOverride(date, overrides ?? new Map());
+  if (ov?.dailySignInTime || ov?.dailySignOutTime) {
+    return {
+      dailySignInTime: normalizeTime(ov.dailySignInTime || base.dailySignInTime),
+      dailySignOutTime: normalizeTime(ov.dailySignOutTime || base.dailySignOutTime),
+    };
+  }
+
+  if (isSundayDate(date) && (global.sundaySignInTime || global.sundaySignOutTime)) {
+    return {
+      dailySignInTime: normalizeTime(global.sundaySignInTime || base.dailySignInTime),
+      dailySignOutTime: normalizeTime(global.sundaySignOutTime || base.dailySignOutTime),
+    };
+  }
+
+  return base;
 }
 
 /** Shift length in minutes (supports overnight shifts). Admin-set sign-in/out. */
@@ -203,7 +271,8 @@ export function computePeriodDeductions(
   records: Attendance[],
   settings: AttendanceSettings,
   overrides: OverrideSource,
-  employeePhone?: string
+  employeePhone?: string,
+  employeeShift?: ShiftSource
 ): MonthDeductionSummary {
   const byDate = new Map(records.map((r) => [r.date, r]));
   const calendarDays = Math.max(daysInclusive(periodStart, periodEnd), 1);
@@ -231,8 +300,15 @@ export function computePeriodDeductions(
     if (rec?.dayCredit === "FULL" || rec?.dayCredit === "HALF") continue;
     if (!rec?.signInTime) continue;
 
-    const late = computeLateMinutes(rec.signInTime, settings.dailySignInTime);
-    const early = computeEarlyLeaveMinutes(rec.signOutTime, settings.dailySignOutTime);
+    const dayShift = resolveShiftSettings(
+      employeeShift,
+      settings,
+      key,
+      overrides,
+      employeePhone
+    );
+    const late = computeLateMinutes(rec.signInTime, dayShift.dailySignInTime);
+    const early = computeEarlyLeaveMinutes(rec.signOutTime, dayShift.dailySignOutTime);
     const lost = late + early;
     if (lost <= 0) continue;
 
@@ -340,6 +416,7 @@ export function computeEarnedSalary(opts: {
   settings: AttendanceSettings;
   overrides: OverrideSource;
   employeePhone?: string;
+  employeeShift?: ShiftSource;
 }): EarnedSalarySummary {
   const {
     monthlySalary,
@@ -350,6 +427,7 @@ export function computeEarnedSalary(opts: {
     settings,
     overrides,
     employeePhone,
+    employeeShift,
   } = opts;
 
   const daysInPeriod = Math.max(daysInclusive(periodStart, periodEnd), 1);
@@ -388,14 +466,21 @@ export function computeEarnedSalary(opts: {
       if (!hasPunch && credit !== "FULL" && credit !== "HALF") continue;
 
       const dayFactor = credit === "HALF" ? 0.5 : 1;
+      const dayShift = resolveShiftSettings(
+        employeeShift,
+        settings,
+        key,
+        overrides,
+        employeePhone
+      );
       const late =
         credit === "FULL" || credit === "HALF"
           ? 0
-          : computeLateMinutes(rec!.signInTime, settings.dailySignInTime);
+          : computeLateMinutes(rec!.signInTime, dayShift.dailySignInTime);
       const early =
         credit === "FULL" || credit === "HALF"
           ? 0
-          : computeEarlyLeaveMinutes(rec!.signOutTime, settings.dailySignOutTime);
+          : computeEarlyLeaveMinutes(rec!.signOutTime, dayShift.dailySignOutTime);
       const lost = late + early;
       const deduction = Math.round(lost * perMinuteRate * 100) / 100;
       const dayGross = Math.round(perDayRate * dayFactor * 100) / 100;
@@ -425,7 +510,8 @@ export function computeEarnedSalary(opts: {
     records,
     settings,
     overrides,
-    employeePhone
+    employeePhone,
+    employeeShift
   );
 
   const earnedNet = Math.max(0, Math.round((grossEarned - totalDeduction) * 100) / 100);

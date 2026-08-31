@@ -98,22 +98,19 @@ export default function MySalaryPage() {
 
   const earned = useMemo(() => {
     if (!session || !isSupervisorSession(session)) return null;
-    const shift = resolveShiftSettings(
-      {
-        dailySignInTime: session.dailySignInTime,
-        dailySignOutTime: session.dailySignOutTime,
-      },
-      settings
-    );
     return computeEarnedSalary({
       monthlySalary: session.monthlySalary,
       periodStart: period.start,
       periodEnd: period.end,
       asOfDate,
       records: attendance,
-      settings: shift,
+      settings,
       overrides,
       employeePhone: phone,
+      employeeShift: {
+        dailySignInTime: session.dailySignInTime,
+        dailySignOutTime: session.dailySignOutTime,
+      },
     });
   }, [session, phone, period, attendance, settings, overrides, asOfDate]);
 

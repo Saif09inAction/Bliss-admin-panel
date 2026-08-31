@@ -353,9 +353,10 @@ export default function WorkerProfilePanel({
       periodEnd: payPeriod.end,
       asOfDate: asOf,
       records: attendanceRecords,
-      settings: effectiveShift,
+      settings,
       overrides,
       employeePhone: employee.phone,
+      employeeShift: localEmployee,
     });
   }, [
     employee.monthlySalary,
@@ -363,7 +364,8 @@ export default function WorkerProfilePanel({
     payPeriod,
     today,
     attendanceRecords,
-    effectiveShift,
+    settings,
+    localEmployee,
     overrides,
   ]);
 

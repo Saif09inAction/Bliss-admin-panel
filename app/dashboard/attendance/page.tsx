@@ -15,6 +15,10 @@ import {
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
 import { todayStr, searchQueryToIsoDate, dateMatchesSearch } from "@/lib/csv";
+import {
+  parseCalendarOverride,
+  type OverrideMap,
+} from "@/lib/deduction-utils";
 import { computeEarlyLeaveMinutes,
   computeLateMinutes,
   defaultSettings,
@@ -59,6 +63,19 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [overrides, setOverrides] = useState<OverrideMap>(new Map());
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
+      const map: OverrideMap = new Map();
+      snap.docs.forEach((d) => {
+        const parsed = parseCalendarOverride(d.id, d.data() as Record<string, unknown>);
+        if (parsed) map.set(parsed.date, parsed);
+      });
+      setOverrides(map);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -99,6 +116,12 @@ export default function AttendancePage() {
         const s = {
           dailySignInTime: normalizeTime(data.dailySignInTime as string),
           dailySignOutTime: normalizeTime(data.dailySignOutTime as string),
+          sundaySignInTime: data.sundaySignInTime
+            ? normalizeTime(data.sundaySignInTime as string)
+            : "",
+          sundaySignOutTime: data.sundaySignOutTime
+            ? normalizeTime(data.sundaySignOutTime as string)
+            : "",
         };
         setSettings(s);
         setSettingsForm(s);
@@ -139,6 +162,12 @@ export default function AttendancePage() {
       const payload = {
         dailySignInTime: normalizeTime(settingsForm.dailySignInTime),
         dailySignOutTime: normalizeTime(settingsForm.dailySignOutTime),
+        ...(settingsForm.sundaySignInTime
+          ? { sundaySignInTime: normalizeTime(settingsForm.sundaySignInTime) }
+          : {}),
+        ...(settingsForm.sundaySignOutTime
+          ? { sundaySignOutTime: normalizeTime(settingsForm.sundaySignOutTime) }
+          : {}),
       };
       await setDoc(doc(getDb(), "settings", "attendance"), payload, { merge: true });
       setSettings(payload);
@@ -176,19 +205,19 @@ export default function AttendancePage() {
       const sa = effectiveDayStatus(
         byEmployee.get(a.phone),
         date,
-        resolveShiftSettings(a, settings)
+        resolveShiftSettings(a, settings, date, overrides, a.phone)
       );
       const sb = effectiveDayStatus(
         byEmployee.get(b.phone),
         date,
-        resolveShiftSettings(b, settings)
+        resolveShiftSettings(b, settings, date, overrides, b.phone)
       );
       const ra = rank(String(sa));
       const rb = rank(String(sb));
       if (ra !== rb) return ra - rb;
       return a.name.localeCompare(b.name);
     });
-  }, [staff, search, byEmployee, date, settings]);
+  }, [staff, search, byEmployee, date, settings, overrides]);
 
   const stats = useMemo(() => {
     let present = 0;
@@ -196,14 +225,14 @@ export default function AttendancePage() {
     let absent = 0;
     for (const e of staff) {
       const r = byEmployee.get(e.phone);
-      const st = effectiveDayStatus(r, date, resolveShiftSettings(e, settings));
+      const st = effectiveDayStatus(r, date, resolveShiftSettings(e, settings, date, overrides, e.phone));
       if (st === "ABSENT") absent++;
       else if (st === "LATE") late++;
       else present++;
     }
     const rate = staff.length ? Math.round(((present + late) / staff.length) * 100) : 0;
     return { present, late, absent, rate };
-  }, [staff, byEmployee, date, settings]);
+  }, [staff, byEmployee, date, settings, overrides]);
 
   const formattedDate = useMemo(
     () =>
@@ -281,7 +310,7 @@ export default function AttendancePage() {
             <div className="divide-y divide-[var(--border)]">
               {filteredStaff.map((e) => {
                 const r = byEmployee.get(e.phone);
-                const shift = resolveShiftSettings(e, settings);
+                const shift = resolveShiftSettings(e, settings, date, overrides, e.phone);
                 const st = effectiveDayStatus(r, date, shift);
                 const lateMins = computeLateMinutes(r?.signInTime, shift.dailySignInTime);
                 const earlyMins = computeEarlyLeaveMinutes(r?.signOutTime, shift.dailySignOutTime);
@@ -444,6 +473,36 @@ export default function AttendancePage() {
                   }
                   required
                 />
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40 p-3">
+                <p className="text-xs font-semibold text-[var(--text)]">Sunday shift (working Sundays)</p>
+                <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
+                  Also editable on Holidays calendar. Leave empty to use weekday times.
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label !text-[10px]">Login</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={settingsForm.sundaySignInTime || ""}
+                      onChange={(e) =>
+                        setSettingsForm({ ...settingsForm, sundaySignInTime: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="label !text-[10px]">Logout</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={settingsForm.sundaySignOutTime || ""}
+                      onChange={(e) =>
+                        setSettingsForm({ ...settingsForm, sundaySignOutTime: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
               </div>
               <button type="submit" className="btn btn-primary w-full" disabled={savingSettings}>
                 {savingSettings ? "Saving..." : "Save Timings"}
