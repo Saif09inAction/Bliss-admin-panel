@@ -30,6 +30,7 @@ import {
 import {
   earnedAsOfDate,
   formatPayPeriodLabel,
+  formatPayPeriodMonthLabel,
   resolvePayPeriod,
   salaryPaidInPeriod,
 } from "@/lib/pay-period-utils";
@@ -54,7 +55,10 @@ function newPaymentId() {
 }
 
 function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+  const rounded = Math.round(n);
+  const abs = Math.abs(rounded).toLocaleString("en-IN");
+  if (rounded < 0) return `−₹${abs}`;
+  return `₹${abs}`;
 }
 
 function StatusBadge({ status }: { status: ReturnType<typeof salaryStatus> }) {
@@ -202,13 +206,15 @@ export default function SalaryPage() {
   }
 
   const periodNavLabel = useMemo(() => {
-    if (periodOffset === 0) return "Current pay period";
-    if (periodOffset === -1) return "Previous pay period";
-    if (periodOffset === 1) return "Next pay period";
-    return periodOffset < 0
-      ? `${Math.abs(periodOffset)} periods ago`
-      : `${periodOffset} periods ahead`;
-  }, [periodOffset]);
+    const ref = staff[0];
+    if (!ref) {
+      return periodOffset === 0 ? "Current pay period" : `Pay period ${periodOffset}`;
+    }
+    const period = resolvePayPeriod(ref.joiningDate, periodOffset, today);
+    const monthLabel = formatPayPeriodMonthLabel(period.start, period.end);
+    if (periodOffset === 0) return `${monthLabel} · current`;
+    return monthLabel;
+  }, [staff, periodOffset, today]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -231,7 +237,7 @@ export default function SalaryPage() {
           employeePhone: e.phone,
           employeeShift: e,
         });
-        const calculatedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+        const calculatedDue = Math.round((earned.earnedNet - paid) * 100) / 100;
         const { total: carryForward } = computeCarryForwardUnpaid({
           employee: e,
           payments,
@@ -244,10 +250,7 @@ export default function SalaryPage() {
         const periodDue = calculatedDue;
         const totalCalculatedDue = Math.round((carryForward + periodDue) * 100) / 100;
         const earnedDue = resolveDisplayDue(e, totalCalculatedDue, periodOffset);
-        const fullDue = Math.max(
-          0,
-          Math.round((earned.fullMonthNet - paid + carryForward) * 100) / 100
-        );
+        const fullDue = Math.round((earned.fullMonthNet - paid + carryForward) * 100) / 100;
         const effectivePaid = Math.max(0, earned.earnedNet + carryForward - earnedDue);
         const status = salaryStatus(earned.earnedNet + carryForward, effectivePaid);
         const isManualDue = periodOffset === 0 && Boolean(e.salaryDueManual);
@@ -317,7 +320,7 @@ export default function SalaryPage() {
         employeePhone: e.phone,
         employeeShift: e,
       });
-      const calculatedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+      const calculatedDue = Math.round((earned.earnedNet - paid) * 100) / 100;
       const { total: carryForward } = computeCarryForwardUnpaid({
         employee: e,
         payments,
@@ -616,7 +619,8 @@ export default function SalaryPage() {
         });
         for (const line of carryLines) {
           if (remaining <= 0) break;
-          const apply = Math.min(remaining, line.unpaid);
+          if (line.balance <= 0) continue;
+          const apply = Math.min(remaining, line.balance);
           if (apply <= 0) continue;
           paymentWrites.push({
             periodStart: line.periodStart,
@@ -635,7 +639,7 @@ export default function SalaryPage() {
             amount: remaining,
             remarks:
               baseRemarks ||
-              `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
+              `${formatPayPeriodMonthLabel(period.start, period.end)} · ${modeLabel}`,
           });
         }
       } else {
@@ -645,7 +649,7 @@ export default function SalaryPage() {
           amount,
           remarks:
             baseRemarks ||
-            `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
+            `${formatPayPeriodMonthLabel(period.start, period.end)} · ${modeLabel}`,
         });
       }
 
@@ -875,9 +879,9 @@ export default function SalaryPage() {
                                 (manual)
                               </span>
                             ) : null}
-                            {carryForward > 0 ? (
+                            {carryForward !== 0 ? (
                               <span className="mt-0.5 block text-[10px] font-normal text-amber-700">
-                                incl. {money(carryForward)} carry
+                                incl. {money(carryForward)} from prior months
                               </span>
                             ) : null}
                           </span>
@@ -952,7 +956,7 @@ export default function SalaryPage() {
                             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                               Earned {money(earned.earnedNet)} · Paid {money(paid)} · Due{" "}
                               <span className="font-semibold text-warning">{money(earnedDue)}</span>
-                              {carryForward > 0 ? ` (${money(carryForward)} carry)` : ""}
+                              {carryForward !== 0 ? ` (${money(carryForward)} prior)` : ""}
                             </p>
                             <p className="text-[10px] text-jade-deep">Tap for full breakdown</p>
                           </div>
@@ -1017,7 +1021,7 @@ export default function SalaryPage() {
                   <h3 className="font-display text-xl font-bold">Pay Salary</h3>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
                     {payTarget.employee.name} ·{" "}
-                    {formatPayPeriodLabel(payTarget.earned.periodStart, payTarget.earned.periodEnd)}
+                    {formatPayPeriodMonthLabel(payTarget.earned.periodStart, payTarget.earned.periodEnd)}
                   </p>
                 </div>
                 <button

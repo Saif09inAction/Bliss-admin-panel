@@ -96,6 +96,21 @@ export function formatPayPeriodLabel(start: string, end: string): string {
   return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
 }
 
+/** Human month label for pay period navigation and carry-forward rows. */
+export function formatPayPeriodMonthLabel(start: string, end: string): string {
+  const monthFmt = (s: string) => {
+    const { y, m } = parseIso(s);
+    return new Date(y, m - 1, 1).toLocaleDateString("en-IN", {
+      month: "long",
+      year: "numeric",
+    });
+  };
+  const startLabel = monthFmt(start);
+  const endLabel = monthFmt(end);
+  if (startLabel === endLabel) return startLabel;
+  return `${startLabel} – ${endLabel}`;
+}
+
 export function paymentAppliesToPeriod(
   payment: PaymentTransaction,
   start: string,

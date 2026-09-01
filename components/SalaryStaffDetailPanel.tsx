@@ -6,9 +6,13 @@ import type { PaymentTransaction } from "@/lib/types";
 import type { SalaryStaffDetail } from "@/lib/salary-detail";
 import { formatDurationMinutes } from "@/lib/salary-detail";
 import { formatDisplayDate, formatDisplayTime } from "@/lib/csv";
+import { formatPayPeriodMonthLabel } from "@/lib/pay-period-utils";
 
 function money(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+  const rounded = Math.round(n);
+  const abs = Math.abs(rounded).toLocaleString("en-IN");
+  if (rounded < 0) return `−₹${abs}`;
+  return `₹${abs}`;
 }
 
 type Props = {
@@ -51,16 +55,27 @@ export default function SalaryStaffDetailPanel({
                 {d.isCurrentPeriod ? " · current period" : " · past period"}
               </p>
             </div>
-            <button type="button" className="btn btn-ghost p-2" onClick={onClose} aria-label="Close">
-              <X size={18} />
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className={`btn btn-sm ${showTransactions ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setShowTransactions((v) => !v)}
+              >
+                <Receipt size={14} />
+                {showTransactions ? "Hide" : "Transactions"}
+                {d.payments.length > 0 ? ` (${d.payments.length})` : ""}
+              </button>
+              <button type="button" className="btn btn-ghost p-2" onClick={onClose} aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
             {d.carryForward.length > 0 && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
-                  Carried forward (unpaid previous periods)
+                  Previous months balance
                 </p>
                 <div className="mt-2 space-y-1.5">
                   {d.carryForward.map((line) => (
@@ -69,8 +84,12 @@ export default function SalaryStaffDetailPanel({
                       className="flex justify-between text-sm"
                     >
                       <span className="text-amber-900">{line.label}</span>
-                      <span className="font-semibold text-amber-900">
-                        {money(line.unpaid)}
+                      <span
+                        className={`font-semibold ${
+                          line.balance < 0 ? "text-jade-deep" : "text-amber-900"
+                        }`}
+                      >
+                        {money(line.balance)}
                         <span className="ml-1 text-xs font-normal opacity-70">
                           (earned {money(line.earned)} − paid {money(line.paid)})
                         </span>
@@ -79,7 +98,7 @@ export default function SalaryStaffDetailPanel({
                   ))}
                 </div>
                 <p className="mt-2 border-t border-amber-200 pt-2 text-sm font-bold text-amber-900">
-                  Carry forward total: {money(d.carryForwardTotal)}
+                  Prior months total: {money(d.carryForwardTotal)}
                 </p>
               </div>
             )}
@@ -145,12 +164,14 @@ export default function SalaryStaffDetailPanel({
               <Row label="Earned this period (net)" value={money(d.earned.earnedNet)} />
               <Row label="Paid this period" value={money(d.paid)} />
               <Row label="Due this period" value={money(d.periodDue)} />
-              {d.carryForwardTotal > 0 && (
-                <Row label="Carry forward" value={money(d.carryForwardTotal)} />
+              {d.carryForwardTotal !== 0 && (
+                <Row label="Prior months" value={money(d.carryForwardTotal)} />
               )}
               <div className="mt-2 flex justify-between border-t border-[var(--border)] pt-2 font-bold">
                 <span>Total due</span>
-                <span className="text-warning">{money(d.totalDue)}</span>
+                <span className={d.totalDue < 0 ? "text-jade-deep" : "text-warning"}>
+                  {money(d.totalDue)}
+                </span>
               </div>
             </div>
 
@@ -198,29 +219,16 @@ export default function SalaryStaffDetailPanel({
               </div>
             )}
 
-            <div className="rounded-xl border border-[var(--border)] p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
-                    <Receipt className="h-4 w-4" />
-                    Transactions
-                  </p>
-                  <p className="mt-1 text-sm text-[var(--text-muted)]">
-                    Salary payments for this staff in this pay period.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${showTransactions ? "btn-primary" : "btn-secondary"}`}
-                  onClick={() => setShowTransactions((v) => !v)}
-                >
-                  <Receipt size={14} />
-                  {showTransactions ? "Hide" : "Show"}
-                  {d.payments.length > 0 ? ` (${d.payments.length})` : ""}
-                </button>
-              </div>
+            {showTransactions && (
+              <div className="rounded-xl border border-[var(--border)] p-4">
+                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
+                  <Receipt className="h-4 w-4" />
+                  Transactions
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  Salary payments for this staff in this pay period.
+                </p>
 
-              {showTransactions && (
                 <div className="mt-3">
                   {d.payments.length === 0 ? (
                     <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
@@ -247,7 +255,7 @@ export default function SalaryStaffDetailPanel({
                             ) : null}
                             {p.periodStart && p.periodEnd ? (
                               <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">
-                                Period: {p.periodStart} → {p.periodEnd}
+                                {formatPayPeriodMonthLabel(p.periodStart, p.periodEnd)}
                               </p>
                             ) : null}
                           </div>
@@ -284,8 +292,8 @@ export default function SalaryStaffDetailPanel({
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2 border-t border-[var(--border)] p-4">

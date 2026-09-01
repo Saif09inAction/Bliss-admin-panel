@@ -12,7 +12,7 @@ import { addDaysIso } from "@/lib/pay-period-utils";
 import {
   currentPayPeriodIndex,
   earnedAsOfDate,
-  formatPayPeriodLabel,
+  formatPayPeriodMonthLabel,
   payPeriodForIndex,
   paymentsInPeriod,
   resolvePayPeriod,
@@ -26,6 +26,9 @@ export type CarryForwardLine = {
   periodEnd: string;
   earned: number;
   paid: number;
+  /** earned − paid; negative when admin overpaid that period */
+  balance: number;
+  /** @deprecated use balance */
   unpaid: number;
 };
 
@@ -185,17 +188,18 @@ export function computeCarryForwardUnpaid(opts: {
       employeePhone: phone,
       employeeShift: employee,
     });
-    const unpaid = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
-    if (unpaid > 0) {
+    const balance = Math.round((earned.fullMonthNet - paid) * 100) / 100;
+    if (balance !== 0) {
       lines.push({
-        label: formatPayPeriodLabel(period.start, period.end),
+        label: formatPayPeriodMonthLabel(period.start, period.end),
         periodStart: period.start,
         periodEnd: period.end,
         earned: earned.fullMonthNet,
         paid,
-        unpaid,
+        balance,
+        unpaid: balance,
       });
-      total += unpaid;
+      total += balance;
     }
   }
 
@@ -233,7 +237,7 @@ export function buildSalaryStaffDetail(opts: {
   });
 
   const { lines: carryForward, total: carryForwardTotal } = computeCarryForwardUnpaid(opts);
-  const periodDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+  const periodDue = Math.round((earned.earnedNet - paid) * 100) / 100;
   const totalDue = Math.round((carryForwardTotal + periodDue) * 100) / 100;
 
   const attendanceStats = countAttendanceInPeriod({
@@ -271,7 +275,7 @@ export function buildSalaryStaffDetail(opts: {
 
   return {
     period,
-    periodLabel: formatPayPeriodLabel(period.start, period.end),
+    periodLabel: formatPayPeriodMonthLabel(period.start, period.end),
     asOfDate,
     isCurrentPeriod: periodOffset === 0,
     carryForward,

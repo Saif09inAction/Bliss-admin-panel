@@ -36,9 +36,10 @@ export function computeStaffEarnedDue(opts: {
     employeePhone: phone,
     employeeShift: employee,
   });
-  const periodDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+  const periodDue = Math.round((earned.earnedNet - paid) * 100) / 100;
   const { total: carryForward } = computeCarryForwardUnpaid(opts);
-  return Math.round((carryForward + periodDue) * 100) / 100;
+  const total = Math.round((carryForward + periodDue) * 100) / 100;
+  return total;
 }
 
 /** Recompute earned due and write to employees/{phone}.salaryRemaining (clears manual override). */
@@ -55,7 +56,7 @@ export async function syncEmployeeSalaryRemaining(opts: {
   const phone = opts.employee.phone?.trim();
   if (phone && opts.periodOffset === 0) {
     await updateDoc(doc(getDb(), "employees", phone), {
-      salaryRemaining: earnedDue,
+      salaryRemaining: Math.max(0, earnedDue),
       salaryDueManual: false,
     });
   }
