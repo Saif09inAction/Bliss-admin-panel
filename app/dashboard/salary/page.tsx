@@ -31,7 +31,8 @@ import {
   resolvePayPeriod,
   salaryPaidInPeriod,
 } from "@/lib/pay-period-utils";
-import { defaultSettings, parseAttendance, resolveShiftSettings } from "@/lib/attendance-utils";
+import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
+import { parseAttendanceSettingsDoc, parseShiftHistory } from "@/lib/shift-schedule";
 import {
   computeEarnedSalary,
   parseCalendarOverride,
@@ -122,6 +123,7 @@ export default function SalaryPage() {
                 role: ((data.role as string) || "STAFF") as Employee["role"],
                 dailySignInTime: (data.dailySignInTime as string) || "",
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
+                shiftHistory: parseShiftHistory(data.shiftHistory),
               };
             })
             .filter((e) => e.role === "STAFF" || e.role === "SUPERVISOR")
@@ -132,11 +134,7 @@ export default function SalaryPage() {
 
         const attSettings = settingsSnap.docs.find((d) => d.id === "attendance");
         if (attSettings) {
-          const data = attSettings.data();
-          setSettings({
-            dailySignInTime: (data.dailySignInTime as string) || "09:00",
-            dailySignOutTime: (data.dailySignOutTime as string) || "18:00",
-          });
+          setSettings(parseAttendanceSettingsDoc(attSettings.data() as Record<string, unknown>));
         }
       } finally {
         if (!cancelled) setLoading(false);

@@ -1,5 +1,13 @@
 import type { SupervisorAccess } from "./supervisor-access";
 
+export interface ShiftScheduleEntry {
+  effectiveFrom: string;
+  dailySignInTime: string;
+  dailySignOutTime: string;
+  sundaySignInTime?: string;
+  sundaySignOutTime?: string;
+}
+
 export type Role = "STAFF" | "KAARIGER" | "SUPERVISOR";
 
 export interface AdminSession {
@@ -58,6 +66,8 @@ export interface Employee {
    */
   dailySignInTime?: string;
   dailySignOutTime?: string;
+  /** Per-staff shift history — changes apply from the next day. */
+  shiftHistory?: ShiftScheduleEntry[];
   salaryRemaining?: number;
   /** Web supervisor — admin toggles which dashboard sections are visible. */
   supervisorAccess?: Partial<SupervisorAccess>;
@@ -281,6 +291,8 @@ export interface AttendanceSettings {
   /** When a Sunday is a working day, use these times instead of weekday shift. */
   sundaySignInTime?: string;
   sundaySignOutTime?: string;
+  /** Past schedules — lateness uses the entry effective on each date. */
+  shiftHistory?: ShiftScheduleEntry[];
 }
 
 export interface Attendance {

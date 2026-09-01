@@ -14,11 +14,7 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
-import { todayStr, searchQueryToIsoDate, dateMatchesSearch } from "@/lib/csv";
-import {
-  parseCalendarOverride,
-  type OverrideMap,
-} from "@/lib/deduction-utils";
+import { todayStr, searchQueryToIsoDate, dateMatchesSearch, formatDisplayDate } from "@/lib/csv";
 import { computeEarlyLeaveMinutes,
   computeLateMinutes,
   defaultSettings,
@@ -33,6 +29,12 @@ import { computeEarlyLeaveMinutes,
 } from "@/lib/attendance-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
+import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
+import {
+  buildGlobalShiftScheduleSave,
+  parseAttendanceSettingsDoc,
+  parseShiftHistory,
+} from "@/lib/shift-schedule";
 
 function badgeClass(status: string): string {
   switch (status) {
@@ -99,6 +101,7 @@ export default function AttendancePage() {
                 role: "STAFF" as const,
                 dailySignInTime: (data.dailySignInTime as string) || "",
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
+                shiftHistory: parseShiftHistory(data.shiftHistory),
               };
             })
             .sort((a, b) => a.name.localeCompare(b.name))
@@ -112,19 +115,14 @@ export default function AttendancePage() {
   useEffect(() => {
     const unsub = onSnapshot(doc(getDb(), "settings", "attendance"), (snap) => {
       if (snap.exists()) {
-        const data = snap.data();
-        const s = {
-          dailySignInTime: normalizeTime(data.dailySignInTime as string),
-          dailySignOutTime: normalizeTime(data.dailySignOutTime as string),
-          sundaySignInTime: data.sundaySignInTime
-            ? normalizeTime(data.sundaySignInTime as string)
-            : "",
-          sundaySignOutTime: data.sundaySignOutTime
-            ? normalizeTime(data.sundaySignOutTime as string)
-            : "",
-        };
+        const s = parseAttendanceSettingsDoc(snap.data() as Record<string, unknown>);
         setSettings(s);
-        setSettingsForm(s);
+        setSettingsForm({
+          dailySignInTime: s.dailySignInTime,
+          dailySignOutTime: s.dailySignOutTime,
+          sundaySignInTime: s.sundaySignInTime || "",
+          sundaySignOutTime: s.sundaySignOutTime || "",
+        });
       }
     });
     return () => unsub();
@@ -159,20 +157,30 @@ export default function AttendancePage() {
     setSavingSettings(true);
     setSettingsMsg("");
     try {
-      const payload = {
-        dailySignInTime: normalizeTime(settingsForm.dailySignInTime),
-        dailySignOutTime: normalizeTime(settingsForm.dailySignOutTime),
-        ...(settingsForm.sundaySignInTime
-          ? { sundaySignInTime: normalizeTime(settingsForm.sundaySignInTime) }
-          : {}),
-        ...(settingsForm.sundaySignOutTime
-          ? { sundaySignOutTime: normalizeTime(settingsForm.sundaySignOutTime) }
-          : {}),
-      };
+      const { payload, settings: next, effectiveFrom, changed } = buildGlobalShiftScheduleSave(
+        settings,
+        {
+          dailySignInTime: settingsForm.dailySignInTime,
+          dailySignOutTime: settingsForm.dailySignOutTime,
+          sundaySignInTime: settingsForm.sundaySignInTime || undefined,
+          sundaySignOutTime: settingsForm.sundaySignOutTime || undefined,
+        }
+      );
+      if (!changed) {
+        setSettingsMsg("No change to save.");
+        return;
+      }
       await setDoc(doc(getDb(), "settings", "attendance"), payload, { merge: true });
-      setSettings(payload);
-      setSettingsForm(payload);
-      setSettingsMsg("Shift timings saved.");
+      setSettings(next);
+      setSettingsForm({
+        dailySignInTime: next.dailySignInTime,
+        dailySignOutTime: next.dailySignOutTime,
+        sundaySignInTime: next.sundaySignInTime || "",
+        sundaySignOutTime: next.sundaySignOutTime || "",
+      });
+      setSettingsMsg(
+        `Shift saved — applies from ${formatDisplayDate(effectiveFrom)}. Earlier days keep the previous timings.`
+      );
     } catch {
       setSettingsMsg("Failed to save settings.");
     } finally {
@@ -445,7 +453,7 @@ export default function AttendancePage() {
               <div>
                 <h3 className="font-display text-base font-bold text-ink">Shift Timings</h3>
                 <p className="text-xs text-[var(--text-muted)]">
-                  Used for late arrivals &amp; early departures
+                  Used for late arrivals &amp; early departures. Changes apply from the next day.
                 </p>
               </div>
             </div>

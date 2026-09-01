@@ -1972,11 +1972,9 @@ function GrandTotalBox({
       ? Math.max(0, order.openingAtCreation)
       : Math.max(0, (openingBalance || 0) - addBalance + weekKharcha);
   const closing =
-    order.status !== "COMPLETED"
-      ? Math.max(0, opening + addBalance - weekKharcha)
-      : (order.closingAtCreation != null
-          ? order.closingAtCreation
-          : Math.max(0, opening + addBalance - weekKharcha));
+    order.closingAtCreation != null
+      ? Math.max(0, order.closingAtCreation)
+      : Math.max(0, opening + addBalance - weekKharcha);
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   const box = orderKharchaBalance(order, paid);

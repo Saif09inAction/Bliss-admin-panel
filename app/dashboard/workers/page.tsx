@@ -28,6 +28,7 @@ import {
 } from "@/lib/supervisor-access";
 import { todayStr, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
+import { buildEmployeeShiftScheduleSave, parseShiftHistory } from "@/lib/shift-schedule";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import PageToolbar from "@/components/admin/PageToolbar";
@@ -92,6 +93,8 @@ export default function WorkersPage() {
           openingBalance: (data.openingBalance as number) || 0,
           dailySignInTime: (data.dailySignInTime as string) || "",
           dailySignOutTime: (data.dailySignOutTime as string) || "",
+          shiftHistory: parseShiftHistory(data.shiftHistory),
+          password: (data.password as string) || "",
           supervisorAccess: normalizeSupervisorAccess(
             data.supervisorAccess as Partial<SupervisorAccess>
           ),
@@ -134,7 +137,7 @@ export default function WorkersPage() {
     setForm({
       name: employee.name,
       phone: employee.phone,
-      password: "",
+      password: employee.password || "",
       monthlySalary: String(employee.monthlySalary || ""),
       joiningDate: employee.joiningDate || todayStr(),
       openingBalance:
@@ -226,7 +229,18 @@ export default function WorkersPage() {
       if (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR") {
         const inTime = form.dailySignInTime.trim();
         const outTime = form.dailySignOutTime.trim();
-        if (inTime || outTime) {
+        if (formMode === "edit" && existingDoc) {
+          const { payload, changed } = buildEmployeeShiftScheduleSave(
+            existingDoc.dailySignInTime,
+            existingDoc.dailySignOutTime,
+            existingDoc.shiftHistory,
+            inTime,
+            outTime
+          );
+          if (changed) {
+            Object.assign(data, payload);
+          }
+        } else if (inTime || outTime) {
           data.dailySignInTime = inTime ? normalizeTime(inTime) : deleteField();
           data.dailySignOutTime = outTime ? normalizeTime(outTime) : deleteField();
         } else if (formMode === "edit") {
@@ -414,6 +428,7 @@ export default function WorkersPage() {
             <tr>
               <th>Name</th>
               <th>Mobile</th>
+              <th>Password</th>
               <th>Role</th>
               <th>Salary</th>
               <th>Joined</th>
@@ -434,6 +449,9 @@ export default function WorkersPage() {
                   </div>
                 </td>
                 <td className="text-[var(--text-muted)]">{e.phone}</td>
+                <td className="font-mono text-sm text-[var(--text-muted)]">
+                  {e.password || "—"}
+                </td>
                 <td>
                   <RoleBadge role={e.role} />
                 </td>
@@ -502,6 +520,7 @@ export default function WorkersPage() {
                     </div>
                     <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                       {e.phone}
+                      {e.password ? ` · ${e.password}` : ""}
                       {e.role !== "KAARIGER" && e.monthlySalary > 0
                         ? ` · ₹${e.monthlySalary.toLocaleString("en-IN")}/mo`
                         : ""}
@@ -603,18 +622,22 @@ export default function WorkersPage() {
                   />
                 </div>
                 <div>
-                  <label className="label">
-                    {formMode === "edit" ? "New Password (optional)" : "Password"}
-                  </label>
+                  <label className="label">Password</label>
                   <input
-                    className="input"
-                    type="password"
+                    className="input font-mono"
+                    type="text"
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                     placeholder="Min 6 characters"
                     required={formMode !== "edit"}
                     minLength={formMode === "edit" ? undefined : 6}
+                    autoComplete="off"
                   />
+                  {formMode === "edit" && (
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      Change only if you want a new login password.
+                    </p>
+                  )}
                 </div>
                 {showPayrollFields && (
                   <div>

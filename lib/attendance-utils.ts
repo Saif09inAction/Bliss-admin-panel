@@ -1,12 +1,19 @@
 import type { Attendance, AttendanceSettings, Employee } from "./types";
 
-export type ShiftSource = Pick<Employee, "dailySignInTime" | "dailySignOutTime"> | null | undefined;
+export type ShiftSource =
+  | Pick<Employee, "dailySignInTime" | "dailySignOutTime" | "shiftHistory">
+  | null
+  | undefined;
 
 export { resolveShiftSettings } from "./deduction-utils";
 
 /** True when this staff has at least one custom shift time saved. */
 export function hasCustomShift(employee?: ShiftSource): boolean {
-  return Boolean(employee?.dailySignInTime?.trim() || employee?.dailySignOutTime?.trim());
+  return Boolean(
+    employee?.shiftHistory?.length ||
+      employee?.dailySignInTime?.trim() ||
+      employee?.dailySignOutTime?.trim()
+  );
 }
 
 /** Display any stored time as 12-hour (e.g. "2:41 PM"). */

@@ -22,6 +22,7 @@ import {
   timeToMinutes,
 } from "@/lib/attendance-utils";
 import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
+import { parseAttendanceSettingsDoc } from "@/lib/shift-schedule";
 import PageToolbar from "@/components/admin/PageToolbar";
 
 function computeWorkingHours(signIn?: string, signOut?: string): number {
@@ -72,13 +73,7 @@ export default function MyAttendancePage() {
     if (!phone) return;
     const unsubSettings = onSnapshot(doc(getDb(), "settings", "attendance"), (snap) => {
       if (snap.exists()) {
-        const d = snap.data();
-        setSettings({
-          dailySignInTime: (d.dailySignInTime as string) || "09:00",
-          dailySignOutTime: (d.dailySignOutTime as string) || "18:00",
-          sundaySignInTime: (d.sundaySignInTime as string) || undefined,
-          sundaySignOutTime: (d.sundaySignOutTime as string) || undefined,
-        });
+        setSettings(parseAttendanceSettingsDoc(snap.data() as Record<string, unknown>));
       }
     });
     const attId = `${phone}_${today}`;

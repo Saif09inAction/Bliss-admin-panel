@@ -27,6 +27,11 @@ import {
   type HolidayScope,
   type OverrideMap,
 } from "@/lib/deduction-utils";
+import {
+  buildGlobalShiftScheduleSave,
+  parseAttendanceSettingsDoc,
+} from "@/lib/shift-schedule";
+import { formatDisplayDate } from "@/lib/csv";
 
 function dayButtonClass(
   kind: DayKind,
@@ -73,17 +78,7 @@ export default function HolidaysPage() {
   useEffect(() => {
     const unsub = onSnapshot(doc(getDb(), "settings", "attendance"), (snap) => {
       if (!snap.exists()) return;
-      const data = snap.data();
-      const s: AttendanceSettings = {
-        dailySignInTime: normalizeTime((data.dailySignInTime as string) || "09:00"),
-        dailySignOutTime: normalizeTime((data.dailySignOutTime as string) || "18:00"),
-        sundaySignInTime: data.sundaySignInTime
-          ? normalizeTime(data.sundaySignInTime as string)
-          : undefined,
-        sundaySignOutTime: data.sundaySignOutTime
-          ? normalizeTime(data.sundaySignOutTime as string)
-          : undefined,
-      };
+      const s = parseAttendanceSettingsDoc(snap.data() as Record<string, unknown>);
       setAttendanceSettings(s);
       setSundayShiftForm({
         sundaySignInTime: s.sundaySignInTime || "",
@@ -207,23 +202,27 @@ export default function HolidaysPage() {
     setSavingSundayShift(true);
     setToast("");
     try {
-      const payload = {
-        ...attendanceSettings,
-        ...(sundayShiftForm.sundaySignInTime
-          ? { sundaySignInTime: normalizeTime(sundayShiftForm.sundaySignInTime) }
-          : { sundaySignInTime: "" }),
-        ...(sundayShiftForm.sundaySignOutTime
-          ? { sundaySignOutTime: normalizeTime(sundayShiftForm.sundaySignOutTime) }
-          : { sundaySignOutTime: "" }),
-      };
+      const { payload, settings: next, effectiveFrom, changed } = buildGlobalShiftScheduleSave(
+        attendanceSettings,
+        {
+          dailySignInTime: attendanceSettings.dailySignInTime,
+          dailySignOutTime: attendanceSettings.dailySignOutTime,
+          sundaySignInTime: sundayShiftForm.sundaySignInTime || undefined,
+          sundaySignOutTime: sundayShiftForm.sundaySignOutTime || undefined,
+        }
+      );
+      if (!changed) {
+        setToast("Sunday shift unchanged.");
+        return;
+      }
       await setDoc(doc(getDb(), "settings", "attendance"), payload, { merge: true });
-      setAttendanceSettings(payload);
-      setToast("Sunday shift saved for all working Sundays.");
+      setAttendanceSettings(next);
+      setToast(`Sunday shift applies from ${formatDisplayDate(effectiveFrom)}.`);
     } catch {
       setToast("Could not save Sunday shift.");
     } finally {
       setSavingSundayShift(false);
-      setTimeout(() => setToast(""), 2500);
+      setTimeout(() => setToast(""), 3000);
     }
   }
 
@@ -661,7 +660,7 @@ export default function HolidaysPage() {
                   <li>Choose All staff or pick specific employees for a holiday.</li>
                   <li>Sundays are holidays by default unless marked working.</li>
                   <li>Set a default Sunday shift above, or per-day shift when marking working.</li>
-                  <li>Late deductions use the shift for that calendar day.</li>
+                  <li>Shift changes apply from the next day — past attendance keeps old timings.</li>
                 </ul>
               </div>
             </div>

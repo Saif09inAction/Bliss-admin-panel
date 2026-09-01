@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
-  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -26,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import { formatDisplayTime, timeSortKey } from "@/lib/csv";
+import { formatDisplayTime, formatDisplayDate, timeSortKey } from "@/lib/csv";
 import { useAuth } from "@/lib/auth-context";
 import { payKaarigerKharcha } from "@/lib/kaariger-pay";
 import { clearKaarigerBusinessData } from "@/lib/delete-worker";
@@ -68,6 +67,10 @@ import {
   salaryPaidInPeriod,
 } from "@/lib/pay-period-utils";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
+import {
+  buildEmployeeShiftScheduleSave,
+  parseAttendanceSettingsDoc,
+} from "@/lib/shift-schedule";
 import {
   SUPERVISOR_PERMISSION_LABELS,
   isPayrollRole,
@@ -263,11 +266,7 @@ export default function WorkerProfilePanel({
       if (settingsProp) return;
       const snap = await getDoc(doc(getDb(), "settings", "attendance"));
       if (!cancelled && snap.exists()) {
-        const data = snap.data();
-        setSettings({
-          dailySignInTime: normalizeTime(data.dailySignInTime as string),
-          dailySignOutTime: normalizeTime(data.dailySignOutTime as string),
-        });
+        setSettings(parseAttendanceSettingsDoc(snap.data() as Record<string, unknown>));
       }
     }
 
@@ -489,26 +488,30 @@ export default function WorkerProfilePanel({
     setShiftSaving(true);
     setShiftMsg("");
     try {
-      const payload: Record<string, unknown> = {};
-      if (inTime || outTime) {
-        payload.dailySignInTime = inTime ? normalizeTime(inTime) : deleteField();
-        payload.dailySignOutTime = outTime ? normalizeTime(outTime) : deleteField();
-      } else {
-        payload.dailySignInTime = deleteField();
-        payload.dailySignOutTime = deleteField();
+      const { payload, effectiveFrom, changed } = buildEmployeeShiftScheduleSave(
+        localEmployee.dailySignInTime,
+        localEmployee.dailySignOutTime,
+        localEmployee.shiftHistory,
+        inTime,
+        outTime
+      );
+      if (!changed) {
+        setShiftMsg("No change to save.");
+        return;
       }
       await updateDoc(doc(getDb(), "employees", localEmployee.phone), payload);
       const next: Employee = {
         ...localEmployee,
         dailySignInTime: inTime ? normalizeTime(inTime) : undefined,
         dailySignOutTime: outTime ? normalizeTime(outTime) : undefined,
+        shiftHistory: payload.shiftHistory as Employee["shiftHistory"],
       };
       setLocalEmployee(next);
       onUpdated?.(next);
       setShiftMsg(
         inTime || outTime
-          ? "Custom shift saved — late / early / pay use this time."
-          : "Using company default shift from Attendance."
+          ? `Custom shift applies from ${formatDisplayDate(effectiveFrom)}. Earlier days keep the previous timings.`
+          : `Using company default shift from ${formatDisplayDate(effectiveFrom)}.`
       );
     } catch (err) {
       setShiftMsg(err instanceof Error ? err.message : "Failed to save shift.");
@@ -656,6 +659,8 @@ export default function WorkerProfilePanel({
                   Basic Info
                 </h3>
                 <div className="mt-3 space-y-0 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40">
+                  <InfoRow label="Mobile" value={employee.phone} />
+                  <InfoRow label="Password" value={localEmployee.password || "—"} />
                   {isPayrollRole(employee.role) && (
                     <>
                       <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
@@ -716,8 +721,7 @@ export default function WorkerProfilePanel({
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
                     Optional. Leave blank to follow the company default from Attendance (
                     {formatShiftHint(settings.dailySignInTime)} –{" "}
-                    {formatShiftHint(settings.dailySignOutTime)}). Custom shift is used for late,
-                    early leave, and salary cuts.
+                    {formatShiftHint(settings.dailySignOutTime)}). Changes apply from the next day.
                   </p>
                   <form onSubmit={saveStaffShift} className="mt-3 space-y-3">
                     <div className="grid grid-cols-2 gap-2">

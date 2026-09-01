@@ -1,4 +1,4 @@
-import type { Attendance, AttendanceSettings } from "./types";
+import type { Attendance, AttendanceSettings, Employee, ShiftScheduleEntry } from "./types";
 import {
   computeEarlyLeaveMinutes,
   computeLateMinutes,
@@ -8,6 +8,10 @@ import {
   timeToMinutes,
   type ShiftSource,
 } from "./attendance-utils";
+import {
+  employeeShiftForDate,
+  globalSettingsForDate,
+} from "./shift-schedule";
 import { addDaysIso, daysInclusive } from "./pay-period-utils";
 
 export type DayKind = "HOLIDAY" | "WORKING";
@@ -145,21 +149,43 @@ export function resolveShiftSettings(
   overrides?: OverrideSource,
   employeePhone?: string
 ): AttendanceSettings {
+  const globalBase = date ? globalSettingsForDate(global, date) : global;
+
+  const empShiftOnDate =
+    date && employee
+      ? employeeShiftForDate(employee, date, employee.shiftHistory)
+      : null;
   const hasEmployeeShift = Boolean(
-    employee?.dailySignInTime?.trim() || employee?.dailySignOutTime?.trim()
+    empShiftOnDate ||
+      employee?.dailySignInTime?.trim() ||
+      employee?.dailySignOutTime?.trim()
   );
 
   let base: AttendanceSettings;
   if (!hasEmployeeShift) {
-    base = global;
+    base = globalBase;
+  } else if (empShiftOnDate) {
+    base = {
+      ...globalBase,
+      dailySignInTime: empShiftOnDate.dailySignInTime,
+      dailySignOutTime: empShiftOnDate.dailySignOutTime,
+    };
   } else {
     base = {
-      dailySignInTime: normalizeTime(employee!.dailySignInTime?.trim() || global.dailySignInTime),
-      dailySignOutTime: normalizeTime(employee!.dailySignOutTime?.trim() || global.dailySignOutTime),
+      ...globalBase,
+      dailySignInTime: normalizeTime(employee!.dailySignInTime?.trim() || globalBase.dailySignInTime),
+      dailySignOutTime: normalizeTime(employee!.dailySignOutTime?.trim() || globalBase.dailySignOutTime),
     };
   }
 
-  if (!date || hasEmployeeShift) return base;
+  if (!date) return base;
+
+  const hasCustomEmployeeShift = Boolean(
+    employee?.shiftHistory?.length ||
+      employee?.dailySignInTime?.trim() ||
+      employee?.dailySignOutTime?.trim()
+  );
+  if (hasCustomEmployeeShift) return base;
 
   if (!isWorkingDay(date, overrides ?? new Map(), employeePhone)) return base;
 
@@ -171,10 +197,10 @@ export function resolveShiftSettings(
     };
   }
 
-  if (isSundayDate(date) && (global.sundaySignInTime || global.sundaySignOutTime)) {
+  if (isSundayDate(date) && (globalBase.sundaySignInTime || globalBase.sundaySignOutTime)) {
     return {
-      dailySignInTime: normalizeTime(global.sundaySignInTime || base.dailySignInTime),
-      dailySignOutTime: normalizeTime(global.sundaySignOutTime || base.dailySignOutTime),
+      dailySignInTime: normalizeTime(globalBase.sundaySignInTime || base.dailySignInTime),
+      dailySignOutTime: normalizeTime(globalBase.sundaySignOutTime || base.dailySignOutTime),
     };
   }
 
