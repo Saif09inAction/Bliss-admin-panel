@@ -190,6 +190,13 @@ export function statusLabel(status: string): string {
   }
 }
 
+/** Status label with admin day-credit wording (Full Day / Half Day). */
+export function displayStatusLabel(status: string, record?: Attendance): string {
+  if (record?.dayCredit === "FULL") return "Full Day";
+  if (record?.dayCredit === "HALF" || status === "HALF_DAY") return "Half Day";
+  return statusLabel(status);
+}
+
 export function dayStatus(record: Attendance | undefined, dateStr: string): DayStatus {
   const today = new Date();
   const day = parseDate(dateStr);
@@ -202,8 +209,9 @@ export function statusColorClass(status: DayStatus | string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
-    case "HALF_DAY":
       return "bg-emerald-500 text-white";
+    case "HALF_DAY":
+      return "bg-amber-400 text-slate-900";
     case "LATE":
       return "bg-amber-400 text-slate-900";
     case "LEFT_EARLY":
@@ -221,8 +229,9 @@ export function statusBadgeClass(status: DayStatus | string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
-    case "HALF_DAY":
       return "badge-present";
+    case "HALF_DAY":
+      return "badge-half-day";
     case "LATE":
       return "badge-late";
     case "LEFT_EARLY":

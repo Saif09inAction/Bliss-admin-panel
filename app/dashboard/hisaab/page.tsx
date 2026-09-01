@@ -11,6 +11,7 @@ import {
   Plus,
   Receipt,
   ShoppingBag,
+  Trash2,
   Wallet,
   Wrench,
   X,
@@ -43,6 +44,7 @@ import {
   orderWeekMeta,
   totalRemainingAmount,
 } from "@/lib/kaariger-hisaab";
+import { deleteKaarigerPayments } from "@/lib/payment-delete";
 import { isStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -111,6 +113,7 @@ export default function HisaabPage() {
   const [payForm, setPayForm] = useState({ amount: "", remarks: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [payMsg, setPayMsg] = useState("");
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [historyOrderId, setHistoryOrderId] = useState("");
 
   async function loadKaarigers() {
@@ -279,6 +282,28 @@ export default function HisaabPage() {
     setHistoryOrderId("");
     setShowTransactions(false);
   }, [kaarigerId]);
+
+  async function handleDeleteKaarigerPayment(items: KaarigerPayment[], label: string) {
+    if (!kaarigerId || items.length === 0) return;
+    const total = items.reduce((s, p) => s + (p.amount || 0), 0);
+    const confirmMsg =
+      items.length > 1
+        ? `Delete payment of ${money(total)} (${items.length} lines)? Opening, kharcha and credit balances will be restored.`
+        : `Delete payment of ${money(total)} (${label})? Balances will be restored.`;
+    if (!confirm(confirmMsg)) return;
+
+    setDeletingPaymentId(items[0]?.id || "batch");
+    setPayMsg("");
+    try {
+      await deleteKaarigerPayments(kaarigerId, items);
+      await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
+      setPayMsg(`Deleted payment of ${money(total)}.`);
+    } catch (err) {
+      setPayMsg(err instanceof Error ? err.message : "Delete failed.");
+    } finally {
+      setDeletingPaymentId(null);
+    }
+  }
 
   async function submitPayment(e: React.FormEvent) {
     e.preventDefault();
@@ -820,7 +845,7 @@ export default function HisaabPage() {
                     All transactions
                   </p>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
-                    Every payment for this kaariger — opening, bills, and credit. Newest first.
+                    Every payment for this kaariger — opening, bills, and credit. Delete to undo mistaken pays.
                   </p>
                 </div>
                 <button
@@ -871,27 +896,48 @@ export default function HisaabPage() {
                     const creditPart = g.payments
                       .filter((p) => paymentKind(p) === "credit")
                       .reduce((s, p) => s + p.amount, 0);
+                    const isDeleting = g.payments.some((p) => deletingPaymentId === p.id);
                     return (
-                      <div key={g.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                      <div key={g.id} className="flex items-start justify-between gap-3 p-3 text-sm">
                         <div className="min-w-0">
                           <p className="font-semibold">Paid {money(g.total)}</p>
                           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                             {formatDisplayDate(g.date)} · {formatDisplayTime(g.time)}
                             {g.createdBy ? ` · by ${g.createdBy}` : ""}
                           </p>
+                          {g.payments.length > 1 && (
+                            <div className="mt-1 space-y-0.5">
+                              {g.payments.map((p) => (
+                                <p key={p.id} className="text-xs text-[var(--text-muted)]">
+                                  {paymentLabel(p, orderNameById)} · {money(p.amount)}
+                                </p>
+                              ))}
+                            </div>
+                          )}
                           {creditPart > 0 && (
                             <p className="mt-1 text-xs font-medium text-jade-deep">
                               Includes credit {money(creditPart)} for next bill
                             </p>
                           )}
                         </div>
-                        <div className="shrink-0 text-right">
+                        <div className="flex shrink-0 flex-col items-end gap-2">
                           <p className="font-display text-lg font-bold text-danger">
                             −{money(g.total)}
                           </p>
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                            {creditPart > 0 ? "Pay + credit" : "Kharcha box"}
-                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm text-danger"
+                            disabled={isDeleting}
+                            onClick={() =>
+                              handleDeleteKaarigerPayment(
+                                g.payments,
+                                paymentLabel(g.payments[0], orderNameById)
+                              )
+                            }
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {isDeleting ? "…" : "Delete"}
+                          </button>
                         </div>
                       </div>
                     );
@@ -1147,9 +1193,20 @@ export default function HisaabPage() {
                               </p>
                               <p className="text-[11px] text-[var(--text-muted)]">Old kharcha</p>
                             </div>
-                            <span className="shrink-0 font-bold text-jade-deep">
-                              Paid {money(p.amount)}
-                            </span>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className="font-bold text-jade-deep">
+                                Paid {money(p.amount)}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm p-2 text-danger"
+                                disabled={deletingPaymentId === p.id}
+                                onClick={() => handleDeleteKaarigerPayment([p], "Old kharcha")}
+                                aria-label="Delete payment"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
                         ))}
                         {weekKharchaPayments.map((p) => (
@@ -1167,9 +1224,25 @@ export default function HisaabPage() {
                                 {p.createdBy ? ` · by ${p.createdBy}` : ""}
                               </p>
                             </div>
-                            <span className="shrink-0 font-bold text-jade-deep">
-                              Paid {money(p.amount)}
-                            </span>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className="font-bold text-jade-deep">
+                                Paid {money(p.amount)}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm p-2 text-danger"
+                                disabled={deletingPaymentId === p.id}
+                                onClick={() =>
+                                  handleDeleteKaarigerPayment(
+                                    [p],
+                                    orderNameById.get(p.orderId) || "Week kharcha"
+                                  )
+                                }
+                                aria-label="Delete payment"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
                         ))}
                         <div className="flex items-center justify-between bg-jade-soft/50 px-3 py-2.5 text-sm">
@@ -1216,11 +1289,22 @@ export default function HisaabPage() {
                         {p.remarks || "Opening balance payment"}
                       </p>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="font-bold text-jade-deep">−{money(p.amount)}</p>
-                      <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
-                        Paid
-                      </p>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div className="text-right">
+                        <p className="font-bold text-jade-deep">−{money(p.amount)}</p>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-jade-deep/80">
+                          Paid
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm p-2 text-danger"
+                        disabled={deletingPaymentId === p.id}
+                        onClick={() => handleDeleteKaarigerPayment([p], "Opening balance")}
+                        aria-label="Delete payment"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}

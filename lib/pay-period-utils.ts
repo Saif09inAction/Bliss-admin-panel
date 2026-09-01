@@ -1,5 +1,8 @@
 import type { PaymentTransaction } from "./types";
 
+/** Fixed salary cycle length — each pay period is exactly this many calendar days. */
+export const PAY_PERIOD_DAYS = 30;
+
 export type PayPeriod = {
   index: number;
   start: string;
@@ -39,18 +42,17 @@ export function daysInclusive(start: string, end: string): number {
 }
 
 /**
- * Pay period from join anniversary to day before next anniversary.
- * Join 18 Aug → period 0: 18 Aug – 17 Sep; next period starts 18 Sep.
+ * Pay period from join date: exactly 30 days (join = day 1, day 30 = last day).
+ * Join 18 Aug → period 0: 18 Aug – 16 Sep (30 days); period 1: 17 Sep – 16 Oct.
  */
 export function payPeriodForIndex(joinDate: string, index: number): PayPeriod {
-  const start = addMonthsIso(joinDate, index);
-  const nextStart = addMonthsIso(joinDate, index + 1);
-  const end = addDaysIso(nextStart, -1);
+  const start = addDaysIso(joinDate, index * PAY_PERIOD_DAYS);
+  const end = addDaysIso(start, PAY_PERIOD_DAYS - 1);
   return {
     index,
     start,
     end,
-    daysInPeriod: daysInclusive(start, end),
+    daysInPeriod: PAY_PERIOD_DAYS,
   };
 }
 

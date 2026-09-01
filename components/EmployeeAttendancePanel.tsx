@@ -23,6 +23,7 @@ import {
   resolveAttendanceImage,
   resolveShiftSettings,
   statusLabel,
+  displayStatusLabel,
 } from "@/lib/attendance-utils";
 import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
 
@@ -38,8 +39,10 @@ function calendarDayClass(status: string, isSelected: boolean): string {
     case "PRESENT":
     case "ON_TIME":
     case "LEFT_EARLY":
-    case "HALF_DAY":
       classes.push("present");
+      break;
+    case "HALF_DAY":
+      classes.push("half-day");
       break;
     case "LATE":
       classes.push("late");
@@ -59,8 +62,9 @@ function badgeClass(status: string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
-    case "HALF_DAY":
       return "badge badge-success";
+    case "HALF_DAY":
+      return "badge badge-warn";
     case "LATE":
     case "LEFT_EARLY":
       return "badge badge-warn";
@@ -311,7 +315,10 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
 
           <div className="mb-4 flex flex-wrap gap-4 text-xs text-[var(--text-muted)]">
             <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded-md border border-jade/40 bg-jade-soft" /> Present
+              <span className="h-3 w-3 rounded-md border border-jade/40 bg-jade-soft" /> Full day
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-md border border-warning/40 bg-warning/15" /> Half day
             </span>
             <span className="flex items-center gap-1.5">
               <span className="h-3 w-3 rounded-md border border-warning/40 bg-warning/15" /> Late
@@ -376,7 +383,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                   })}
                 </h4>
                 <span className={badgeClass(String(selectedStatus))}>
-                  {statusLabel(String(selectedStatus))}
+                  {displayStatusLabel(String(selectedStatus), selected)}
                 </span>
               </div>
 

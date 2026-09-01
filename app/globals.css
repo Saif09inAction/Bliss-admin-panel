@@ -560,7 +560,8 @@ body {
 }
 
 .badge-warn,
-.badge-yellow {
+.badge-yellow,
+.badge-half-day {
   background: rgba(232, 168, 56, 0.15);
   color: #9a6b10;
 }
@@ -829,6 +830,17 @@ body {
   background: var(--jade-soft);
   border-color: rgba(30, 203, 143, 0.4);
   color: var(--jade-deep);
+}
+
+.calendar-day.half-day {
+  background: rgba(232, 168, 56, 0.18);
+  border-color: rgba(232, 168, 56, 0.5);
+  color: #9a6b10;
+}
+
+.calendar-day.half-day:hover {
+  background: rgba(232, 168, 56, 0.28);
+  border-color: rgba(232, 168, 56, 0.65);
 }
 
 .calendar-day.late {

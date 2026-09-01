@@ -24,6 +24,7 @@ import { computeEarlyLeaveMinutes,
   normalizeTime,
   parseAttendance,
   statusLabel,
+  displayStatusLabel,
   formatDisplayTime,
   resolveShiftSettings,
 } from "@/lib/attendance-utils";
@@ -40,8 +41,9 @@ function badgeClass(status: string): string {
   switch (status) {
     case "PRESENT":
     case "ON_TIME":
-    case "HALF_DAY":
       return "badge badge-success";
+    case "HALF_DAY":
+      return "badge badge-warn";
     case "LATE":
     case "LEFT_EARLY":
       return "badge badge-warn";
@@ -349,7 +351,11 @@ export default function AttendancePage() {
                             : ""}
                         </p>
                       ) : r?.dayCredit ? (
-                        <p className="mt-0.5 text-xs text-jade-deep">
+                        <p
+                          className={`mt-0.5 text-xs ${
+                            r.dayCredit === "HALF" ? "text-amber-700" : "text-jade-deep"
+                          }`}
+                        >
                           {r.dayCredit === "HALF" ? "Half day (admin)" : "Full day present (admin)"}
                         </p>
                       ) : (
@@ -357,7 +363,7 @@ export default function AttendancePage() {
                       )}
                     </div>
                     <span className={`shrink-0 ${badgeClass(String(st))}`}>
-                      {statusLabel(String(st))}
+                      {displayStatusLabel(String(st), r)}
                     </span>
                     <ChevronRight
                       size={16}

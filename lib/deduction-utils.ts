@@ -12,7 +12,7 @@ import {
   employeeShiftForDate,
   globalSettingsForDate,
 } from "./shift-schedule";
-import { addDaysIso, daysInclusive } from "./pay-period-utils";
+import { addDaysIso, PAY_PERIOD_DAYS } from "./pay-period-utils";
 
 export type DayKind = "HOLIDAY" | "WORKING";
 export type HolidayScope = "ALL" | "SELECTED";
@@ -301,7 +301,7 @@ export function computePeriodDeductions(
   employeeShift?: ShiftSource
 ): MonthDeductionSummary {
   const byDate = new Map(records.map((r) => [r.date, r]));
-  const calendarDays = Math.max(daysInclusive(periodStart, periodEnd), 1);
+  const calendarDays = PAY_PERIOD_DAYS;
   const workingDays = countWorkingDaysInRange(
     periodStart,
     periodEnd,
@@ -409,7 +409,7 @@ export type EarnedDay = {
 export type EarnedSalarySummary = {
   periodStart: string;
   periodEnd: string;
-  /** Days in the join-based pay period (e.g. 18 Aug – 17 Sep = 31). */
+  /** Days in the 30-day pay period. */
   daysInPeriod: number;
   /** @deprecated alias for daysInPeriod */
   calendarDaysInMonth: number;
@@ -430,7 +430,7 @@ export type EarnedSalarySummary = {
 };
 
 /**
- * Prorate monthly salary across the join-based pay period (join date → day before next anniversary).
+ * Prorate monthly salary across the 30-day join-based pay period.
  * Only signed-in working days count as earned.
  */
 export function computeEarnedSalary(opts: {
@@ -456,7 +456,7 @@ export function computeEarnedSalary(opts: {
     employeeShift,
   } = opts;
 
-  const daysInPeriod = Math.max(daysInclusive(periodStart, periodEnd), 1);
+  const daysInPeriod = PAY_PERIOD_DAYS;
   const workingDaysInMonth = countWorkingDaysInRange(
     periodStart,
     periodEnd,
