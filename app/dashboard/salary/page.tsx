@@ -35,6 +35,7 @@ import {
   salaryPaidInPeriod,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment } from "@/lib/payment-delete";
+import { syncEmployeeSalaryRemaining } from "@/lib/salary-sync";
 import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
 import { parseAttendanceSettingsDoc, parseShiftHistory } from "@/lib/shift-schedule";
 import {
@@ -130,6 +131,7 @@ export default function SalaryPage() {
                 dailySignInTime: (data.dailySignInTime as string) || "",
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
                 shiftHistory: parseShiftHistory(data.shiftHistory),
+                salaryRemaining: (data.salaryRemaining as number) ?? undefined,
               };
             })
             .filter((e) => e.role === "STAFF" || e.role === "SUPERVISOR")
@@ -298,15 +300,37 @@ export default function SalaryPage() {
 
   // Sync computed remaining salary to Firestore so mobile app can read it directly
   useEffect(() => {
-    if (periodOffset !== 0) return; // Only sync current period
+    if (periodOffset !== 0) return;
     rows.forEach((r) => {
-      if (r.employee.phone && r.employee.salaryRemaining !== r.earnedDue) {
-        updateDoc(doc(getDb(), "employees", r.employee.phone), {
-          salaryRemaining: r.earnedDue
-        }).catch(() => {});
-      }
+      if (!r.employee.phone) return;
+      const rounded = Math.round(r.earnedDue * 100) / 100;
+      const stored = r.employee.salaryRemaining;
+      if (stored === rounded) return;
+      updateDoc(doc(getDb(), "employees", r.employee.phone), {
+        salaryRemaining: rounded,
+      })
+        .then(() => {
+          setStaff((prev) =>
+            prev.map((e) =>
+              e.phone === r.employee.phone ? { ...e, salaryRemaining: rounded } : e
+            )
+          );
+        })
+        .catch(() => {});
     });
   }, [rows, periodOffset]);
+
+  // Keep pay modal in sync when payments change (e.g. after delete)
+  useEffect(() => {
+    if (!payTarget) return;
+    const updated = rows.find((r) => r.employee.phone === payTarget.employee.phone);
+    if (
+      updated &&
+      (updated.paid !== payTarget.paid || updated.earnedDue !== payTarget.earnedDue)
+    ) {
+      setPayTarget(updated);
+    }
+  }, [rows, payTarget]);
 
   function openPay(row: SalaryRow, mode: PayMode = "EARNED") {
     setPayTarget(row);
@@ -322,9 +346,11 @@ export default function SalaryPage() {
     setPayAmount(String(mode === "EARNED" ? payTarget.earnedDue : payTarget.fullDue));
   }
 
-  async function refreshPayments() {
+  async function refreshPayments(): Promise<PaymentTransaction[]> {
     const paySnap = await getDocs(collection(getDb(), "payments"));
-    setPayments(paySnap.docs.map((d) => parsePayment(d.id, d.data())));
+    const list = paySnap.docs.map((d) => parsePayment(d.id, d.data()));
+    setPayments(list);
+    return list;
   }
 
   async function handleDeleteSalaryPayment(
@@ -333,17 +359,38 @@ export default function SalaryPage() {
   ) {
     if (
       !confirm(
-        `Delete salary payment of ${money(payment.amount)} for ${employeeName}? Paid amount will be undone.`
+        `Delete salary payment of ${money(payment.amount)} for ${employeeName}? Due amount will be restored.`
       )
     ) {
+      return;
+    }
+    const employee = staffByPhone.get(payment.employeeId);
+    if (!employee) {
+      setMsg("Staff member not found.");
       return;
     }
     setDeletingPaymentId(payment.id);
     setMsg("");
     try {
       await deleteSalaryPayment(payment.id);
-      await refreshPayments();
-      setMsg(`Deleted payment of ${money(payment.amount)} for ${employeeName}.`);
+      const freshPayments = await refreshPayments();
+      const earnedDue = await syncEmployeeSalaryRemaining({
+        employee,
+        payments: freshPayments,
+        attendance,
+        settings,
+        overrides,
+        periodOffset,
+        today,
+      });
+      setStaff((prev) =>
+        prev.map((e) =>
+          e.phone === employee.phone ? { ...e, salaryRemaining: earnedDue } : e
+        )
+      );
+      setMsg(
+        `Deleted payment of ${money(payment.amount)} for ${employeeName}. Due is now ${money(earnedDue)}.`
+      );
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Delete failed.");
     } finally {
@@ -380,9 +427,23 @@ export default function SalaryPage() {
         ...payment,
         remarks: payment.remarks || "",
       });
+      const freshPayments = await refreshPayments();
+      const earnedDue = await syncEmployeeSalaryRemaining({
+        employee: payTarget.employee,
+        payments: freshPayments,
+        attendance,
+        settings,
+        overrides,
+        periodOffset,
+        today,
+      });
+      setStaff((prev) =>
+        prev.map((e) =>
+          e.phone === payTarget.employee.phone ? { ...e, salaryRemaining: earnedDue } : e
+        )
+      );
       setPayTarget(null);
       setMsg(`Salary of ${money(amount)} recorded for ${payTarget.employee.name}.`);
-      await refreshPayments();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Payment failed.");
     } finally {
@@ -494,7 +555,7 @@ export default function SalaryPage() {
       {msg && (
         <div
           className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
-            msg.includes("recorded") || msg.includes("Deleted")
+            msg.includes("recorded") || msg.includes("Deleted") || msg.includes("Due is now")
               ? "bg-jade-soft text-jade-deep"
               : "bg-red-50 text-danger"
           }`}
