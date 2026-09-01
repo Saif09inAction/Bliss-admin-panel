@@ -28,6 +28,7 @@ import {
   type SalaryFilter,
 } from "@/lib/salary-utils";
 import {
+  clampPayPeriodOffset,
   earnedAsOfDate,
   formatPayPeriodLabel,
   formatPayPeriodMonthLabel,
@@ -202,7 +203,7 @@ export default function SalaryPage() {
   const today = todayDateStr();
 
   function shiftPeriod(delta: number) {
-    setPeriodOffset((prev) => prev + delta);
+    setPeriodOffset((prev) => clampPayPeriodOffset(prev + delta));
   }
 
   const periodNavLabel = useMemo(() => {
@@ -214,6 +215,13 @@ export default function SalaryPage() {
     const monthLabel = formatPayPeriodMonthLabel(period.start, period.end);
     if (periodOffset === 0) return `${monthLabel} · current`;
     return monthLabel;
+  }, [staff, periodOffset, today]);
+
+  const periodNavRange = useMemo(() => {
+    const ref = staff[0];
+    if (!ref) return "";
+    const period = resolvePayPeriod(ref.joiningDate, periodOffset, today);
+    return formatPayPeriodLabel(period.start, period.end);
   }, [staff, periodOffset, today]);
 
   const rows = useMemo(() => {
@@ -750,15 +758,22 @@ export default function SalaryPage() {
           >
             <ChevronLeft size={18} />
           </button>
-          <div className="flex items-center gap-2 text-center">
-            <CalendarDays size={18} className="text-jade-deep" />
-            <h2 className="font-display text-lg font-bold">{periodNavLabel}</h2>
-            <p className="text-xs text-[var(--text-muted)]">From each staff join date</p>
+          <div className="min-w-0 flex-1 text-center">
+            <div className="flex items-center justify-center gap-2">
+              <CalendarDays size={18} className="shrink-0 text-jade-deep" />
+              <h2 className="font-display text-lg font-bold">{periodNavLabel}</h2>
+            </div>
+            {periodNavRange ? (
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">{periodNavRange}</p>
+            ) : (
+              <p className="text-xs text-[var(--text-muted)]">From each staff join date</p>
+            )}
           </div>
           <button
             type="button"
             className="btn-icon"
             onClick={() => shiftPeriod(1)}
+            disabled={periodOffset >= 0}
             aria-label="Next pay period"
           >
             <ChevronRight size={18} />

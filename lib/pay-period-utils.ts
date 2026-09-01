@@ -65,6 +65,11 @@ export function currentPayPeriodIndex(joinDate: string, asOfDate: string): numbe
   return idx;
 }
 
+/** Pay period offset cannot go past the current period (0 = current, negative = past). */
+export function clampPayPeriodOffset(periodOffset: number): number {
+  return Math.min(0, periodOffset);
+}
+
 /** Resolve pay period relative to today (offset 0 = current, -1 = previous, …). */
 export function resolvePayPeriod(
   joinDate: string,
@@ -73,7 +78,8 @@ export function resolvePayPeriod(
 ): PayPeriod {
   const join = joinDate?.trim() || asOfDate;
   const current = currentPayPeriodIndex(join, asOfDate);
-  const index = Math.max(0, current + periodOffset);
+  const offset = clampPayPeriodOffset(periodOffset);
+  const index = Math.max(0, current + offset);
   return payPeriodForIndex(join, index);
 }
 
@@ -96,19 +102,13 @@ export function formatPayPeriodLabel(start: string, end: string): string {
   return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
 }
 
-/** Human month label for pay period navigation and carry-forward rows. */
-export function formatPayPeriodMonthLabel(start: string, end: string): string {
-  const monthFmt = (s: string) => {
-    const { y, m } = parseIso(s);
-    return new Date(y, m - 1, 1).toLocaleDateString("en-IN", {
-      month: "long",
-      year: "numeric",
-    });
-  };
-  const startLabel = monthFmt(start);
-  const endLabel = monthFmt(end);
-  if (startLabel === endLabel) return startLabel;
-  return `${startLabel} – ${endLabel}`;
+/** Primary month for a pay period (start month) — e.g. July, August, September. */
+export function formatPayPeriodMonthLabel(start: string, _end?: string): string {
+  const { y, m } = parseIso(start);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
 }
 
 export function paymentAppliesToPeriod(

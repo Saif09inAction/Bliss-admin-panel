@@ -15,6 +15,7 @@ import {
   type OverrideMap,
 } from "@/lib/deduction-utils";
 import {
+  clampPayPeriodOffset,
   earnedAsOfDate,
   formatPayPeriodLabel,
   paymentsInPeriod,
@@ -142,7 +143,12 @@ export default function MySalaryPage() {
             {periodOffset === 0 ? "Current pay period" : "Past pay period"} · {period.daysInPeriod} days
           </p>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPeriodOffset((p) => p + 1)}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setPeriodOffset((p) => clampPayPeriodOffset(p + 1))}
+          disabled={periodOffset >= 0}
+        >
           Next
         </button>
       </div>

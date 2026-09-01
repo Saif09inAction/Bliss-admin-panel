@@ -61,6 +61,7 @@ import {
 import { parsePayment, salaryStatus, todayDateStr } from "@/lib/salary-utils";
 import {
   addDaysIso,
+  clampPayPeriodOffset,
   earnedAsOfDate,
   formatPayPeriodLabel,
   resolvePayPeriod,
@@ -867,7 +868,8 @@ export default function WorkerProfilePanel({
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm !px-2"
-                        onClick={() => setPeriodOffset((p) => p + 1)}
+                        onClick={() => setPeriodOffset((p) => clampPayPeriodOffset(p + 1))}
+                        disabled={periodOffset >= 0}
                       >
                         Next
                       </button>

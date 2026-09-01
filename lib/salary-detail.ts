@@ -13,6 +13,7 @@ import {
   currentPayPeriodIndex,
   earnedAsOfDate,
   formatPayPeriodMonthLabel,
+  clampPayPeriodOffset,
   payPeriodForIndex,
   paymentsInPeriod,
   resolvePayPeriod,
@@ -164,7 +165,7 @@ export function computeCarryForwardUnpaid(opts: {
   const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
   const join = employee.joiningDate?.trim() || today;
   const currentIdx = currentPayPeriodIndex(join, today);
-  const viewIdx = Math.max(0, currentIdx + periodOffset);
+  const viewIdx = Math.max(0, currentIdx + clampPayPeriodOffset(periodOffset));
   const phone = employee.phone;
   const empPayments = payments.filter((p) => p.employeeId === phone);
   const empAtt = attendance.filter(
