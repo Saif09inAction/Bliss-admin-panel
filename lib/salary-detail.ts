@@ -3,9 +3,11 @@ import {
   computeEarnedSalary,
   formatDurationMinutes,
   isWorkingDay,
+  resolveShiftSettings,
   type EarnedSalarySummary,
   type OverrideMap,
 } from "@/lib/deduction-utils";
+import { computeShiftWorkingHours } from "@/lib/attendance-utils";
 import { addDaysIso } from "@/lib/pay-period-utils";
 import {
   currentPayPeriodIndex,
@@ -68,10 +70,21 @@ function countAttendanceInPeriod(opts: {
   periodEnd: string;
   asOfDate: string;
   records: Attendance[];
+  settings: AttendanceSettings;
   overrides: OverrideMap;
   employeePhone?: string;
+  employeeShift?: Employee;
 }) {
-  const { periodStart, periodEnd, asOfDate, records, overrides, employeePhone } = opts;
+  const {
+    periodStart,
+    periodEnd,
+    asOfDate,
+    records,
+    settings,
+    overrides,
+    employeePhone,
+    employeeShift,
+  } = opts;
   const until = asOfDate < periodEnd ? asOfDate : periodEnd;
   const byDate = new Map(records.map((r) => [r.date, r]));
 
@@ -105,12 +118,29 @@ function countAttendanceInPeriod(opts: {
     const hasPunch = Boolean(rec?.signInTime);
     const creditedFull = credit === "FULL";
 
+    const dayShift = resolveShiftSettings(
+      employeeShift,
+      settings,
+      key,
+      overrides,
+      employeePhone
+    );
+    const shiftHours =
+      rec?.signInTime && rec?.signOutTime
+        ? computeShiftWorkingHours(
+            rec.signInTime,
+            rec.signOutTime,
+            dayShift.dailySignInTime,
+            dayShift.dailySignOutTime
+          )
+        : 0;
+
     if (isHalf) {
       halfDays++;
-      totalWorkingHours += rec?.workingHours || 0;
+      totalWorkingHours += shiftHours;
     } else if (hasPunch || creditedFull) {
       fullDays++;
-      totalWorkingHours += rec?.workingHours || 0;
+      totalWorkingHours += shiftHours;
     } else {
       absentDays++;
     }
@@ -211,8 +241,10 @@ export function buildSalaryStaffDetail(opts: {
     periodEnd: period.end,
     asOfDate,
     records: empAtt,
+    settings,
     overrides,
     employeePhone: phone,
+    employeeShift: employee,
   });
 
   let fullDayAmount = 0;

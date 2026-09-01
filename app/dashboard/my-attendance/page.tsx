@@ -17,20 +17,13 @@ import {
   formatLateDuration,
   formatWorkingHours,
   parseAttendance,
+  computeShiftWorkingHours,
   resolveShiftSettings,
   statusLabel,
-  timeToMinutes,
 } from "@/lib/attendance-utils";
 import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
 import { parseAttendanceSettingsDoc } from "@/lib/shift-schedule";
 import PageToolbar from "@/components/admin/PageToolbar";
-
-function computeWorkingHours(signIn?: string, signOut?: string): number {
-  const inM = timeToMinutes(signIn);
-  const outM = timeToMinutes(signOut);
-  if (inM == null || outM == null) return 0;
-  return Math.max(0, (outM - inM) / 60);
-}
 
 export default function MyAttendancePage() {
   const { session } = useAuth();
@@ -169,7 +162,12 @@ export default function MyAttendancePage() {
       if (earlyMinutes > 0) status = "LEFT_EARLY";
       else if (lateMinutes > 0) status = "LATE";
       else status = "PRESENT";
-      const workingHours = computeWorkingHours(record.signInTime, signOutTime);
+      const workingHours = computeShiftWorkingHours(
+        record.signInTime,
+        signOutTime,
+        shift.dailySignInTime,
+        shift.dailySignOutTime
+      );
       const id = `${phone}_${today}`;
       await setDoc(
         doc(getDb(), "attendance", id),
@@ -241,7 +239,15 @@ export default function MyAttendancePage() {
               {record?.signInTime && (
                 <span className="flex items-center gap-1.5">
                   <Clock size={14} />
-                  {formatWorkingHours(record.workingHours || computeWorkingHours(record.signInTime, record.signOutTime))}
+                  {formatWorkingHours(
+                    record.workingHours ||
+                      computeShiftWorkingHours(
+                        record.signInTime,
+                        record.signOutTime,
+                        shift.dailySignInTime,
+                        shift.dailySignOutTime
+                      )
+                  )}
                 </span>
               )}
             </div>

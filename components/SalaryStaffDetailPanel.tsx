@@ -1,9 +1,11 @@
 "use client";
 
-import { X } from "lucide-react";
+import { useState } from "react";
+import { Receipt, Trash2, Pencil, X } from "lucide-react";
+import type { PaymentTransaction } from "@/lib/types";
 import type { SalaryStaffDetail } from "@/lib/salary-detail";
 import { formatDurationMinutes } from "@/lib/salary-detail";
-import { formatDisplayDate } from "@/lib/csv";
+import { formatDisplayDate, formatDisplayTime } from "@/lib/csv";
 
 function money(n: number) {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
@@ -14,10 +16,24 @@ type Props = {
   detail: SalaryStaffDetail;
   onClose: () => void;
   onPay?: () => void;
+  onDeletePayment?: (payment: PaymentTransaction) => void;
+  onEditPayment?: (payment: PaymentTransaction) => void;
+  deletingPaymentId?: string | null;
+  editingPaymentId?: string | null;
 };
 
-export default function SalaryStaffDetailPanel({ staffName, detail, onClose, onPay }: Props) {
+export default function SalaryStaffDetailPanel({
+  staffName,
+  detail,
+  onClose,
+  onPay,
+  onDeletePayment,
+  onEditPayment,
+  deletingPaymentId,
+  editingPaymentId,
+}: Props) {
   const d = detail;
+  const [showTransactions, setShowTransactions] = useState(false);
 
   return (
     <>
@@ -90,18 +106,10 @@ export default function SalaryStaffDetailPanel({ staffName, detail, onClose, onP
                     value={money(d.earnings.halfDayAmount)}
                   />
                   <Row label="Gross earned" value={money(d.earnings.grossEarned)} bold />
+                  <Row label="Rate per day" value={money(d.earned.perDayRate)} muted />
+                  <Row label="Rate per hour" value={money(d.earned.perHourRate)} muted />
                   <Row
-                    label={`Rate per day`}
-                    value={money(d.earned.perDayRate)}
-                    muted
-                  />
-                  <Row
-                    label={`Rate per hour`}
-                    value={money(d.earned.perHourRate)}
-                    muted
-                  />
-                  <Row
-                    label={`Total hours worked`}
+                    label="Total hours worked"
                     value={`${d.attendance.totalWorkingHours} hrs`}
                     muted
                   />
@@ -190,23 +198,94 @@ export default function SalaryStaffDetailPanel({ staffName, detail, onClose, onP
               </div>
             )}
 
-            {d.payments.length > 0 && (
-              <div>
-                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Payments this period
-                </p>
-                <div className="space-y-1 rounded-xl border border-[var(--border)] p-3">
-                  {d.payments.map((p) => (
-                    <div key={p.id} className="flex justify-between text-sm">
-                      <span>
-                        {formatDisplayDate(p.date)} · {money(p.amount)}
-                      </span>
-                      <span className="text-[var(--text-muted)]">{p.remarks || "—"}</span>
-                    </div>
-                  ))}
+            <div className="rounded-xl border border-[var(--border)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
+                    <Receipt className="h-4 w-4" />
+                    Transactions
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--text-muted)]">
+                    Salary payments for this staff in this pay period.
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showTransactions ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => setShowTransactions((v) => !v)}
+                >
+                  <Receipt size={14} />
+                  {showTransactions ? "Hide" : "Show"}
+                  {d.payments.length > 0 ? ` (${d.payments.length})` : ""}
+                </button>
               </div>
-            )}
+
+              {showTransactions && (
+                <div className="mt-3">
+                  {d.payments.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
+                      No payments for this period yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+                      {d.payments.map((p) => (
+                        <div
+                          key={p.id}
+                          className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-semibold text-jade-deep">{money(p.amount)}</p>
+                            <p className="text-xs text-[var(--text-muted)]">
+                              {formatDisplayDate(p.date)}
+                              {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
+                              {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                            </p>
+                            {p.remarks ? (
+                              <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
+                                {p.remarks}
+                              </p>
+                            ) : null}
+                            {p.periodStart && p.periodEnd ? (
+                              <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">
+                                Period: {p.periodStart} → {p.periodEnd}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {onEditPayment ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                disabled={editingPaymentId === p.id}
+                                onClick={() => onEditPayment(p)}
+                              >
+                                <Pencil size={14} />
+                                Edit
+                              </button>
+                            ) : null}
+                            {onDeletePayment ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm text-danger"
+                                disabled={deletingPaymentId === p.id}
+                                onClick={() => onDeletePayment(p)}
+                              >
+                                <Trash2 size={14} />
+                                {deletingPaymentId === p.id ? "…" : "Delete"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between bg-jade-soft/40 px-3 py-2 text-sm font-semibold text-jade-deep">
+                        <span>Total paid</span>
+                        <span>{money(d.paid)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex gap-2 border-t border-[var(--border)] p-4">

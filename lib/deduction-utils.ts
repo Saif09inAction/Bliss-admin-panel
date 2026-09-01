@@ -2,6 +2,7 @@ import type { Attendance, AttendanceSettings, Employee, ShiftScheduleEntry } fro
 import {
   computeEarlyLeaveMinutes,
   computeLateMinutes,
+  computeShiftWorkingHours,
   dateKey,
   daysInMonth,
   normalizeTime,
@@ -518,10 +519,20 @@ export function computeEarnedSalary(opts: {
       const dayGross = Math.round(perDayRate * dayFactor * 100) / 100;
       const dayNet = Math.max(0, Math.round((dayGross - deduction) * 100) / 100);
 
+      const workingHours =
+        rec?.signInTime && rec?.signOutTime
+          ? computeShiftWorkingHours(
+              rec.signInTime,
+              rec.signOutTime,
+              dayShift.dailySignInTime,
+              dayShift.dailySignOutTime
+            )
+          : 0;
+
       days.push({
         date: key,
         dayFactor,
-        workingHours: rec?.workingHours || 0,
+        workingHours,
         dayGross,
         lateMinutes: late,
         earlyMinutes: early,

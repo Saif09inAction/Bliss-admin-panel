@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Clock,
   Pencil,
-  Receipt,
   Trash2,
   X,
 } from "lucide-react";
@@ -31,10 +30,8 @@ import {
 import {
   earnedAsOfDate,
   formatPayPeriodLabel,
-  paymentsInPeriod,
   resolvePayPeriod,
   salaryPaidInPeriod,
-  paymentAppliesToPeriod,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
 import {
@@ -125,7 +122,6 @@ export default function SalaryPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(true);
-  const [showTransactions, setShowTransactions] = useState(false);
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editDueTarget, setEditDueTarget] = useState<SalaryRow | null>(null);
@@ -344,32 +340,6 @@ export default function SalaryPage() {
     [staff]
   );
 
-  const periodTransactions = useMemo(() => {
-    return payments
-      .filter((p) => p.type === "SALARY_PAYMENT")
-      .map((payment) => {
-        const employee = staffByPhone.get(payment.employeeId);
-        if (!employee) return null;
-        const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
-        if (!paymentAppliesToPeriod(payment, period.start, period.end)) return null;
-        return { payment, employee };
-      })
-      .filter((row): row is { payment: PaymentTransaction; employee: Employee } => row != null)
-      .sort((a, b) =>
-        `${b.payment.date} ${b.payment.time}`.localeCompare(`${a.payment.date} ${a.payment.time}`)
-      );
-  }, [payments, staffByPhone, periodOffset, today]);
-
-  const payTargetTransactions = useMemo(() => {
-    if (!payTarget) return [];
-    const period = resolvePayPeriod(payTarget.employee.joiningDate, periodOffset, today);
-    return paymentsInPeriod(
-      payments.filter((p) => p.employeeId === payTarget.employee.phone && p.type === "SALARY_PAYMENT"),
-      period.start,
-      period.end
-    ).sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
-  }, [payTarget, payments, periodOffset, today]);
-
   const staffDetail = useMemo(() => {
     if (!detailTarget) return null;
     return buildSalaryStaffDetail({
@@ -420,6 +390,13 @@ export default function SalaryPage() {
       setPayTarget(updated);
     }
   }, [rows, payTarget]);
+
+  // Keep breakdown panel in sync when payments change
+  useEffect(() => {
+    if (!detailTarget) return;
+    const updated = rows.find((r) => r.employee.phone === detailTarget.employee.phone);
+    if (updated) setDetailTarget(updated);
+  }, [rows, detailTarget?.employee.phone]);
 
   function openPay(row: SalaryRow, mode: PayMode = "EARNED") {
     setPayTarget(row);
@@ -808,20 +785,6 @@ export default function SalaryPage() {
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <button
-          type="button"
-          className={`btn btn-sm ${showTransactions ? "btn-primary" : "btn-secondary"}`}
-          onClick={() => setShowTransactions((v) => !v)}
-        >
-          <Receipt size={14} />
-          {showTransactions ? "Hide transactions" : "Transactions"}
-          {!showTransactions && periodTransactions.length > 0
-            ? ` (${periodTransactions.length})`
-            : ""}
-        </button>
-      </div>
-
       {msg && (
         <div
           className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
@@ -846,100 +809,6 @@ export default function SalaryPage() {
             <AlertCircle size={16} />
           )}
           {msg}
-        </div>
-      )}
-
-      {showTransactions && (
-        <div className="surface space-y-3 border-2 border-jade/25 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-jade-deep">
-                <Receipt className="h-4 w-4" />
-                Salary transactions
-              </p>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">
-                Payments in each staff member&apos;s current pay period view. Delete to undo mistaken pays.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setShowTransactions(false)}
-            >
-              Close
-            </button>
-          </div>
-
-          {periodTransactions.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-8 text-center text-sm text-[var(--text-muted)]">
-              No salary payments this period.
-            </p>
-          ) : (
-            <div className="overflow-hidden rounded-xl border border-[var(--border)]">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Staff</th>
-                    <th>Date</th>
-                    <th>Amount</th>
-                    <th>Notes</th>
-                    <th className="text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {periodTransactions.map(({ payment, employee }) => (
-                    <tr key={payment.id}>
-                      <td>
-                        <p className="font-semibold capitalize">{employee.name}</p>
-                        <p className="text-xs text-[var(--text-muted)]">{employee.phone}</p>
-                      </td>
-                      <td className="text-sm">
-                        {formatDisplayDate(payment.date)}
-                        {payment.time ? (
-                          <span className="block text-xs text-[var(--text-muted)]">
-                            {formatDisplayTime(payment.time)}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="font-semibold text-jade-deep">{money(payment.amount)}</td>
-                      <td className="max-w-[200px] truncate text-sm text-[var(--text-muted)]">
-                        {payment.remarks || "—"}
-                        {payment.createdBy ? (
-                          <span className="block text-xs">by {payment.createdBy}</span>
-                        ) : null}
-                      </td>
-                      <td className="text-right">
-                        <div className="flex flex-wrap items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={editingPaymentId === payment.id}
-                            onClick={() => openEditPayment(payment)}
-                            aria-label="Edit payment amount"
-                          >
-                            <Pencil size={14} />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm text-danger"
-                            disabled={deletingPaymentId === payment.id}
-                            onClick={() =>
-                              handleDeleteSalaryPayment(payment, employee.name)
-                            }
-                            aria-label="Delete payment"
-                          >
-                            <Trash2 size={14} />
-                            {deletingPaymentId === payment.id ? "…" : "Delete"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
 
@@ -1200,50 +1069,6 @@ export default function SalaryPage() {
                 </div>
               </div>
 
-              {payTargetTransactions.length > 0 && (
-                <div>
-                  <p className="label mb-2">This period&apos;s payments</p>
-                  <div className="max-h-40 space-y-0 overflow-y-auto rounded-xl border border-[var(--border)]">
-                    {payTargetTransactions.map((p) => (
-                      <div
-                        key={p.id}
-                        className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2 text-sm last:border-b-0"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium">{money(p.amount)}</p>
-                          <p className="truncate text-xs text-[var(--text-muted)]">
-                            {formatDisplayDate(p.date)}
-                            {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
-                            {p.remarks ? ` · ${p.remarks}` : ""}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm p-2"
-                            disabled={editingPaymentId === p.id}
-                            onClick={() => openEditPayment(p)}
-                            aria-label="Edit payment"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm p-2 text-danger"
-                            disabled={deletingPaymentId === p.id}
-                            onClick={() =>
-                              handleDeleteSalaryPayment(p, payTarget.employee.name)
-                            }
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div>
                 <p className="label mb-2">Pay option</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -1326,6 +1151,12 @@ export default function SalaryPage() {
             setDetailTarget(null);
             openPay(row, "EARNED");
           }}
+          onDeletePayment={(payment) =>
+            handleDeleteSalaryPayment(payment, detailTarget.employee.name)
+          }
+          onEditPayment={openEditPayment}
+          deletingPaymentId={deletingPaymentId}
+          editingPaymentId={editingPaymentId}
         />
       )}
 

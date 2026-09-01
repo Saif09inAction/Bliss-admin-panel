@@ -115,6 +115,37 @@ export function computeEarlyLeaveMinutes(signOutTime?: string, expectedSignOut?:
   return Math.max(0, expected - actual);
 }
 
+/**
+ * Hours credited for pay/display: only time within the scheduled shift window.
+ * Late clock-out after shift end does not add extra hours.
+ */
+export function computeShiftWorkingHours(
+  signInTime?: string,
+  signOutTime?: string,
+  expectedSignIn?: string,
+  expectedSignOut?: string
+): number {
+  const signIn = timeToMinutes(signInTime);
+  const signOut = timeToMinutes(signOutTime);
+  const shiftIn = timeToMinutes(normalizeTime(expectedSignIn));
+  const shiftOut = timeToMinutes(normalizeTime(expectedSignOut));
+  if (signIn == null || signOut == null || shiftIn == null || shiftOut == null) return 0;
+
+  const shiftDuration =
+    shiftOut > shiftIn ? shiftOut - shiftIn : shiftOut + 24 * 60 - shiftIn;
+
+  let actualOut = signOut;
+  if (actualOut < signIn) actualOut += 24 * 60;
+
+  const effectiveStart = Math.max(signIn, shiftIn);
+  const shiftEnd = shiftIn + shiftDuration;
+  const effectiveEnd = Math.min(actualOut, shiftEnd);
+  if (effectiveEnd <= effectiveStart) return 0;
+
+  const mins = Math.min(effectiveEnd - effectiveStart, shiftDuration);
+  return Math.round((mins / 60) * 100) / 100;
+}
+
 export function formatLateDuration(minutes: number): string {
   if (minutes <= 0) return "On time";
   const h = Math.floor(minutes / 60);
