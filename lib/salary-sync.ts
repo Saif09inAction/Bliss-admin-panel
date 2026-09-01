@@ -3,7 +3,7 @@ import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import { computeCarryForwardUnpaid } from "@/lib/salary-detail";
 import { computeEarnedSalary, type OverrideMap } from "@/lib/deduction-utils";
-import { earnedAsOfDate, resolvePayPeriod, salaryPaidInPeriod } from "@/lib/pay-period-utils";
+import { earnedAsOfDateForCalendarView, calendarMonthFromOffset, resolvePayPeriodForCalendarOffset, salaryPaidInPeriod } from "@/lib/pay-period-utils";
 
 export function computeStaffEarnedDue(opts: {
   employee: Employee;
@@ -18,8 +18,14 @@ export function computeStaffEarnedDue(opts: {
   const phone = employee.phone?.trim();
   if (!phone) return 0;
 
-  const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
-  const asOfDate = earnedAsOfDate(period, today);
+  const period = resolvePayPeriodForCalendarOffset(employee.joiningDate, periodOffset, today);
+  if (!period) return 0;
+
+  const asOfDate = earnedAsOfDateForCalendarView(
+    period,
+    calendarMonthFromOffset(today, periodOffset),
+    today
+  );
   const empPayments = payments.filter((p) => p.employeeId === phone);
   const paid = salaryPaidInPeriod(empPayments, period.start, period.end);
   const empAtt = attendance.filter(

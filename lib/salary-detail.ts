@@ -10,13 +10,13 @@ import {
 import { computeShiftWorkingHours } from "@/lib/attendance-utils";
 import { addDaysIso } from "@/lib/pay-period-utils";
 import {
-  currentPayPeriodIndex,
-  earnedAsOfDate,
+  calendarMonthFromOffset,
+  earnedAsOfDateForCalendarView,
+  formatCalendarMonthLabel,
   formatPayPeriodMonthLabel,
-  clampPayPeriodOffset,
   payPeriodForIndex,
   paymentsInPeriod,
-  resolvePayPeriod,
+  resolvePayPeriodForCalendarOffset,
   salaryPaidInPeriod,
   type PayPeriod,
 } from "@/lib/pay-period-utils";
@@ -164,8 +164,11 @@ export function computeCarryForwardUnpaid(opts: {
 }): { lines: CarryForwardLine[]; total: number } {
   const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
   const join = employee.joiningDate?.trim() || today;
-  const currentIdx = currentPayPeriodIndex(join, today);
-  const viewIdx = Math.max(0, currentIdx + clampPayPeriodOffset(periodOffset));
+  const viewedPeriod = resolvePayPeriodForCalendarOffset(join, periodOffset, today);
+  if (!viewedPeriod) {
+    return { lines: [], total: 0 };
+  }
+  const viewIdx = viewedPeriod.index;
   const phone = employee.phone;
   const empPayments = payments.filter((p) => p.employeeId === phone);
   const empAtt = attendance.filter(
@@ -217,8 +220,65 @@ export function buildSalaryStaffDetail(opts: {
   today: string;
 }): SalaryStaffDetail {
   const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
-  const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
-  const asOfDate = earnedAsOfDate(period, today);
+  const viewedMonth = calendarMonthFromOffset(today, periodOffset);
+  const period = resolvePayPeriodForCalendarOffset(employee.joiningDate, periodOffset, today);
+  if (!period) {
+    return {
+      period: { index: -1, start: "", end: "", daysInPeriod: 0 },
+      periodLabel: formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month),
+      asOfDate: today,
+      isCurrentPeriod: periodOffset === 0,
+      carryForward: [],
+      carryForwardTotal: 0,
+      attendance: {
+        workingDays: 0,
+        fullDays: 0,
+        halfDays: 0,
+        absentDays: 0,
+        holidayDays: 0,
+        totalWorkingHours: 0,
+      },
+      earnings: {
+        fullDayCount: 0,
+        fullDayAmount: 0,
+        halfDayCount: 0,
+        halfDayAmount: 0,
+        grossEarned: 0,
+      },
+      deductions: {
+        lateMinutes: 0,
+        earlyMinutes: 0,
+        lateAmount: 0,
+        earlyAmount: 0,
+        total: 0,
+      },
+      earned: {
+        periodStart: "",
+        periodEnd: "",
+        daysInPeriod: 0,
+        calendarDaysInMonth: 0,
+        workingDaysInMonth: 0,
+        shiftMinutes: 0,
+        perDayRate: 0,
+        perHourRate: 0,
+        perMinuteRate: 0,
+        daysWorked: 0,
+        grossEarned: 0,
+        totalLateMinutes: 0,
+        totalEarlyMinutes: 0,
+        totalLostMinutes: 0,
+        totalDeduction: 0,
+        earnedNet: 0,
+        fullMonthNet: 0,
+        days: [],
+      },
+      paid: 0,
+      periodDue: 0,
+      totalDue: 0,
+      payments: [],
+    };
+  }
+  const asOfDate = earnedAsOfDateForCalendarView(period, viewedMonth, today);
   const phone = employee.phone;
   const empPayments = payments.filter((p) => p.employeeId === phone);
   const empAtt = attendance.filter(
@@ -272,11 +332,9 @@ export function buildSalaryStaffDetail(opts: {
     earlyAmount += day.earlyDeduction ?? 0;
   }
 
-  const currentIdx = currentPayPeriodIndex(employee.joiningDate?.trim() || today, today);
-
   return {
     period,
-    periodLabel: formatPayPeriodMonthLabel(period.start, period.end),
+    periodLabel: formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month),
     asOfDate,
     isCurrentPeriod: periodOffset === 0,
     carryForward,

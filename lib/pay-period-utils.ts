@@ -65,9 +65,98 @@ export function currentPayPeriodIndex(joinDate: string, asOfDate: string): numbe
   return idx;
 }
 
-/** Pay period offset cannot go past the current period (0 = current, negative = past). */
+/** Pay period / month offset cannot go past the current period (0 = current, negative = past). */
 export function clampPayPeriodOffset(periodOffset: number): number {
   return Math.min(0, periodOffset);
+}
+
+export type CalendarMonth = { year: number; month: number };
+
+/** Calendar month relative to today: 0 = this month, -1 = last month, etc. */
+export function calendarMonthFromOffset(asOfDate: string, monthOffset: number): CalendarMonth {
+  const offset = clampPayPeriodOffset(monthOffset);
+  const { y, m } = parseIso(asOfDate);
+  const dt = new Date(y, m - 1 + offset, 1);
+  return { year: dt.getFullYear(), month: dt.getMonth() + 1 };
+}
+
+export function calendarMonthBounds(year: number, month: number): { start: string; end: string } {
+  const start = toIsoDate(year, month, 1);
+  const lastDay = new Date(year, month, 0).getDate();
+  const end = toIsoDate(year, month, lastDay);
+  return { start, end };
+}
+
+export function formatCalendarMonthLabel(year: number, month: number): string {
+  return new Date(year, month - 1, 1).toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/**
+ * Pay period with the most overlap in a calendar month (e.g. viewing August → Aug 8–Sep 7 for Aug 8 join).
+ */
+export function payPeriodOverlappingCalendarMonth(
+  joinDate: string,
+  year: number,
+  month: number
+): PayPeriod | null {
+  const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
+  const join = joinDate?.trim();
+  if (!join || monthEnd < join) return null;
+
+  let best: PayPeriod | null = null;
+  let bestOverlap = 0;
+
+  for (let idx = 0; idx < 600; idx++) {
+    const p = payPeriodForIndex(join, idx);
+    if (p.start > monthEnd) break;
+    if (p.end < monthStart) continue;
+
+    const overlapStart = p.start > monthStart ? p.start : monthStart;
+    const overlapEnd = p.end < monthEnd ? p.end : monthEnd;
+    const overlap = daysInclusive(overlapStart, overlapEnd);
+    if (overlap <= 0) continue;
+
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      best = p;
+      continue;
+    }
+
+    if (overlap === bestOverlap && best) {
+      const startMonth = parseIso(p.start).m;
+      const bestStartMonth = parseIso(best.start).m;
+      if (startMonth === month && bestStartMonth !== month) best = p;
+    }
+  }
+
+  return best;
+}
+
+/** Resolve each staff member's pay period for a calendar month (offset 0 = current month). */
+export function resolvePayPeriodForCalendarOffset(
+  joinDate: string,
+  monthOffset: number,
+  asOfDate: string
+): PayPeriod | null {
+  const { year, month } = calendarMonthFromOffset(asOfDate, monthOffset);
+  return payPeriodOverlappingCalendarMonth(joinDate, year, month);
+}
+
+export function earnedAsOfDateForCalendarView(
+  period: PayPeriod,
+  viewMonth: CalendarMonth,
+  today: string
+): string {
+  const { end: monthEnd } = calendarMonthBounds(viewMonth.year, viewMonth.month);
+  if (today < period.start) return addDaysIso(period.start, -1);
+  let cap = today;
+  if (cap > monthEnd) cap = monthEnd;
+  if (cap > period.end) cap = period.end;
+  if (cap < period.start) return addDaysIso(period.start, -1);
+  return cap;
 }
 
 /** Resolve pay period relative to today (offset 0 = current, -1 = previous, …). */
