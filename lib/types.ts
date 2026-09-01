@@ -69,6 +69,8 @@ export interface Employee {
   /** Per-staff shift history — changes apply from the next day. */
   shiftHistory?: ShiftScheduleEntry[];
   salaryRemaining?: number;
+  /** When true, salaryRemaining is set manually and auto-sync is skipped. */
+  salaryDueManual?: boolean;
   /** Web supervisor — admin toggles which dashboard sections are visible. */
   supervisorAccess?: Partial<SupervisorAccess>;
 }

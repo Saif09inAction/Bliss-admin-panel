@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Pencil,
   Receipt,
   Trash2,
   X,
@@ -34,8 +35,11 @@ import {
   resolvePayPeriod,
   salaryPaidInPeriod,
 } from "@/lib/pay-period-utils";
-import { deleteSalaryPayment } from "@/lib/payment-delete";
-import { syncEmployeeSalaryRemaining } from "@/lib/salary-sync";
+import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
+import {
+  setManualSalaryRemaining,
+  syncEmployeeSalaryRemaining,
+} from "@/lib/salary-sync";
 import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
 import { parseAttendanceSettingsDoc, parseShiftHistory } from "@/lib/shift-schedule";
 import {
@@ -74,10 +78,28 @@ type SalaryRow = {
   employee: Employee;
   paid: number;
   earned: EarnedSalarySummary;
+  calculatedDue: number;
   earnedDue: number;
   fullDue: number;
+  isManualDue: boolean;
   status: ReturnType<typeof salaryStatus>;
 };
+
+function resolveDisplayDue(
+  employee: Employee,
+  calculatedDue: number,
+  periodOffset: number
+): number {
+  if (
+    periodOffset === 0 &&
+    employee.salaryDueManual &&
+    employee.salaryRemaining != null &&
+    Number.isFinite(employee.salaryRemaining)
+  ) {
+    return Math.max(0, Math.round(employee.salaryRemaining * 100) / 100);
+  }
+  return calculatedDue;
+}
 
 export default function SalaryPage() {
   const { session } = useAuth();
@@ -100,6 +122,11 @@ export default function SalaryPage() {
   const [loading, setLoading] = useState(true);
   const [showTransactions, setShowTransactions] = useState(false);
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editDueTarget, setEditDueTarget] = useState<SalaryRow | null>(null);
+  const [editDueAmount, setEditDueAmount] = useState("");
+  const [editPaymentTarget, setEditPaymentTarget] = useState<PaymentTransaction | null>(null);
+  const [editPaymentAmount, setEditPaymentAmount] = useState("");
 
   useEffect(() => {
     const db = getDb();
@@ -132,6 +159,7 @@ export default function SalaryPage() {
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
                 shiftHistory: parseShiftHistory(data.shiftHistory),
                 salaryRemaining: (data.salaryRemaining as number) ?? undefined,
+                salaryDueManual: Boolean(data.salaryDueManual),
               };
             })
             .filter((e) => e.role === "STAFF" || e.role === "SUPERVISOR")
@@ -201,11 +229,22 @@ export default function SalaryPage() {
           employeePhone: e.phone,
           employeeShift: e,
         });
-        const earnedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+        const calculatedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+        const earnedDue = resolveDisplayDue(e, calculatedDue, periodOffset);
         const fullDue = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
-        // Status vs earned-till-now (what they should have received so far)
-        const status = salaryStatus(earned.earnedNet, paid);
-        return { employee: e, paid, earned, earnedDue, fullDue, status };
+        const effectivePaid = Math.max(0, earned.earnedNet - earnedDue);
+        const status = salaryStatus(earned.earnedNet, effectivePaid);
+        const isManualDue = periodOffset === 0 && Boolean(e.salaryDueManual);
+        return {
+          employee: e,
+          paid,
+          earned,
+          calculatedDue,
+          earnedDue,
+          fullDue,
+          isManualDue,
+          status,
+        };
       })
       .filter(({ employee, status }) => {
         const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
@@ -260,9 +299,11 @@ export default function SalaryPage() {
         employeePhone: e.phone,
         employeeShift: e,
       });
+      const calculatedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+      const earnedDue = resolveDisplayDue(e, calculatedDue, periodOffset);
       totalPaid += paid;
-      totalDue += Math.max(0, earned.earnedNet - paid);
-      if (salaryStatus(earned.earnedNet, paid) !== "PAID" && e.monthlySalary > 0) unpaidCount++;
+      totalDue += earnedDue;
+      if (earnedDue > 0 && e.monthlySalary > 0) unpaidCount++;
     }
     return { totalDue, totalPaid, unpaidCount };
   }, [staff, payments, attendance, periodOffset, today, settings, overrides]);
@@ -302,8 +343,8 @@ export default function SalaryPage() {
   useEffect(() => {
     if (periodOffset !== 0) return;
     rows.forEach((r) => {
-      if (!r.employee.phone) return;
-      const rounded = Math.round(r.earnedDue * 100) / 100;
+      if (!r.employee.phone || r.employee.salaryDueManual) return;
+      const rounded = Math.round(r.calculatedDue * 100) / 100;
       const stored = r.employee.salaryRemaining;
       if (stored === rounded) return;
       updateDoc(doc(getDb(), "employees", r.employee.phone), {
@@ -312,7 +353,9 @@ export default function SalaryPage() {
         .then(() => {
           setStaff((prev) =>
             prev.map((e) =>
-              e.phone === r.employee.phone ? { ...e, salaryRemaining: rounded } : e
+              e.phone === r.employee.phone
+                ? { ...e, salaryRemaining: rounded, salaryDueManual: false }
+                : e
             )
           );
         })
@@ -326,7 +369,9 @@ export default function SalaryPage() {
     const updated = rows.find((r) => r.employee.phone === payTarget.employee.phone);
     if (
       updated &&
-      (updated.paid !== payTarget.paid || updated.earnedDue !== payTarget.earnedDue)
+      (updated.paid !== payTarget.paid ||
+        updated.earnedDue !== payTarget.earnedDue ||
+        updated.isManualDue !== payTarget.isManualDue)
     ) {
       setPayTarget(updated);
     }
@@ -385,7 +430,9 @@ export default function SalaryPage() {
       });
       setStaff((prev) =>
         prev.map((e) =>
-          e.phone === employee.phone ? { ...e, salaryRemaining: earnedDue } : e
+          e.phone === employee.phone
+            ? { ...e, salaryRemaining: earnedDue, salaryDueManual: false }
+            : e
         )
       );
       setMsg(
@@ -395,6 +442,118 @@ export default function SalaryPage() {
       setMsg(err instanceof Error ? err.message : "Delete failed.");
     } finally {
       setDeletingPaymentId(null);
+    }
+  }
+
+  function openEditDue(row: SalaryRow) {
+    setEditDueTarget(row);
+    setEditDueAmount(String(row.earnedDue));
+    setMsg("");
+  }
+
+  async function submitEditDue(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editDueTarget) return;
+    const amount = Number(editDueAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setMsg("Enter a valid amount.");
+      return;
+    }
+    setSaving(true);
+    setMsg("");
+    try {
+      await setManualSalaryRemaining(editDueTarget.employee.phone, amount);
+      setStaff((prev) =>
+        prev.map((emp) =>
+          emp.phone === editDueTarget.employee.phone
+            ? { ...emp, salaryRemaining: amount, salaryDueManual: true }
+            : emp
+        )
+      );
+      setEditDueTarget(null);
+      setMsg(`Remaining due set to ${money(amount)} for ${editDueTarget.employee.name}.`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Update failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetDueToCalculated(row: SalaryRow) {
+    setSaving(true);
+    setMsg("");
+    try {
+      const earnedDue = await syncEmployeeSalaryRemaining({
+        employee: row.employee,
+        payments,
+        attendance,
+        settings,
+        overrides,
+        periodOffset,
+        today,
+      });
+      setStaff((prev) =>
+        prev.map((e) =>
+          e.phone === row.employee.phone
+            ? { ...e, salaryRemaining: earnedDue, salaryDueManual: false }
+            : e
+        )
+      );
+      setEditDueTarget(null);
+      setMsg(`Due reset to calculated ${money(earnedDue)} for ${row.employee.name}.`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Reset failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openEditPayment(payment: PaymentTransaction) {
+    setEditPaymentTarget(payment);
+    setEditPaymentAmount(String(payment.amount));
+    setMsg("");
+  }
+
+  async function submitEditPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editPaymentTarget) return;
+    const amount = Number(editPaymentAmount);
+    if (!amount || amount <= 0) {
+      setMsg("Enter a valid amount.");
+      return;
+    }
+    const employee = staffByPhone.get(editPaymentTarget.employeeId);
+    if (!employee) {
+      setMsg("Staff member not found.");
+      return;
+    }
+    setEditingPaymentId(editPaymentTarget.id);
+    setMsg("");
+    try {
+      await updateSalaryPaymentAmount(editPaymentTarget.id, amount);
+      const freshPayments = await refreshPayments();
+      const earnedDue = await syncEmployeeSalaryRemaining({
+        employee,
+        payments: freshPayments,
+        attendance,
+        settings,
+        overrides,
+        periodOffset,
+        today,
+      });
+      setStaff((prev) =>
+        prev.map((e) =>
+          e.phone === employee.phone
+            ? { ...e, salaryRemaining: earnedDue, salaryDueManual: false }
+            : e
+        )
+      );
+      setEditPaymentTarget(null);
+      setMsg(`Payment updated to ${money(amount)}. Due is now ${money(earnedDue)}.`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Update failed.");
+    } finally {
+      setEditingPaymentId(null);
     }
   }
 
@@ -439,7 +598,9 @@ export default function SalaryPage() {
       });
       setStaff((prev) =>
         prev.map((e) =>
-          e.phone === payTarget.employee.phone ? { ...e, salaryRemaining: earnedDue } : e
+          e.phone === payTarget.employee.phone
+            ? { ...e, salaryRemaining: earnedDue, salaryDueManual: false }
+            : e
         )
       );
       setPayTarget(null);
@@ -455,7 +616,7 @@ export default function SalaryPage() {
     <div className="space-y-5">
       <PageToolbar title="Salary">
         <p className="section-sub">
-          30-day pay cycles (join day = day 1, day 30 = last) · late hours deducted · {summary.unpaidCount} pending
+          Join-date pay periods (e.g. 8th to 8th) · late hours deducted · {summary.unpaidCount} pending
         </p>
       </PageToolbar>
 
@@ -555,12 +716,22 @@ export default function SalaryPage() {
       {msg && (
         <div
           className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
-            msg.includes("recorded") || msg.includes("Deleted") || msg.includes("Due is now")
+            msg.includes("recorded") ||
+            msg.includes("Deleted") ||
+            msg.includes("Due is now") ||
+            msg.includes("Remaining due") ||
+            msg.includes("Due reset") ||
+            msg.includes("Payment updated")
               ? "bg-jade-soft text-jade-deep"
               : "bg-red-50 text-danger"
           }`}
         >
-          {msg.includes("recorded") || msg.includes("Deleted") ? (
+          {msg.includes("recorded") ||
+          msg.includes("Deleted") ||
+          msg.includes("Due is now") ||
+          msg.includes("Remaining due") ||
+          msg.includes("Due reset") ||
+          msg.includes("Payment updated") ? (
             <CheckCircle2 size={16} />
           ) : (
             <AlertCircle size={16} />
@@ -629,18 +800,30 @@ export default function SalaryPage() {
                         ) : null}
                       </td>
                       <td className="text-right">
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm text-danger"
-                          disabled={deletingPaymentId === payment.id}
-                          onClick={() =>
-                            handleDeleteSalaryPayment(payment, employee.name)
-                          }
-                          aria-label="Delete payment"
-                        >
-                          <Trash2 size={14} />
-                          {deletingPaymentId === payment.id ? "…" : "Delete"}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={editingPaymentId === payment.id}
+                            onClick={() => openEditPayment(payment)}
+                            aria-label="Edit payment amount"
+                          >
+                            <Pencil size={14} />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm text-danger"
+                            disabled={deletingPaymentId === payment.id}
+                            onClick={() =>
+                              handleDeleteSalaryPayment(payment, employee.name)
+                            }
+                            aria-label="Delete payment"
+                          >
+                            <Trash2 size={14} />
+                            {deletingPaymentId === payment.id ? "…" : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -700,7 +883,28 @@ export default function SalaryPage() {
                       </td>
                       <td className="font-medium text-jade-deep">{money(earned.earnedNet)}</td>
                       <td className="font-medium">{money(paid)}</td>
-                      <td className="font-medium text-warning">{money(earnedDue)}</td>
+                      <td className="font-medium text-warning">
+                        <div className="flex items-center gap-1.5">
+                          <span>
+                            {money(earnedDue)}
+                            {row.isManualDue ? (
+                              <span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">
+                                (manual)
+                              </span>
+                            ) : null}
+                          </span>
+                          {periodOffset === 0 && employee.monthlySalary > 0 ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm p-1"
+                              onClick={() => openEditDue(row)}
+                              aria-label="Edit remaining due"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
                       <td>
                         <StatusBadge status={status} />
                       </td>
@@ -760,6 +964,16 @@ export default function SalaryPage() {
                           </div>
                           <StatusBadge status={status} />
                         </div>
+                        {employee.monthlySalary > 0 && periodOffset === 0 && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm mt-2 w-full"
+                            onClick={() => openEditDue(row)}
+                          >
+                            <Pencil size={14} />
+                            Edit due {money(earnedDue)}
+                          </button>
+                        )}
                         {employee.monthlySalary > 0 && (earnedDue > 0 || row.fullDue > 0) && (
                           <button
                             type="button"
@@ -872,16 +1086,27 @@ export default function SalaryPage() {
                             {p.remarks ? ` · ${p.remarks}` : ""}
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm shrink-0 text-danger"
-                          disabled={deletingPaymentId === p.id}
-                          onClick={() =>
-                            handleDeleteSalaryPayment(p, payTarget.employee.name)
-                          }
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm p-2"
+                            disabled={editingPaymentId === p.id}
+                            onClick={() => openEditPayment(p)}
+                            aria-label="Edit payment"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm p-2 text-danger"
+                            disabled={deletingPaymentId === p.id}
+                            onClick={() =>
+                              handleDeleteSalaryPayment(p, payTarget.employee.name)
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -955,6 +1180,113 @@ export default function SalaryPage() {
                   {saving ? "Saving..." : "Confirm Payment"}
                 </button>
               </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {editDueTarget && (
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            onClick={() => setEditDueTarget(null)}
+            aria-hidden
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={submitEditDue}
+              className="surface w-full max-w-sm space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Edit remaining due</h3>
+                  <p className="text-sm text-[var(--text-muted)]">{editDueTarget.employee.name}</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost p-2"
+                  onClick={() => setEditDueTarget(null)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="text-xs text-[var(--text-muted)]">
+                Calculated due: {money(editDueTarget.calculatedDue)}
+              </p>
+              <div>
+                <label className="label">Remaining to pay (₹)</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={editDueAmount}
+                  onChange={(e) => setEditDueAmount(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <button type="submit" className="btn btn-primary w-full" disabled={saving}>
+                  {saving ? "Saving…" : "Save remaining"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary w-full"
+                  disabled={saving}
+                  onClick={() => resetDueToCalculated(editDueTarget)}
+                >
+                  Reset to calculated
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {editPaymentTarget && (
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            onClick={() => setEditPaymentTarget(null)}
+            aria-hidden
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <form
+              onSubmit={submitEditPayment}
+              className="surface w-full max-w-sm space-y-4 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-bold">Edit payment amount</h3>
+                  <p className="text-sm text-[var(--text-muted)]">
+                    {formatDisplayDate(editPaymentTarget.date)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost p-2"
+                  onClick={() => setEditPaymentTarget(null)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div>
+                <label className="label">Amount (₹)</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={editPaymentAmount}
+                  onChange={(e) => setEditPaymentAmount(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn btn-primary w-full" disabled={!!editingPaymentId}>
+                {editingPaymentId ? "Saving…" : "Save payment"}
+              </button>
             </form>
           </div>
         </>

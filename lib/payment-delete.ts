@@ -2,6 +2,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  updateDoc,
   writeBatch,
 } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
@@ -18,6 +19,18 @@ export async function deleteSalaryPayment(paymentId: string): Promise<void> {
   const id = paymentId.trim();
   if (!id) throw new Error("Missing payment id.");
   await deleteDoc(doc(getDb(), "payments", id));
+}
+
+/** Update a salary payment amount (e.g. admin correction). */
+export async function updateSalaryPaymentAmount(
+  paymentId: string,
+  amount: number
+): Promise<void> {
+  const id = paymentId.trim();
+  const rounded = Math.round(amount * 100) / 100;
+  if (!id) throw new Error("Missing payment id.");
+  if (!rounded || rounded <= 0) throw new Error("Enter a valid amount.");
+  await updateDoc(doc(getDb(), "payments", id), { amount: rounded });
 }
 
 /**
