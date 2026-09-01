@@ -1,6 +1,7 @@
 import { doc, updateDoc } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
+import { computeCarryForwardUnpaid } from "@/lib/salary-detail";
 import { computeEarnedSalary, type OverrideMap } from "@/lib/deduction-utils";
 import { earnedAsOfDate, resolvePayPeriod, salaryPaidInPeriod } from "@/lib/pay-period-utils";
 
@@ -35,7 +36,9 @@ export function computeStaffEarnedDue(opts: {
     employeePhone: phone,
     employeeShift: employee,
   });
-  return Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+  const periodDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+  const { total: carryForward } = computeCarryForwardUnpaid(opts);
+  return Math.round((carryForward + periodDue) * 100) / 100;
 }
 
 /** Recompute earned due and write to employees/{phone}.salaryRemaining (clears manual override). */

@@ -96,16 +96,25 @@ export function formatPayPeriodLabel(start: string, end: string): string {
   return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
 }
 
+export function paymentAppliesToPeriod(
+  payment: PaymentTransaction,
+  start: string,
+  end: string
+): boolean {
+  if (payment.type !== "SALARY_PAYMENT") return false;
+  if (payment.periodStart && payment.periodEnd) {
+    return payment.periodStart === start && payment.periodEnd === end;
+  }
+  return payment.date >= start && payment.date <= end;
+}
+
 export function salaryPaidInPeriod(
   payments: PaymentTransaction[],
   start: string,
   end: string
 ): number {
   return payments
-    .filter(
-      (p) =>
-        p.type === "SALARY_PAYMENT" && p.date >= start && p.date <= end
-    )
+    .filter((p) => paymentAppliesToPeriod(p, start, end))
     .reduce((sum, p) => sum + p.amount, 0);
 }
 
@@ -114,5 +123,5 @@ export function paymentsInPeriod(
   start: string,
   end: string
 ): PaymentTransaction[] {
-  return payments.filter((p) => p.date >= start && p.date <= end);
+  return payments.filter((p) => paymentAppliesToPeriod(p, start, end));
 }

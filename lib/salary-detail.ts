@@ -1,0 +1,281 @@
+import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
+import {
+  computeEarnedSalary,
+  formatDurationMinutes,
+  isWorkingDay,
+  type EarnedSalarySummary,
+  type OverrideMap,
+} from "@/lib/deduction-utils";
+import { addDaysIso } from "@/lib/pay-period-utils";
+import {
+  currentPayPeriodIndex,
+  earnedAsOfDate,
+  formatPayPeriodLabel,
+  payPeriodForIndex,
+  paymentsInPeriod,
+  resolvePayPeriod,
+  salaryPaidInPeriod,
+  type PayPeriod,
+} from "@/lib/pay-period-utils";
+
+export type CarryForwardLine = {
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  earned: number;
+  paid: number;
+  unpaid: number;
+};
+
+export type SalaryStaffDetail = {
+  period: PayPeriod;
+  periodLabel: string;
+  asOfDate: string;
+  isCurrentPeriod: boolean;
+  carryForward: CarryForwardLine[];
+  carryForwardTotal: number;
+  attendance: {
+    workingDays: number;
+    fullDays: number;
+    halfDays: number;
+    absentDays: number;
+    holidayDays: number;
+    totalWorkingHours: number;
+  };
+  earnings: {
+    fullDayCount: number;
+    fullDayAmount: number;
+    halfDayCount: number;
+    halfDayAmount: number;
+    grossEarned: number;
+  };
+  deductions: {
+    lateMinutes: number;
+    earlyMinutes: number;
+    lateAmount: number;
+    earlyAmount: number;
+    total: number;
+  };
+  earned: EarnedSalarySummary;
+  paid: number;
+  periodDue: number;
+  totalDue: number;
+  payments: PaymentTransaction[];
+};
+
+function countAttendanceInPeriod(opts: {
+  periodStart: string;
+  periodEnd: string;
+  asOfDate: string;
+  records: Attendance[];
+  overrides: OverrideMap;
+  employeePhone?: string;
+}) {
+  const { periodStart, periodEnd, asOfDate, records, overrides, employeePhone } = opts;
+  const until = asOfDate < periodEnd ? asOfDate : periodEnd;
+  const byDate = new Map(records.map((r) => [r.date, r]));
+
+  let workingDays = 0;
+  let fullDays = 0;
+  let halfDays = 0;
+  let absentDays = 0;
+  let holidayDays = 0;
+  let totalWorkingHours = 0;
+
+  if (until < periodStart) {
+    return { workingDays, fullDays, halfDays, absentDays, holidayDays, totalWorkingHours };
+  }
+
+  let cursor = periodStart;
+  while (cursor <= periodEnd) {
+    const key = cursor;
+    cursor = addDaysIso(cursor, 1);
+    if (key > until) continue;
+
+    if (!isWorkingDay(key, overrides, employeePhone)) {
+      holidayDays++;
+      continue;
+    }
+
+    workingDays++;
+    const rec = byDate.get(key);
+    const credit = rec?.dayCredit;
+    const isHalf =
+      credit === "HALF" || rec?.status === "HALF_DAY" || rec?.status === "HALF DAY";
+    const hasPunch = Boolean(rec?.signInTime);
+    const creditedFull = credit === "FULL";
+
+    if (isHalf) {
+      halfDays++;
+      totalWorkingHours += rec?.workingHours || 0;
+    } else if (hasPunch || creditedFull) {
+      fullDays++;
+      totalWorkingHours += rec?.workingHours || 0;
+    } else {
+      absentDays++;
+    }
+  }
+
+  return { workingDays, fullDays, halfDays, absentDays, holidayDays, totalWorkingHours };
+}
+
+export function computeCarryForwardUnpaid(opts: {
+  employee: Employee;
+  payments: PaymentTransaction[];
+  attendance: Attendance[];
+  settings: AttendanceSettings;
+  overrides: OverrideMap;
+  periodOffset: number;
+  today: string;
+}): { lines: CarryForwardLine[]; total: number } {
+  const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
+  const join = employee.joiningDate?.trim() || today;
+  const currentIdx = currentPayPeriodIndex(join, today);
+  const viewIdx = Math.max(0, currentIdx + periodOffset);
+  const phone = employee.phone;
+  const empPayments = payments.filter((p) => p.employeeId === phone);
+  const empAtt = attendance.filter(
+    (a) => a.employeeId === phone || a.employeeId === employee.id
+  );
+
+  const lines: CarryForwardLine[] = [];
+  let total = 0;
+
+  for (let i = 0; i < viewIdx; i++) {
+    const period = payPeriodForIndex(join, i);
+    const paid = salaryPaidInPeriod(empPayments, period.start, period.end);
+    const earned = computeEarnedSalary({
+      monthlySalary: employee.monthlySalary,
+      periodStart: period.start,
+      periodEnd: period.end,
+      asOfDate: period.end,
+      records: empAtt,
+      settings,
+      overrides,
+      employeePhone: phone,
+      employeeShift: employee,
+    });
+    const unpaid = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
+    if (unpaid > 0) {
+      lines.push({
+        label: formatPayPeriodLabel(period.start, period.end),
+        periodStart: period.start,
+        periodEnd: period.end,
+        earned: earned.fullMonthNet,
+        paid,
+        unpaid,
+      });
+      total += unpaid;
+    }
+  }
+
+  return { lines, total: Math.round(total * 100) / 100 };
+}
+
+export function buildSalaryStaffDetail(opts: {
+  employee: Employee;
+  payments: PaymentTransaction[];
+  attendance: Attendance[];
+  settings: AttendanceSettings;
+  overrides: OverrideMap;
+  periodOffset: number;
+  today: string;
+}): SalaryStaffDetail {
+  const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
+  const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
+  const asOfDate = earnedAsOfDate(period, today);
+  const phone = employee.phone;
+  const empPayments = payments.filter((p) => p.employeeId === phone);
+  const empAtt = attendance.filter(
+    (a) => a.employeeId === phone || a.employeeId === employee.id
+  );
+  const paid = salaryPaidInPeriod(empPayments, period.start, period.end);
+  const earned = computeEarnedSalary({
+    monthlySalary: employee.monthlySalary,
+    periodStart: period.start,
+    periodEnd: period.end,
+    asOfDate,
+    records: empAtt,
+    settings,
+    overrides,
+    employeePhone: phone,
+    employeeShift: employee,
+  });
+
+  const { lines: carryForward, total: carryForwardTotal } = computeCarryForwardUnpaid(opts);
+  const periodDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
+  const totalDue = Math.round((carryForwardTotal + periodDue) * 100) / 100;
+
+  const attendanceStats = countAttendanceInPeriod({
+    periodStart: period.start,
+    periodEnd: period.end,
+    asOfDate,
+    records: empAtt,
+    overrides,
+    employeePhone: phone,
+  });
+
+  let fullDayAmount = 0;
+  let halfDayAmount = 0;
+  let fullDayCount = 0;
+  let halfDayCount = 0;
+  let lateAmount = 0;
+  let earlyAmount = 0;
+
+  for (const day of earned.days) {
+    const factor = day.dayFactor ?? 1;
+    if (factor < 1) {
+      halfDayCount++;
+      halfDayAmount += day.dayGross;
+    } else {
+      fullDayCount++;
+      fullDayAmount += day.dayGross;
+    }
+    lateAmount += day.lateDeduction ?? 0;
+    earlyAmount += day.earlyDeduction ?? 0;
+  }
+
+  const currentIdx = currentPayPeriodIndex(employee.joiningDate?.trim() || today, today);
+
+  return {
+    period,
+    periodLabel: formatPayPeriodLabel(period.start, period.end),
+    asOfDate,
+    isCurrentPeriod: periodOffset === 0,
+    carryForward,
+    carryForwardTotal,
+    attendance: {
+      workingDays: attendanceStats.workingDays,
+      fullDays: attendanceStats.fullDays,
+      halfDays: attendanceStats.halfDays,
+      absentDays: attendanceStats.absentDays,
+      holidayDays: attendanceStats.holidayDays,
+      totalWorkingHours: Math.round(attendanceStats.totalWorkingHours * 100) / 100,
+    },
+    earnings: {
+      fullDayCount,
+      fullDayAmount: Math.round(fullDayAmount * 100) / 100,
+      halfDayCount,
+      halfDayAmount: Math.round(halfDayAmount * 100) / 100,
+      grossEarned: earned.grossEarned,
+    },
+    deductions: {
+      lateMinutes: earned.totalLateMinutes,
+      earlyMinutes: earned.totalEarlyMinutes,
+      lateAmount: Math.round(lateAmount * 100) / 100,
+      earlyAmount: Math.round(earlyAmount * 100) / 100,
+      total: earned.totalDeduction,
+    },
+    earned,
+    paid,
+    periodDue,
+    totalDue,
+    payments: paymentsInPeriod(
+      empPayments.filter((p) => p.type === "SALARY_PAYMENT"),
+      period.start,
+      period.end
+    ),
+  };
+}
+
+export { formatDurationMinutes };

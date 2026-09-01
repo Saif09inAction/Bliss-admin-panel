@@ -34,6 +34,7 @@ import {
   paymentsInPeriod,
   resolvePayPeriod,
   salaryPaidInPeriod,
+  paymentAppliesToPeriod,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
 import {
@@ -48,6 +49,8 @@ import {
   type EarnedSalarySummary,
   type OverrideMap,
 } from "@/lib/deduction-utils";
+import { buildSalaryStaffDetail, computeCarryForwardUnpaid } from "@/lib/salary-detail";
+import SalaryStaffDetailPanel from "@/components/SalaryStaffDetailPanel";
 
 function newPaymentId() {
   return `pay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -78,6 +81,8 @@ type SalaryRow = {
   employee: Employee;
   paid: number;
   earned: EarnedSalarySummary;
+  carryForward: number;
+  periodDue: number;
   calculatedDue: number;
   earnedDue: number;
   fullDue: number;
@@ -127,6 +132,7 @@ export default function SalaryPage() {
   const [editDueAmount, setEditDueAmount] = useState("");
   const [editPaymentTarget, setEditPaymentTarget] = useState<PaymentTransaction | null>(null);
   const [editPaymentAmount, setEditPaymentAmount] = useState("");
+  const [detailTarget, setDetailTarget] = useState<SalaryRow | null>(null);
 
   useEffect(() => {
     const db = getDb();
@@ -230,16 +236,32 @@ export default function SalaryPage() {
           employeeShift: e,
         });
         const calculatedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
-        const earnedDue = resolveDisplayDue(e, calculatedDue, periodOffset);
-        const fullDue = Math.max(0, Math.round((earned.fullMonthNet - paid) * 100) / 100);
-        const effectivePaid = Math.max(0, earned.earnedNet - earnedDue);
-        const status = salaryStatus(earned.earnedNet, effectivePaid);
+        const { total: carryForward } = computeCarryForwardUnpaid({
+          employee: e,
+          payments,
+          attendance,
+          settings,
+          overrides,
+          periodOffset,
+          today,
+        });
+        const periodDue = calculatedDue;
+        const totalCalculatedDue = Math.round((carryForward + periodDue) * 100) / 100;
+        const earnedDue = resolveDisplayDue(e, totalCalculatedDue, periodOffset);
+        const fullDue = Math.max(
+          0,
+          Math.round((earned.fullMonthNet - paid + carryForward) * 100) / 100
+        );
+        const effectivePaid = Math.max(0, earned.earnedNet + carryForward - earnedDue);
+        const status = salaryStatus(earned.earnedNet + carryForward, effectivePaid);
         const isManualDue = periodOffset === 0 && Boolean(e.salaryDueManual);
         return {
           employee: e,
           paid,
           earned,
-          calculatedDue,
+          carryForward,
+          periodDue,
+          calculatedDue: totalCalculatedDue,
           earnedDue,
           fullDue,
           isManualDue,
@@ -300,7 +322,16 @@ export default function SalaryPage() {
         employeeShift: e,
       });
       const calculatedDue = Math.max(0, Math.round((earned.earnedNet - paid) * 100) / 100);
-      const earnedDue = resolveDisplayDue(e, calculatedDue, periodOffset);
+      const { total: carryForward } = computeCarryForwardUnpaid({
+        employee: e,
+        payments,
+        attendance,
+        settings,
+        overrides,
+        periodOffset,
+        today,
+      });
+      const earnedDue = resolveDisplayDue(e, carryForward + calculatedDue, periodOffset);
       totalPaid += paid;
       totalDue += earnedDue;
       if (earnedDue > 0 && e.monthlySalary > 0) unpaidCount++;
@@ -320,7 +351,7 @@ export default function SalaryPage() {
         const employee = staffByPhone.get(payment.employeeId);
         if (!employee) return null;
         const period = resolvePayPeriod(employee.joiningDate, periodOffset, today);
-        if (payment.date < period.start || payment.date > period.end) return null;
+        if (!paymentAppliesToPeriod(payment, period.start, period.end)) return null;
         return { payment, employee };
       })
       .filter((row): row is { payment: PaymentTransaction; employee: Employee } => row != null)
@@ -338,6 +369,19 @@ export default function SalaryPage() {
       period.end
     ).sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   }, [payTarget, payments, periodOffset, today]);
+
+  const staffDetail = useMemo(() => {
+    if (!detailTarget) return null;
+    return buildSalaryStaffDetail({
+      employee: detailTarget.employee,
+      payments,
+      attendance,
+      settings,
+      overrides,
+      periodOffset,
+      today,
+    });
+  }, [detailTarget, payments, attendance, settings, overrides, periodOffset, today]);
 
   // Sync computed remaining salary to Firestore so mobile app can read it directly
   useEffect(() => {
@@ -570,22 +614,85 @@ export default function SalaryPage() {
     try {
       const modeLabel = payMode === "EARNED" ? "earned till now" : "full period";
       const period = resolvePayPeriod(payTarget.employee.joiningDate, periodOffset, today);
-      const payment: PaymentTransaction = {
-        id: newPaymentId(),
-        employeeId: payTarget.employee.phone,
-        amount,
-        type: "SALARY_PAYMENT",
-        date: todayDateStr(),
-        time: nowTimeStr(),
-        remarks:
-          payRemarks.trim() ||
-          `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
-        createdBy: session?.name || "Admin",
-      };
-      await setDoc(doc(getDb(), "payments", payment.id), {
-        ...payment,
-        remarks: payment.remarks || "",
-      });
+      const baseRemarks = payRemarks.trim();
+      const createdBy = session?.name || "Admin";
+      const payDate = todayDateStr();
+      const payTime = nowTimeStr();
+
+      const paymentWrites: Array<{
+        periodStart: string;
+        periodEnd: string;
+        amount: number;
+        remarks: string;
+      }> = [];
+
+      if (periodOffset === 0) {
+        let remaining = amount;
+        const { lines: carryLines } = computeCarryForwardUnpaid({
+          employee: payTarget.employee,
+          payments,
+          attendance,
+          settings,
+          overrides,
+          periodOffset,
+          today,
+        });
+        for (const line of carryLines) {
+          if (remaining <= 0) break;
+          const apply = Math.min(remaining, line.unpaid);
+          if (apply <= 0) continue;
+          paymentWrites.push({
+            periodStart: line.periodStart,
+            periodEnd: line.periodEnd,
+            amount: apply,
+            remarks:
+              baseRemarks ||
+              `${line.label} · carry forward · ${modeLabel}`,
+          });
+          remaining = Math.round((remaining - apply) * 100) / 100;
+        }
+        if (remaining > 0) {
+          paymentWrites.push({
+            periodStart: period.start,
+            periodEnd: period.end,
+            amount: remaining,
+            remarks:
+              baseRemarks ||
+              `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
+          });
+        }
+      } else {
+        paymentWrites.push({
+          periodStart: period.start,
+          periodEnd: period.end,
+          amount,
+          remarks:
+            baseRemarks ||
+            `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
+        });
+      }
+
+      for (const write of paymentWrites) {
+        const payment: PaymentTransaction = {
+          id: newPaymentId(),
+          employeeId: payTarget.employee.phone,
+          amount: write.amount,
+          type: "SALARY_PAYMENT",
+          date: payDate,
+          time: payTime,
+          periodStart: write.periodStart,
+          periodEnd: write.periodEnd,
+          remarks: write.remarks,
+          createdBy,
+        };
+        await setDoc(doc(getDb(), "payments", payment.id), {
+          ...payment,
+          remarks: payment.remarks || "",
+          periodStart: write.periodStart,
+          periodEnd: write.periodEnd,
+        });
+      }
+
       const freshPayments = await refreshPayments();
       const earnedDue = await syncEmployeeSalaryRemaining({
         employee: payTarget.employee,
@@ -593,7 +700,7 @@ export default function SalaryPage() {
         attendance,
         settings,
         overrides,
-        periodOffset,
+        periodOffset: 0,
         today,
       });
       setStaff((prev) =>
@@ -604,7 +711,9 @@ export default function SalaryPage() {
         )
       );
       setPayTarget(null);
-      setMsg(`Salary of ${money(amount)} recorded for ${payTarget.employee.name}.`);
+      const splitNote =
+        paymentWrites.length > 1 ? ` (${paymentWrites.length} period allocations)` : "";
+      setMsg(`Salary of ${money(amount)} recorded for ${payTarget.employee.name}${splitNote}.`);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Payment failed.");
     } finally {
@@ -616,7 +725,7 @@ export default function SalaryPage() {
     <div className="space-y-5">
       <PageToolbar title="Salary">
         <p className="section-sub">
-          Join-date pay periods (e.g. 8th to 8th) · late hours deducted · {summary.unpaidCount} pending
+          Join-date pay periods · carry forward unpaid · click staff for breakdown · {summary.unpaidCount} pending
         </p>
       </PageToolbar>
 
@@ -857,9 +966,13 @@ export default function SalaryPage() {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const { employee, paid, earned, earnedDue, status } = row;
+                  const { employee, paid, earned, earnedDue, carryForward, status } = row;
                   return (
-                    <tr key={employee.phone}>
+                    <tr
+                      key={employee.phone}
+                      className="cursor-pointer hover:bg-[var(--surface-mist)]"
+                      onClick={() => setDetailTarget(row)}
+                    >
                       <td>
                         <div className="flex items-center gap-3">
                           <WorkerAvatar name={employee.name} />
@@ -869,6 +982,7 @@ export default function SalaryPage() {
                               {employee.phone}
                               {employee.joiningDate ? ` · joined ${employee.joiningDate}` : ""}
                             </p>
+                            <p className="text-[10px] text-jade-deep">Tap for salary breakdown</p>
                           </div>
                         </div>
                       </td>
@@ -892,12 +1006,20 @@ export default function SalaryPage() {
                                 (manual)
                               </span>
                             ) : null}
+                            {carryForward > 0 ? (
+                              <span className="mt-0.5 block text-[10px] font-normal text-amber-700">
+                                incl. {money(carryForward)} carry
+                              </span>
+                            ) : null}
                           </span>
                           {periodOffset === 0 && employee.monthlySalary > 0 ? (
                             <button
                               type="button"
                               className="btn btn-ghost btn-sm p-1"
-                              onClick={() => openEditDue(row)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditDue(row);
+                              }}
                               aria-label="Edit remaining due"
                             >
                               <Pencil size={13} />
@@ -908,7 +1030,7 @@ export default function SalaryPage() {
                       <td>
                         <StatusBadge status={status} />
                       </td>
-                      <td className="text-right">
+                      <td className="text-right" onClick={(e) => e.stopPropagation()}>
                         {employee.monthlySalary > 0 && (earnedDue > 0 || row.fullDue > 0) ? (
                           <button
                             type="button"
@@ -939,11 +1061,12 @@ export default function SalaryPage() {
             <p className="mobile-section-label">Earned till now · late deducted</p>
             <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
               {rows.map((row, idx) => {
-                const { employee, paid, earned, earnedDue, status } = row;
+                const { employee, paid, earned, earnedDue, carryForward, status } = row;
                 return (
                   <div
                     key={employee.phone}
-                    className={`p-3.5 ${idx < rows.length - 1 ? "border-b border-[var(--border)]" : ""}`}
+                    className={`cursor-pointer p-3.5 hover:bg-[var(--surface-mist)] ${idx < rows.length - 1 ? "border-b border-[var(--border)]" : ""}`}
+                    onClick={() => setDetailTarget(row)}
                   >
                     <div className="flex items-start gap-3">
                       <WorkerAvatar name={employee.name} />
@@ -960,7 +1083,9 @@ export default function SalaryPage() {
                             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                               Earned {money(earned.earnedNet)} · Paid {money(paid)} · Due{" "}
                               <span className="font-semibold text-warning">{money(earnedDue)}</span>
+                              {carryForward > 0 ? ` (${money(carryForward)} carry)` : ""}
                             </p>
+                            <p className="text-[10px] text-jade-deep">Tap for full breakdown</p>
                           </div>
                           <StatusBadge status={status} />
                         </div>
@@ -968,7 +1093,10 @@ export default function SalaryPage() {
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm mt-2 w-full"
-                            onClick={() => openEditDue(row)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditDue(row);
+                            }}
                           >
                             <Pencil size={14} />
                             Edit due {money(earnedDue)}
@@ -977,8 +1105,11 @@ export default function SalaryPage() {
                         {employee.monthlySalary > 0 && (earnedDue > 0 || row.fullDue > 0) && (
                           <button
                             type="button"
-                            className="btn btn-primary btn-sm mt-2.5 w-full"
-                            onClick={() => openPay(row, "EARNED")}
+                            className="btn btn-primary btn-sm mt-2 w-full"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPay(row, "EARNED");
+                            }}
                           >
                             <Banknote size={14} />
                             Pay earned {money(earnedDue)}
@@ -1183,6 +1314,19 @@ export default function SalaryPage() {
             </form>
           </div>
         </>
+      )}
+
+      {detailTarget && staffDetail && (
+        <SalaryStaffDetailPanel
+          staffName={detailTarget.employee.name}
+          detail={staffDetail}
+          onClose={() => setDetailTarget(null)}
+          onPay={() => {
+            const row = detailTarget;
+            setDetailTarget(null);
+            openPay(row, "EARNED");
+          }}
+        />
       )}
 
       {editDueTarget && (

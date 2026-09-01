@@ -60,5 +60,7 @@ export function parsePayment(id: string, data: Record<string, unknown>): Payment
     time: (data.time as string) || "",
     remarks: (data.remarks as string) || undefined,
     createdBy: (data.createdBy as string) || "Admin",
+    periodStart: (data.periodStart as string) || undefined,
+    periodEnd: (data.periodEnd as string) || undefined,
   };
 }

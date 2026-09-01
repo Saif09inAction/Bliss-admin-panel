@@ -398,10 +398,14 @@ export function computeMonthDeductions(
 
 export type EarnedDay = {
   date: string;
+  dayFactor: number;
+  workingHours: number;
   dayGross: number;
   lateMinutes: number;
   earlyMinutes: number;
   lostMinutes: number;
+  lateDeduction: number;
+  earlyDeduction: number;
   deduction: number;
   dayNet: number;
 };
@@ -508,16 +512,22 @@ export function computeEarnedSalary(opts: {
           ? 0
           : computeEarlyLeaveMinutes(rec!.signOutTime, dayShift.dailySignOutTime);
       const lost = late + early;
-      const deduction = Math.round(lost * perMinuteRate * 100) / 100;
+      const lateDeduction = Math.round(late * perMinuteRate * 100) / 100;
+      const earlyDeduction = Math.round(early * perMinuteRate * 100) / 100;
+      const deduction = lateDeduction + earlyDeduction;
       const dayGross = Math.round(perDayRate * dayFactor * 100) / 100;
       const dayNet = Math.max(0, Math.round((dayGross - deduction) * 100) / 100);
 
       days.push({
         date: key,
+        dayFactor,
+        workingHours: rec?.workingHours || 0,
         dayGross,
         lateMinutes: late,
         earlyMinutes: early,
         lostMinutes: lost,
+        lateDeduction,
+        earlyDeduction,
         deduction,
         dayNet,
       });

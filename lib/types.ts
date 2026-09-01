@@ -332,6 +332,9 @@ export interface PaymentTransaction {
   time: string;
   remarks?: string;
   createdBy: string;
+  /** Pay period this salary payment applies to (fixes paying previous month). */
+  periodStart?: string;
+  periodEnd?: string;
 }
 
 export interface PickupRecord {
