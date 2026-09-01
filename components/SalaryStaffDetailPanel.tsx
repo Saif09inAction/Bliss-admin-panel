@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Receipt, Trash2, Pencil, X } from "lucide-react";
 import type { PaymentTransaction } from "@/lib/types";
 import type { SalaryStaffDetail } from "@/lib/salary-detail";
@@ -38,6 +38,89 @@ export default function SalaryStaffDetailPanel({
 }: Props) {
   const d = detail;
   const [showTransactions, setShowTransactions] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (showTransactions) {
+      scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [showTransactions]);
+
+  const transactionsBlock = showTransactions ? (
+    <div className="rounded-xl border border-[var(--border)] p-4">
+      <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
+        <Receipt className="h-4 w-4" />
+        Transactions
+      </p>
+      <p className="mt-1 text-sm text-[var(--text-muted)]">
+        Salary payments for this staff in this pay period.
+      </p>
+
+      <div className="mt-3">
+        {d.payments.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
+            No payments for this period yet.
+          </p>
+        ) : (
+          <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+            {d.payments.map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-jade-deep">{money(p.amount)}</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {formatDisplayDate(p.date)}
+                    {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
+                    {p.createdBy ? ` · by ${p.createdBy}` : ""}
+                  </p>
+                  {p.remarks ? (
+                    <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
+                      {p.remarks}
+                    </p>
+                  ) : null}
+                  {p.periodStart && p.periodEnd ? (
+                    <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">
+                      {formatPayPeriodMonthLabel(p.periodStart, p.periodEnd)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {onEditPayment ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={editingPaymentId === p.id}
+                      onClick={() => onEditPayment(p)}
+                    >
+                      <Pencil size={14} />
+                      Edit
+                    </button>
+                  ) : null}
+                  {onDeletePayment ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm text-danger"
+                      disabled={deletingPaymentId === p.id}
+                      onClick={() => onDeletePayment(p)}
+                    >
+                      <Trash2 size={14} />
+                      {deletingPaymentId === p.id ? "…" : "Delete"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between bg-jade-soft/40 px-3 py-2 text-sm font-semibold text-jade-deep">
+              <span>Total paid</span>
+              <span>{money(d.paid)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <>
@@ -71,7 +154,9 @@ export default function SalaryStaffDetailPanel({
             </div>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+            {transactionsBlock}
+
             {d.carryForward.length > 0 && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
@@ -219,81 +304,6 @@ export default function SalaryStaffDetailPanel({
               </div>
             )}
 
-            {showTransactions && (
-              <div className="rounded-xl border border-[var(--border)] p-4">
-                <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-jade-deep">
-                  <Receipt className="h-4 w-4" />
-                  Transactions
-                </p>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">
-                  Salary payments for this staff in this pay period.
-                </p>
-
-                <div className="mt-3">
-                  {d.payments.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
-                      No payments for this period yet.
-                    </p>
-                  ) : (
-                    <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-                      {d.payments.map((p) => (
-                        <div
-                          key={p.id}
-                          className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 text-sm"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-semibold text-jade-deep">{money(p.amount)}</p>
-                            <p className="text-xs text-[var(--text-muted)]">
-                              {formatDisplayDate(p.date)}
-                              {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
-                              {p.createdBy ? ` · by ${p.createdBy}` : ""}
-                            </p>
-                            {p.remarks ? (
-                              <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
-                                {p.remarks}
-                              </p>
-                            ) : null}
-                            {p.periodStart && p.periodEnd ? (
-                              <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">
-                                {formatPayPeriodMonthLabel(p.periodStart, p.periodEnd)}
-                              </p>
-                            ) : null}
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1">
-                            {onEditPayment ? (
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                disabled={editingPaymentId === p.id}
-                                onClick={() => onEditPayment(p)}
-                              >
-                                <Pencil size={14} />
-                                Edit
-                              </button>
-                            ) : null}
-                            {onDeletePayment ? (
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm text-danger"
-                                disabled={deletingPaymentId === p.id}
-                                onClick={() => onDeletePayment(p)}
-                              >
-                                <Trash2 size={14} />
-                                {deletingPaymentId === p.id ? "…" : "Delete"}
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between bg-jade-soft/40 px-3 py-2 text-sm font-semibold text-jade-deep">
-                        <span>Total paid</span>
-                        <span>{money(d.paid)}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="flex gap-2 border-t border-[var(--border)] p-4">
