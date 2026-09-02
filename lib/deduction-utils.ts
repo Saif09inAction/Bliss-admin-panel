@@ -13,7 +13,7 @@ import {
   employeeShiftForDate,
   globalSettingsForDate,
 } from "./shift-schedule";
-import { addDaysIso, daysInclusive } from "./pay-period-utils";
+import { addDaysIso, daysInclusive, calendarMonthBounds, payPeriodContainingDate } from "./pay-period-utils";
 
 export type DayKind = "HOLIDAY" | "WORKING";
 export type HolidayScope = "ALL" | "SELECTED";
@@ -581,6 +581,164 @@ export function computeEarnedSalary(opts: {
     totalDeduction: Math.round(totalDeduction * 100) / 100,
     earnedNet,
     fullMonthNet: fullMonthDeductions.netSalary,
+    days: days.sort((a, b) => b.date.localeCompare(a.date)),
+  };
+}
+
+/**
+ * Earned salary for a calendar month — counts every working day in that month,
+ * using the join-based pay period that contains each day (fixes 0/30 when join day is mid-month).
+ */
+export function computeEarnedSalaryForCalendarMonth(opts: {
+  monthlySalary: number;
+  joinDate: string;
+  year: number;
+  month: number;
+  asOfDate: string;
+  records: Attendance[];
+  settings: AttendanceSettings;
+  overrides: OverrideSource;
+  employeePhone?: string;
+  employeeShift?: ShiftSource;
+}): EarnedSalarySummary {
+  const {
+    monthlySalary,
+    joinDate,
+    year,
+    month,
+    asOfDate,
+    records,
+    settings,
+    overrides,
+    employeePhone,
+    employeeShift,
+  } = opts;
+
+  const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
+  const daysInPeriod = Math.max(daysInclusive(monthStart, monthEnd), 1);
+  const workingDaysInMonth = countWorkingDaysInRange(
+    monthStart,
+    monthEnd,
+    overrides,
+    employeePhone
+  );
+  const shiftMins = shiftMinutes(settings);
+  const until = asOfDate < monthEnd ? asOfDate : monthEnd;
+
+  const byDate = new Map(records.map((r) => [r.date, r]));
+  const days: EarnedDay[] = [];
+  let totalLate = 0;
+  let totalEarly = 0;
+  let grossEarned = 0;
+  let totalDeduction = 0;
+  let fullMonthGross = 0;
+
+  if (until >= monthStart && monthlySalary > 0) {
+    let cursor = monthStart;
+    while (cursor <= monthEnd) {
+      const key = cursor;
+      cursor = addDaysIso(cursor, 1);
+      if (!isWorkingDay(key, overrides, employeePhone)) continue;
+
+      const dayPeriod = payPeriodContainingDate(joinDate, key);
+      if (!dayPeriod) continue;
+
+      const periodDays = Math.max(daysInclusive(dayPeriod.start, dayPeriod.end), 1);
+      const perDayRate = monthlySalary / periodDays;
+      const dayShift = resolveShiftSettings(
+        employeeShift,
+        settings,
+        key,
+        overrides,
+        employeePhone
+      );
+      const dayShiftMins = shiftMinutes(dayShift);
+      const perMinuteRate = monthlySalary / (periodDays * dayShiftMins);
+
+      fullMonthGross += perDayRate;
+
+      if (key > until) continue;
+
+      const rec = byDate.get(key);
+      const credit = rec?.dayCredit;
+      const hasPunch = Boolean(rec?.signInTime);
+      if (!hasPunch && credit !== "FULL" && credit !== "HALF") continue;
+
+      const dayFactor = credit === "HALF" ? 0.5 : 1;
+      const late =
+        credit === "FULL" || credit === "HALF"
+          ? 0
+          : computeLateMinutes(rec!.signInTime, dayShift.dailySignInTime);
+      const early =
+        credit === "FULL" || credit === "HALF"
+          ? 0
+          : computeEarlyLeaveMinutes(rec!.signOutTime, dayShift.dailySignOutTime);
+      const lateDeduction = Math.round(late * perMinuteRate * 100) / 100;
+      const earlyDeduction = Math.round(early * perMinuteRate * 100) / 100;
+      const deduction = lateDeduction + earlyDeduction;
+      const dayGross = Math.round(perDayRate * dayFactor * 100) / 100;
+      const workingHours =
+        rec?.signInTime && rec?.signOutTime
+          ? computeShiftWorkingHours(
+              rec.signInTime,
+              rec.signOutTime,
+              dayShift.dailySignInTime,
+              dayShift.dailySignOutTime
+            )
+          : 0;
+
+      days.push({
+        date: key,
+        dayFactor,
+        workingHours,
+        dayGross,
+        lateMinutes: late,
+        earlyMinutes: early,
+        lostMinutes: late + early,
+        lateDeduction,
+        earlyDeduction,
+        deduction,
+        dayNet: Math.max(0, Math.round((dayGross - deduction) * 100) / 100),
+      });
+
+      grossEarned += dayGross;
+      totalDeduction += deduction;
+      totalLate += late;
+      totalEarly += early;
+    }
+  }
+
+  const earnedNet = Math.max(0, Math.round((grossEarned - totalDeduction) * 100) / 100);
+  const fullMonthNet = Math.round(fullMonthGross * 100) / 100;
+
+  return {
+    periodStart: monthStart,
+    periodEnd: monthEnd,
+    daysInPeriod,
+    calendarDaysInMonth: daysInPeriod,
+    workingDaysInMonth,
+    shiftMinutes: shiftMins,
+    perDayRate: Math.round(
+      (workingDaysInMonth > 0 ? fullMonthGross / workingDaysInMonth : monthlySalary / daysInPeriod) *
+        100
+    ) / 100,
+    perHourRate: Math.round(
+      ((workingDaysInMonth > 0 ? fullMonthGross / workingDaysInMonth : monthlySalary / daysInPeriod) /
+        shiftMins) *
+        60 *
+        100
+    ) / 100,
+    perMinuteRate:
+      (workingDaysInMonth > 0 ? fullMonthGross / workingDaysInMonth : monthlySalary / daysInPeriod) /
+      shiftMins,
+    daysWorked: days.length,
+    grossEarned: Math.round(grossEarned * 100) / 100,
+    totalLateMinutes: totalLate,
+    totalEarlyMinutes: totalEarly,
+    totalLostMinutes: totalLate + totalEarly,
+    totalDeduction: Math.round(totalDeduction * 100) / 100,
+    earnedNet,
+    fullMonthNet: Math.round(fullMonthGross * 100) / 100,
     days: days.sort((a, b) => b.date.localeCompare(a.date)),
   };
 }

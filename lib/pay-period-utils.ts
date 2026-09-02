@@ -135,6 +135,46 @@ export function payPeriodOverlappingCalendarMonth(
   return best;
 }
 
+/** Pay period that contains a specific date (for per-day rate inside a calendar month). */
+export function payPeriodContainingDate(joinDate: string, dateStr: string): PayPeriod | null {
+  const join = joinDate?.trim();
+  if (!join || dateStr < join) return null;
+  let idx = 0;
+  while (idx < 600) {
+    const p = payPeriodForIndex(join, idx);
+    if (dateStr < p.start) return null;
+    if (dateStr >= p.start && dateStr <= p.end) return p;
+    idx++;
+  }
+  return null;
+}
+
+/** Last date to count for a calendar month view (today or month end). */
+export function asOfDateForCalendarMonth(viewMonth: CalendarMonth, today: string): string {
+  const { end: monthEnd } = calendarMonthBounds(viewMonth.year, viewMonth.month);
+  return today <= monthEnd ? today : monthEnd;
+}
+
+/** Sum salary paid across all join-based periods overlapping a calendar month. */
+export function salaryPaidInCalendarMonth(
+  payments: PaymentTransaction[],
+  joinDate: string,
+  year: number,
+  month: number
+): number {
+  const join = joinDate?.trim();
+  if (!join) return 0;
+  const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
+  let total = 0;
+  for (let idx = 0; idx < 600; idx++) {
+    const p = payPeriodForIndex(join, idx);
+    if (p.start > monthEnd) break;
+    if (p.end < monthStart) continue;
+    total += salaryPaidInPeriod(payments, p.start, p.end);
+  }
+  return total;
+}
+
 /** Resolve each staff member's pay period for a calendar month (offset 0 = current month). */
 export function resolvePayPeriodForCalendarOffset(
   joinDate: string,
@@ -146,17 +186,11 @@ export function resolvePayPeriodForCalendarOffset(
 }
 
 export function earnedAsOfDateForCalendarView(
-  period: PayPeriod,
+  _period: PayPeriod,
   viewMonth: CalendarMonth,
   today: string
 ): string {
-  const { end: monthEnd } = calendarMonthBounds(viewMonth.year, viewMonth.month);
-  if (today < period.start) return addDaysIso(period.start, -1);
-  let cap = today;
-  if (cap > monthEnd) cap = monthEnd;
-  if (cap > period.end) cap = period.end;
-  if (cap < period.start) return addDaysIso(period.start, -1);
-  return cap;
+  return asOfDateForCalendarMonth(viewMonth, today);
 }
 
 /** Resolve pay period relative to today (offset 0 = current, -1 = previous, …). */
@@ -198,6 +232,32 @@ export function formatPayPeriodMonthLabel(start: string, _end?: string): string 
     month: "long",
     year: "numeric",
   });
+}
+
+export function paymentsInCalendarMonth(
+  payments: PaymentTransaction[],
+  joinDate: string,
+  year: number,
+  month: number
+): PaymentTransaction[] {
+  const join = joinDate?.trim();
+  if (!join) return [];
+  const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
+  const seen = new Set<string>();
+  const result: PaymentTransaction[] = [];
+  for (let idx = 0; idx < 600; idx++) {
+    const p = payPeriodForIndex(join, idx);
+    if (p.start > monthEnd) break;
+    if (p.end < monthStart) continue;
+    for (const pay of payments) {
+      if (seen.has(pay.id)) continue;
+      if (paymentAppliesToPeriod(pay, p.start, p.end)) {
+        seen.add(pay.id);
+        result.push(pay);
+      }
+    }
+  }
+  return result;
 }
 
 export function paymentAppliesToPeriod(

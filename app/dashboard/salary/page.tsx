@@ -35,7 +35,7 @@ import {
   formatCalendarMonthLabel,
   formatPayPeriodLabel,
   resolvePayPeriodForCalendarOffset,
-  salaryPaidInPeriod,
+  salaryPaidInCalendarMonth,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
 import {
@@ -45,7 +45,7 @@ import {
 import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
 import { parseAttendanceSettingsDoc, parseShiftHistory } from "@/lib/shift-schedule";
 import {
-  computeEarnedSalary,
+  computeEarnedSalaryForCalendarMonth,
   parseCalendarOverride,
   type EarnedSalarySummary,
   type OverrideMap,
@@ -94,40 +94,13 @@ type SalaryRow = {
   status: ReturnType<typeof salaryStatus>;
 };
 
-function emptyEarnedSummary(): EarnedSalarySummary {
-  return {
-    periodStart: "",
-    periodEnd: "",
-    daysInPeriod: 0,
-    calendarDaysInMonth: 0,
-    workingDaysInMonth: 0,
-    shiftMinutes: 0,
-    perDayRate: 0,
-    perHourRate: 0,
-    perMinuteRate: 0,
-    daysWorked: 0,
-    grossEarned: 0,
-    totalLateMinutes: 0,
-    totalEarlyMinutes: 0,
-    totalLostMinutes: 0,
-    totalDeduction: 0,
-    earnedNet: 0,
-    fullMonthNet: 0,
-    days: [],
-  };
-}
-
 function resolveStaffPeriod(joinDate: string, monthOffset: number, asOfDate: string) {
   return resolvePayPeriodForCalendarOffset(joinDate, monthOffset, asOfDate);
 }
 
-function staffAsOfDate(
-  period: { start: string; end: string },
-  monthOffset: number,
-  asOfDate: string
-) {
+function staffAsOfDate(monthOffset: number, asOfDate: string) {
   return earnedAsOfDateForCalendarView(
-    period as { start: string; end: string; index: number; daysInPeriod: number },
+    { index: 0, start: "", end: "", daysInPeriod: 0 },
     calendarMonthFromOffset(asOfDate, monthOffset),
     asOfDate
   );
@@ -266,29 +239,22 @@ export default function SalaryPage() {
     const viewedMonthLabel = formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month).toLowerCase();
     return staff
       .map((e): SalaryRow => {
+        const join = e.joiningDate?.trim() || today;
         const period = resolveStaffPeriod(e.joiningDate, periodOffset, today);
-        if (!period) {
-          return {
-            employee: e,
-            paid: 0,
-            earned: emptyEarnedSummary(),
-            carryForward: 0,
-            periodDue: 0,
-            calculatedDue: 0,
-            earnedDue: 0,
-            fullDue: 0,
-            isManualDue: false,
-            status: "NONE",
-          };
-        }
-        const asOfDate = staffAsOfDate(period, periodOffset, today);
+        const asOfDate = staffAsOfDate(periodOffset, today);
         const empPayments = payments.filter((p) => p.employeeId === e.phone);
-        const paid = salaryPaidInPeriod(empPayments, period.start, period.end);
+        const paid = salaryPaidInCalendarMonth(
+          empPayments,
+          join,
+          viewedMonth.year,
+          viewedMonth.month
+        );
         const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
-        const earned = computeEarnedSalary({
+        const earned = computeEarnedSalaryForCalendarMonth({
           monthlySalary: e.monthlySalary,
-          periodStart: period.start,
-          periodEnd: period.end,
+          joinDate: join,
+          year: viewedMonth.year,
+          month: viewedMonth.month,
           asOfDate,
           records: empAtt,
           settings: settings,
@@ -361,20 +327,22 @@ export default function SalaryPage() {
     let totalDue = 0;
     let totalPaid = 0;
     let unpaidCount = 0;
+    const viewedMonth = calendarMonthFromOffset(today, periodOffset);
     for (const e of staff) {
-      const period = resolveStaffPeriod(e.joiningDate, periodOffset, today);
-      if (!period) continue;
-      const asOfDate = staffAsOfDate(period, periodOffset, today);
-      const paid = salaryPaidInPeriod(
+      const join = e.joiningDate?.trim() || today;
+      const asOfDate = staffAsOfDate(periodOffset, today);
+      const paid = salaryPaidInCalendarMonth(
         payments.filter((p) => p.employeeId === e.phone),
-        period.start,
-        period.end
+        join,
+        viewedMonth.year,
+        viewedMonth.month
       );
       const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
-      const earned = computeEarnedSalary({
+      const earned = computeEarnedSalaryForCalendarMonth({
         monthlySalary: e.monthlySalary,
-        periodStart: period.start,
-        periodEnd: period.end,
+        joinDate: join,
+        year: viewedMonth.year,
+        month: viewedMonth.month,
         asOfDate,
         records: empAtt,
         settings,
