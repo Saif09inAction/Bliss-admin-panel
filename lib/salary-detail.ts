@@ -1,6 +1,5 @@
 import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
-  computeEarnedSalary,
   computeEarnedSalaryForCalendarMonth,
   formatDurationMinutes,
   isWorkingDay,
@@ -15,13 +14,9 @@ import {
   calendarMonthFromOffset,
   earnedAsOfDateForCalendarView,
   formatCalendarMonthLabel,
-  formatPayPeriodMonthLabel,
-  payPeriodForIndex,
   paymentsInCalendarMonth,
-  paymentsInPeriod,
   resolvePayPeriodForCalendarOffset,
   salaryPaidInCalendarMonth,
-  salaryPaidInPeriod,
   type PayPeriod,
 } from "@/lib/pay-period-utils";
 
@@ -157,6 +152,107 @@ function countAttendanceInPeriod(opts: {
   return { workingDays, fullDays, halfDays, absentDays, holidayDays, totalWorkingHours };
 }
 
+export function computeCalendarMonthBalance(opts: {
+  employee: Employee;
+  payments: PaymentTransaction[];
+  attendance: Attendance[];
+  settings: AttendanceSettings;
+  overrides: OverrideMap;
+  monthOffset: number;
+  today: string;
+  fullMonth?: boolean;
+}): {
+  label: string;
+  year: number;
+  month: number;
+  monthStart: string;
+  monthEnd: string;
+  periodStart: string;
+  periodEnd: string;
+  earned: number;
+  paid: number;
+  balance: number;
+} {
+  const {
+    employee,
+    payments,
+    attendance,
+    settings,
+    overrides,
+    monthOffset,
+    today,
+    fullMonth = false,
+  } = opts;
+  const join = employee.joiningDate?.trim() || today;
+  const phone = employee.phone;
+  const viewedMonth = calendarMonthFromOffset(today, monthOffset);
+  const { start: monthStart, end: monthEnd } = calendarMonthBounds(
+    viewedMonth.year,
+    viewedMonth.month
+  );
+  const label = formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month);
+  const empty = {
+    label,
+    year: viewedMonth.year,
+    month: viewedMonth.month,
+    monthStart,
+    monthEnd,
+    periodStart: monthStart,
+    periodEnd: monthEnd,
+    earned: 0,
+    paid: 0,
+    balance: 0,
+  };
+  if (monthEnd < join) return empty;
+
+  const payPeriod = resolvePayPeriodForCalendarOffset(join, monthOffset, today);
+  const asOfDate = fullMonth
+    ? monthEnd
+    : earnedAsOfDateForCalendarView(
+        payPeriod ?? { index: -1, start: monthStart, end: monthEnd, daysInPeriod: 0 },
+        viewedMonth,
+        today
+      );
+
+  const empPayments = payments.filter((p) => p.employeeId === phone);
+  const empAtt = attendance.filter(
+    (a) => a.employeeId === phone || a.employeeId === employee.id
+  );
+  const earnedSummary = computeEarnedSalaryForCalendarMonth({
+    monthlySalary: employee.monthlySalary,
+    joinDate: join,
+    year: viewedMonth.year,
+    month: viewedMonth.month,
+    asOfDate,
+    records: empAtt,
+    settings,
+    overrides,
+    employeePhone: phone,
+    employeeShift: employee,
+  });
+  const paid = salaryPaidInCalendarMonth(
+    empPayments,
+    join,
+    viewedMonth.year,
+    viewedMonth.month
+  );
+  const earned = earnedSummary.earnedNet;
+  const balance = Math.round((earned - paid) * 100) / 100;
+
+  return {
+    label,
+    year: viewedMonth.year,
+    month: viewedMonth.month,
+    monthStart,
+    monthEnd,
+    periodStart: payPeriod?.start ?? monthStart,
+    periodEnd: payPeriod?.end ?? monthEnd,
+    earned,
+    paid,
+    balance,
+  };
+}
+
 export function computeCarryForwardUnpaid(opts: {
   employee: Employee;
   payments: PaymentTransaction[];
@@ -168,45 +264,43 @@ export function computeCarryForwardUnpaid(opts: {
 }): { lines: CarryForwardLine[]; total: number } {
   const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
   const join = employee.joiningDate?.trim() || today;
-  const viewedMonth = calendarMonthFromOffset(today, periodOffset);
-  const { start: monthStart } = calendarMonthBounds(viewedMonth.year, viewedMonth.month);
-  const phone = employee.phone;
-  const empPayments = payments.filter((p) => p.employeeId === phone);
-  const empAtt = attendance.filter(
-    (a) => a.employeeId === phone || a.employeeId === employee.id
-  );
+
+  const pastOffsets: number[] = [];
+  let offset = periodOffset - 1;
+  while (offset >= periodOffset - 120) {
+    const pastMonth = calendarMonthFromOffset(today, offset);
+    const { end: monthEnd } = calendarMonthBounds(pastMonth.year, pastMonth.month);
+    if (monthEnd < join) break;
+    pastOffsets.push(offset);
+    offset--;
+  }
+  pastOffsets.reverse();
 
   const lines: CarryForwardLine[] = [];
   let total = 0;
 
-  for (let i = 0; i < 600; i++) {
-    const period = payPeriodForIndex(join, i);
-    if (period.end >= monthStart) break;
-    const paid = salaryPaidInPeriod(empPayments, period.start, period.end);
-    const earned = computeEarnedSalary({
-      monthlySalary: employee.monthlySalary,
-      periodStart: period.start,
-      periodEnd: period.end,
-      asOfDate: period.end,
-      records: empAtt,
+  for (const pastOffset of pastOffsets) {
+    const monthBalance = computeCalendarMonthBalance({
+      employee,
+      payments,
+      attendance,
       settings,
       overrides,
-      employeePhone: phone,
-      employeeShift: employee,
+      monthOffset: pastOffset,
+      today,
+      fullMonth: true,
     });
-    const balance = Math.round((earned.fullMonthNet - paid) * 100) / 100;
-    if (balance !== 0) {
-      lines.push({
-        label: formatPayPeriodMonthLabel(period.start, period.end),
-        periodStart: period.start,
-        periodEnd: period.end,
-        earned: earned.fullMonthNet,
-        paid,
-        balance,
-        unpaid: balance,
-      });
-      total += balance;
-    }
+    if (monthBalance.balance === 0) continue;
+    lines.push({
+      label: monthBalance.label,
+      periodStart: monthBalance.periodStart,
+      periodEnd: monthBalance.periodEnd,
+      earned: monthBalance.earned,
+      paid: monthBalance.paid,
+      balance: monthBalance.balance,
+      unpaid: monthBalance.balance,
+    });
+    total += monthBalance.balance;
   }
 
   return { lines, total: Math.round(total * 100) / 100 };
