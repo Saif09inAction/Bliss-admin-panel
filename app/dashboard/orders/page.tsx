@@ -485,6 +485,7 @@ export default function OrdersPage() {
               status: data.status as any,
               originalDealAmount: (data.originalDealAmount as number) || 0,
               dealAfterThisRepair: (data.dealAfterThisRepair as number) || 0,
+              deferToNextBill: Boolean(data.deferToNextBill),
             } satisfies OrderRepair;
           })
           .filter((r) => isStandaloneRepair(r.orderId) && (r.status === "APPROVED" || !r.status));
@@ -839,6 +840,7 @@ export default function OrdersPage() {
           activeStandaloneRepairs.map((r) =>
             updateDoc(doc(db, "order_repairs", r.id), {
               orderId: id,
+              deferToNextBill: false,
             })
           )
         );

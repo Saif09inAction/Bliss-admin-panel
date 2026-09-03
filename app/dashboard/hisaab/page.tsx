@@ -250,6 +250,7 @@ export default function HisaabPage() {
               : undefined),
             reviewedBy: data.reviewedBy as string | undefined,
             reviewedAt: data.reviewedAt as number | undefined,
+            deferToNextBill: Boolean(data.deferToNextBill),
           } satisfies OrderRepair;
         })
         .sort((a, b) => b.createdAt - a.createdAt);
@@ -330,6 +331,7 @@ export default function HisaabPage() {
                 : undefined),
               reviewedBy: data.reviewedBy as string | undefined,
               reviewedAt: data.reviewedAt as number | undefined,
+              deferToNextBill: Boolean(data.deferToNextBill),
             } satisfies OrderRepair;
           })
           .sort((a, b) => b.createdAt - a.createdAt);

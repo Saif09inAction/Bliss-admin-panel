@@ -285,6 +285,11 @@ export interface OrderRepair {
   status?: RepairStatus;
   reviewedBy?: string;
   reviewedAt?: number;
+  /**
+   * When true, stay off the live bill and wait for the next bill create.
+   * Cleared once linked to a bill.
+   */
+  deferToNextBill?: boolean;
 }
 
 export interface AttendanceSettings {

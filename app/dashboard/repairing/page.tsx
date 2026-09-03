@@ -20,7 +20,7 @@ import type {
   RepairStatus,
 } from "@/lib/types";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
-import { attachApprovedRepairToLiveBill, syncOrderRepairAndRemaining } from "@/lib/kaariger-repair";
+import { attachApprovedRepairToLiveBill, findLiveKaarigerBill, syncOrderRepairAndRemaining } from "@/lib/kaariger-repair";
 import { formatRupee, uuid, formatClockTime, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
@@ -81,6 +81,7 @@ function parseRepair(d: { id: string; data: () => Record<string, unknown> }): Or
     status,
     reviewedBy: data.reviewedBy as string | undefined,
     reviewedAt: data.reviewedAt as number | undefined,
+    deferToNextBill: Boolean(data.deferToNextBill),
   };
 }
 
@@ -120,12 +121,16 @@ export default function RepairingPage() {
     faultyPricePerPiece: "",
     notes: "",
     applyNow: true,
+    includeInLiveBill: true,
   });
+  const [addHasLiveBill, setAddHasLiveBill] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [approveRepairDoc, setApproveRepairDoc] = useState<OrderRepair | null>(null);
   const [approvePrice, setApprovePrice] = useState("");
+  const [approveIncludeInLiveBill, setApproveIncludeInLiveBill] = useState(true);
+  const [approveHasLiveBill, setApproveHasLiveBill] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
@@ -173,6 +178,34 @@ export default function RepairingPage() {
     setAddProductId("");
   }, [addKaarigerId]);
 
+  useEffect(() => {
+    if (!addKaarigerId) {
+      setAddHasLiveBill(false);
+      return;
+    }
+    let cancelled = false;
+    findLiveKaarigerBill(addKaarigerId).then((live) => {
+      if (!cancelled) setAddHasLiveBill(Boolean(live));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [addKaarigerId]);
+
+  useEffect(() => {
+    if (!approveRepairDoc?.kaarigerId) {
+      setApproveHasLiveBill(false);
+      return;
+    }
+    let cancelled = false;
+    findLiveKaarigerBill(approveRepairDoc.kaarigerId).then((live) => {
+      if (!cancelled) setApproveHasLiveBill(Boolean(live));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [approveRepairDoc?.kaarigerId]);
+
   const productOptions: ProductOption[] = useMemo(
     () =>
       catalogProducts.map((p) => ({
@@ -190,7 +223,13 @@ export default function RepairingPage() {
     setMsg("");
     setAddKaarigerId("");
     setAddProductId("");
-    setAddForm({ faultyQuantity: "", faultyPricePerPiece: "", notes: "", applyNow: true });
+    setAddForm({
+      faultyQuantity: "",
+      faultyPricePerPiece: "",
+      notes: "",
+      applyNow: true,
+      includeInLiveBill: true,
+    });
   }
 
   function onPickProduct(id: string) {
@@ -231,7 +270,8 @@ export default function RepairingPage() {
     setSaving(true);
     setMsg("");
     try {
-      const notes = addForm.notes.trim();
+      const deferToNextBill =
+        status === "APPROVED" && addHasLiveBill && !addForm.includeInLiveBill;
       await setDoc(doc(getDb(), "order_repairs", id), {
         id,
         orderId,
@@ -248,7 +288,8 @@ export default function RepairingPage() {
         createdBy,
         createdAt: now,
         status,
-        ...(notes ? { notes } : {}),
+        deferToNextBill,
+        ...(addForm.notes.trim() ? { notes: addForm.notes.trim() } : {}),
         ...(status === "APPROVED"
           ? { reviewedBy: createdBy, reviewedAt: now }
           : {}),
@@ -256,13 +297,17 @@ export default function RepairingPage() {
 
       let attachedLabel = "";
       if (status === "APPROVED") {
-        const { attachedToOrderId } = await attachApprovedRepairToLiveBill({
-          repairId: id,
-          kaarigerId,
-        });
-        attachedLabel = attachedToOrderId
-          ? "included in the live bill"
-          : "will go on the next bill";
+        if (deferToNextBill) {
+          attachedLabel = "saved for the next bill";
+        } else {
+          const { attachedToOrderId } = await attachApprovedRepairToLiveBill({
+            repairId: id,
+            kaarigerId,
+          });
+          attachedLabel = attachedToOrderId
+            ? "included in the live bill"
+            : "will go on the next bill";
+        }
       }
 
       setShowAdd(false);
@@ -373,16 +418,24 @@ export default function RepairingPage() {
   }
 
   function startApprove(r: OrderRepair) {
-    if (r.faultyPricePerPiece <= 0 || r.totalRepairCost <= 0) {
+    setApproveIncludeInLiveBill(true);
+    setMsg("");
+    // Standalone approvals use the modal so admin can choose live vs next bill.
+    if (isStandaloneRepair(r.orderId) || r.faultyPricePerPiece <= 0 || r.totalRepairCost <= 0) {
       setApproveRepairDoc(r);
-      setApprovePrice("");
-      setMsg("");
+      setApprovePrice(
+        r.faultyPricePerPiece > 0 ? String(r.faultyPricePerPiece) : ""
+      );
       return;
     }
-    void confirmAndApprove(r, r.faultyPricePerPiece);
+    void confirmAndApprove(r, r.faultyPricePerPiece, true);
   }
 
-  async function confirmAndApprove(r: OrderRepair, pricePerPiece: number) {
+  async function confirmAndApprove(
+    r: OrderRepair,
+    pricePerPiece: number,
+    includeInLiveBill = approveIncludeInLiveBill
+  ) {
     const qty = r.faultyQuantity || 0;
     const price = Math.max(0, pricePerPiece);
     if (qty <= 0) {
@@ -395,9 +448,15 @@ export default function RepairingPage() {
     }
     const faultyTotal = Math.round(qty * price * 100) / 100;
     const standalone = isStandaloneRepair(r.orderId);
-    const target = standalone
-      ? "the live bill if one is open, otherwise the next bill"
-      : "this bill";
+    const live = standalone ? await findLiveKaarigerBill(r.kaarigerId) : null;
+    const deferToNextBill = Boolean(standalone && live && !includeInLiveBill);
+    const target = !standalone
+      ? "this bill"
+      : deferToNextBill
+        ? "the next bill"
+        : live
+          ? "the live bill"
+          : "the next bill";
     if (
       !confirm(
         `Approve repairing for "${r.productName}" (−${money(faultyTotal)})? This deducts from the kaariger's ${target}.`
@@ -414,13 +473,15 @@ export default function RepairingPage() {
         totalRepairCost: faultyTotal,
         reviewedBy: session?.name || "Admin",
         reviewedAt: Date.now(),
+        deferToNextBill,
       });
-      if (standalone) {
+      if (standalone && !deferToNextBill) {
         await attachApprovedRepairToLiveBill({
           repairId: r.id,
           kaarigerId: r.kaarigerId,
+          liveOrder: live,
         });
-      } else {
+      } else if (!standalone) {
         await syncOrderRepairTotal(r.orderId);
       }
       setApproveRepairDoc(null);
@@ -645,7 +706,9 @@ export default function RepairingPage() {
                       <td>
                         <p>{r.productName || "—"}</p>
                         {isStandaloneRepair(r.orderId) && (
-                          <p className="text-xs text-[var(--text-muted)]">No bill · hisaab</p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            {r.deferToNextBill ? "Next bill · hisaab" : "No bill · hisaab"}
+                          </p>
                         )}
                       </td>
                       <td className="text-right">{r.faultyQuantity}</td>
@@ -739,7 +802,11 @@ export default function RepairingPage() {
                         <p className="font-display font-bold">{r.productName || "—"}</p>
                         <p className="text-sm text-[var(--text-muted)]">
                           {r.kaarigerName}
-                          {isStandaloneRepair(r.orderId) ? " · no bill" : ""}
+                          {isStandaloneRepair(r.orderId)
+                            ? r.deferToNextBill
+                              ? " · next bill"
+                              : " · no bill"
+                            : ""}
                         </p>
                       </div>
                       <span className={statusBadge(status)}>{status}</span>
@@ -925,6 +992,25 @@ export default function RepairingPage() {
                 Apply to hisaab now (approve)
               </label>
 
+              {addForm.applyNow && addHasLiveBill && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={addForm.includeInLiveBill}
+                    onChange={(e) =>
+                      setAddForm({ ...addForm, includeInLiveBill: e.target.checked })
+                    }
+                  />
+                  <span>
+                    Include in current live bill
+                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+                      Uncheck to keep this repairing for the next bill only.
+                    </span>
+                  </span>
+                </label>
+              )}
+
               {msg && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{msg}</p>}
 
               <div className="flex gap-2 pt-1">
@@ -1037,7 +1123,11 @@ export default function RepairingPage() {
               onClick={(e) => e.stopPropagation()}
               onSubmit={(e) => {
                 e.preventDefault();
-                void confirmAndApprove(approveRepairDoc, Number(approvePrice) || 0);
+                void confirmAndApprove(
+                  approveRepairDoc,
+                  Number(approvePrice) || 0,
+                  approveIncludeInLiveBill
+                );
               }}
             >
               <div>
@@ -1066,6 +1156,22 @@ export default function RepairingPage() {
                   Deduction: −
                   {money((approveRepairDoc.faultyQuantity || 0) * (Number(approvePrice) || 0))}
                 </p>
+              )}
+              {approveHasLiveBill && isStandaloneRepair(approveRepairDoc.orderId) && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={approveIncludeInLiveBill}
+                    onChange={(e) => setApproveIncludeInLiveBill(e.target.checked)}
+                  />
+                  <span>
+                    Include in current live bill
+                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+                      Uncheck to keep this repairing for the next bill only.
+                    </span>
+                  </span>
+                </label>
               )}
               <div className="flex gap-2">
                 <button

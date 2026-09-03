@@ -116,6 +116,7 @@ export async function attachApprovedRepairToLiveBill(opts: {
 
   await updateDoc(doc(getDb(), "order_repairs", opts.repairId), {
     orderId: live.id,
+    deferToNextBill: false,
   });
   await syncOrderRepairAndRemaining(live.id);
   return { attachedToOrderId: live.id };
@@ -133,7 +134,10 @@ export async function foldStandaloneRepairsIntoLiveBill(opts: {
   if (!live) return 0;
 
   const orphans = opts.repairs.filter(
-    (r) => isStandaloneRepair(r.orderId) && isApprovedRepair(r)
+    (r) =>
+      isStandaloneRepair(r.orderId) &&
+      isApprovedRepair(r) &&
+      !r.deferToNextBill
   );
   for (const r of orphans) {
     await attachApprovedRepairToLiveBill({
