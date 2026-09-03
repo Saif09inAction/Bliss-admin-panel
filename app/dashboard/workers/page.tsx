@@ -28,8 +28,10 @@ import {
 } from "@/lib/supervisor-access";
 import { todayStr, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
+import { markPresentDateRange } from "@/lib/attendance-credit";
 import { buildEmployeeShiftScheduleSave, parseShiftHistory } from "@/lib/shift-schedule";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
+import { useAuth } from "@/lib/auth-context";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import PageToolbar from "@/components/admin/PageToolbar";
 import WorkerProfilePanel from "@/components/WorkerProfilePanel";
@@ -64,6 +66,7 @@ function RoleBadge({ role }: { role: Role }) {
 
 export default function WorkersPage() {
   const router = useRouter();
+  const { session } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<"ALL" | Role>("ALL");
   const [search, setSearch] = useState("");
@@ -258,6 +261,24 @@ export default function WorkersPage() {
       }
 
       await setDoc(doc(getDb(), "employees", phone), data, { merge: formMode === "edit" });
+
+      // New staff/supervisor with a past join date → credit present through today.
+      if (
+        isNew &&
+        (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR") &&
+        form.joiningDate.trim()
+      ) {
+        const join = form.joiningDate.trim();
+        const today = todayStr();
+        if (join <= today) {
+          await markPresentDateRange({
+            employeeId: phone,
+            fromDate: join,
+            toDate: today,
+            creditedBy: session?.name || "Admin",
+          });
+        }
+      }
 
       if (formMode === "edit" && editingPhone && editingPhone !== phone) {
         await deleteDoc(doc(getDb(), "employees", editingPhone));

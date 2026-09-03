@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, setDoc, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, setDoc, query, where } from "firebase/firestore";
 import {
   CalendarDays,
   ChevronRight,
   Clock,
+  Download,
   Search,
   UserCheck,
   UserX,
@@ -14,7 +15,13 @@ import {
 } from "lucide-react";
 import { getDb } from "@/lib/firebase";
 import type { Attendance, AttendanceSettings, Employee } from "@/lib/types";
-import { todayStr, searchQueryToIsoDate, dateMatchesSearch, formatDisplayDate } from "@/lib/csv";
+import {
+  todayStr,
+  searchQueryToIsoDate,
+  dateMatchesSearch,
+  formatDisplayDate,
+  downloadCsv,
+} from "@/lib/csv";
 import { computeEarlyLeaveMinutes,
   computeLateMinutes,
   defaultSettings,
@@ -28,6 +35,7 @@ import { computeEarlyLeaveMinutes,
   formatDisplayTime,
   resolveShiftSettings,
 } from "@/lib/attendance-utils";
+import { eachDateInclusive } from "@/lib/attendance-credit";
 import EmployeeAttendancePanel from "@/components/EmployeeAttendancePanel";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
 import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
@@ -57,6 +65,10 @@ function badgeClass(status: string): string {
 export default function AttendancePage() {
   const [date, setDate] = useState(todayStr());
   const [search, setSearch] = useState("");
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState("");
   const [staff, setStaff] = useState<Employee[]>([]);
   const [records, setRecords] = useState<Attendance[]>([]);
   const [settings, setSettings] = useState<AttendanceSettings>(defaultSettings());
@@ -190,6 +202,84 @@ export default function AttendancePage() {
     }
   }
 
+  async function exportAttendanceExcel() {
+    const from = (exportFrom || date).trim();
+    const to = (exportTo || exportFrom || date).trim();
+    if (!from || !to) {
+      setExportMsg("Choose From and To dates to export.");
+      return;
+    }
+    if (from > to) {
+      setExportMsg("From date must be on or before To date.");
+      return;
+    }
+    setExporting(true);
+    setExportMsg("");
+    try {
+      const days = eachDateInclusive(from, to);
+      const snap = await getDocs(
+        query(
+          collection(getDb(), "attendance"),
+          where("date", ">=", from),
+          where("date", "<=", to)
+        )
+      );
+      const byKey = new Map(
+        snap.docs.map((d) => {
+          const rec = parseAttendance(d.id, d.data() as Record<string, unknown>);
+          return [`${rec.employeeId}_${rec.date}`, rec] as const;
+        })
+      );
+
+      const staffForExport = filteredStaff.length ? filteredStaff : staff;
+      const rows: string[][] = [];
+      for (const e of staffForExport) {
+        for (const day of days) {
+          if (e.joiningDate && day < e.joiningDate) continue;
+          const rec = byKey.get(`${e.phone}_${day}`);
+          const shift = resolveShiftSettings(e, settings, day, overrides, e.phone);
+          const st = effectiveDayStatus(rec, day, shift);
+          rows.push([
+            e.name,
+            e.phone,
+            formatDisplayDate(day),
+            displayStatusLabel(String(st), rec),
+            formatDisplayTime(rec?.signInTime) || "",
+            formatDisplayTime(rec?.signOutTime) || "",
+            rec?.dayCredit === "FULL"
+              ? "Full day"
+              : rec?.dayCredit === "HALF"
+                ? "Half day"
+                : "",
+            rec?.dayCreditBy || "",
+          ]);
+        }
+      }
+
+      downloadCsv(
+        `attendance_${from}_to_${to}.csv`,
+        [
+          "Staff",
+          "Mobile",
+          "Date",
+          "Status",
+          "Clock In",
+          "Clock Out",
+          "Admin credit",
+          "Credited by",
+        ],
+        rows
+      );
+      setExportMsg(
+        `Exported ${rows.length} row(s) from ${formatDisplayDate(from)} to ${formatDisplayDate(to)}.`
+      );
+    } catch (err) {
+      setExportMsg(err instanceof Error ? err.message : "Export failed.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const byEmployee = useMemo(() => new Map(records.map((r) => [r.employeeId, r])), [records]);
 
   const filteredStaff = useMemo(() => {
@@ -264,7 +354,25 @@ export default function AttendancePage() {
             {staff.length} staff · {formattedDate}
           </p>
         </div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={exporting}
+          onClick={() => void exportAttendanceExcel()}
+          title={
+            exportFrom || exportTo
+              ? `Export ${exportFrom || "…"} to ${exportTo || exportFrom || "…"}`
+              : `Export ${date} (set Filter dates for a range)`
+          }
+        >
+          <Download className="h-4 w-4" />
+          {exporting ? "Exporting…" : "Export Excel"}
+        </button>
       </div>
+
+      {exportMsg && (
+        <p className="rounded-xl bg-jade-soft/70 px-3 py-2 text-sm text-jade-deep">{exportMsg}</p>
+      )}
 
       {/* Mobile: stats first so client sees the day at a glance */}
       <div className="grid grid-cols-2 gap-2.5 lg:hidden">
@@ -284,14 +392,28 @@ export default function AttendancePage() {
                 <AdminSearchWithDateFilter
                   search={search}
                   onSearchChange={setSearch}
-                  dateFrom={date}
-                  onDateFromChange={setDate}
-                  dateFilterMode="single"
+                  dateFrom={exportFrom}
+                  dateTo={exportTo}
+                  onDateFromChange={setExportFrom}
+                  onDateToChange={setExportTo}
+                  dateFilterMode="range"
                   placeholder="Search name, mobile, date (dd/mm/yy)…"
                 />
+                <p className="mt-1.5 text-[11px] text-[var(--text-muted)]">
+                  Filter dates apply to Excel export only
+                  {exportFrom || exportTo
+                    ? ` · ${exportFrom ? formatDisplayDate(exportFrom) : "…"} → ${
+                        exportTo
+                          ? formatDisplayDate(exportTo)
+                          : exportFrom
+                            ? formatDisplayDate(exportFrom)
+                            : "…"
+                      }`
+                    : ` · leave empty to export the selected day (${formatDisplayDate(date)})`}
+                </p>
               </div>
               <div className="sm:w-44 hidden sm:block">
-                <label className="label">Date</label>
+                <label className="label">View date</label>
                 <input
                   className="input"
                   type="date"

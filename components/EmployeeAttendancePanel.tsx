@@ -20,17 +20,33 @@ import {
   monthDateRange,
   monthLabel,
   parseAttendance,
+  parseDate,
   resolveAttendanceImage,
   resolveShiftSettings,
   statusLabel,
   displayStatusLabel,
 } from "@/lib/attendance-utils";
+import { markPresentDateRange } from "@/lib/attendance-credit";
 import { parseCalendarOverride, type OverrideMap } from "@/lib/deduction-utils";
 
 interface Props {
   employee: Employee;
   settings: AttendanceSettings;
   onClose: () => void;
+}
+
+/** Join date as YYYY-MM-DD, or null if missing/invalid. */
+function joinDateKey(joiningDate?: string): string | null {
+  const raw = joiningDate?.trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return dateKey(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function monthIndex(year: number, month: number) {
+  return year * 12 + month;
 }
 
 function calendarDayClass(status: string, isSelected: boolean): string {
@@ -78,16 +94,66 @@ function badgeClass(status: string): string {
 export default function EmployeeAttendancePanel({ employee, settings, onClose }: Props) {
   const { session } = useAuth();
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+  const joinKey = joinDateKey(employee.joiningDate);
+  const minMonth = useMemo(() => {
+    if (!joinKey) return null;
+    const d = parseDate(joinKey);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  }, [joinKey]);
+
+  const [year, setYear] = useState(() => {
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    if (minMonth && monthIndex(y, m) < monthIndex(minMonth.year, minMonth.month)) {
+      return minMonth.year;
+    }
+    return y;
+  });
+  const [month, setMonth] = useState(() => {
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    if (minMonth && monthIndex(y, m) < monthIndex(minMonth.year, minMonth.month)) {
+      return minMonth.month;
+    }
+    return m;
+  });
   const [records, setRecords] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(
     dateKey(now.getFullYear(), now.getMonth(), now.getDate())
   );
   const [creditSaving, setCreditSaving] = useState(false);
+  const [monthMarking, setMonthMarking] = useState(false);
   const [creditMsg, setCreditMsg] = useState("");
   const [overrides, setOverrides] = useState<OverrideMap>(new Map());
+
+  // Keep view at/after join month when staff changes.
+  useEffect(() => {
+    if (!minMonth) return;
+    if (monthIndex(year, month) < monthIndex(minMonth.year, minMonth.month)) {
+      setYear(minMonth.year);
+      setMonth(minMonth.month);
+      setSelectedDate(null);
+    }
+  }, [minMonth, year, month]);
+
+  const canGoPrev =
+    !minMonth || monthIndex(year, month) > monthIndex(minMonth.year, minMonth.month);
+  const canGoNext =
+    monthIndex(year, month) < monthIndex(now.getFullYear(), now.getMonth());
+
+  const daysToMarkPresent = useMemo(() => {
+    const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+    const total = daysInMonth(year, month);
+    const keys: string[] = [];
+    for (let d = 1; d <= total; d++) {
+      const key = dateKey(year, month, d);
+      if (joinKey && key < joinKey) continue;
+      if (key > todayKey) continue;
+      keys.push(key);
+    }
+    return keys;
+  }, [year, month, joinKey]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "calendar_days"), (snap) => {
@@ -222,10 +288,55 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
     }
   }
 
+  async function markFullMonthPresent() {
+    if (daysToMarkPresent.length === 0) {
+      setCreditMsg("No days in this month can be marked present yet.");
+      return;
+    }
+    if (
+      !confirm(
+        `Mark all ${daysToMarkPresent.length} day(s) in ${monthLabel(year, month)} as full-day present for ${employee.name}?`
+      )
+    ) {
+      return;
+    }
+    setMonthMarking(true);
+    setCreditMsg("");
+    try {
+      const from = daysToMarkPresent[0];
+      const to = daysToMarkPresent[daysToMarkPresent.length - 1];
+      const count = await markPresentDateRange({
+        employeeId: employee.phone,
+        fromDate: from,
+        toDate: to,
+        creditedBy: session?.name || "Admin",
+      });
+      setCreditMsg(
+        `Marked ${count} day(s) in ${monthLabel(year, month)} as full-day present.`
+      );
+    } catch (err) {
+      setCreditMsg(err instanceof Error ? err.message : "Failed to mark month present.");
+    } finally {
+      setMonthMarking(false);
+    }
+  }
+
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
+    let nextYear = d.getFullYear();
+    let nextMonth = d.getMonth();
+    if (minMonth && monthIndex(nextYear, nextMonth) < monthIndex(minMonth.year, minMonth.month)) {
+      nextYear = minMonth.year;
+      nextMonth = minMonth.month;
+    }
+    const maxY = now.getFullYear();
+    const maxM = now.getMonth();
+    if (monthIndex(nextYear, nextMonth) > monthIndex(maxY, maxM)) {
+      nextYear = maxY;
+      nextMonth = maxM;
+    }
+    setYear(nextYear);
+    setMonth(nextMonth);
     setSelectedDate(null);
     setCreditMsg("");
   }
@@ -293,11 +404,17 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between">
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => shiftMonth(-1)}
+              disabled={!canGoPrev}
+              title={
+                !canGoPrev && joinKey
+                  ? `Cannot go before join date (${joinKey})`
+                  : undefined
+              }
             >
               <ChevronLeft size={14} />
               Prev
@@ -307,11 +424,33 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => shiftMonth(1)}
+              disabled={!canGoNext}
+              title={!canGoNext ? "Already at current month" : undefined}
             >
               Next
               <ChevronRight size={14} />
             </button>
           </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={monthMarking || creditSaving || daysToMarkPresent.length === 0 || loading}
+              onClick={() => void markFullMonthPresent()}
+            >
+              {monthMarking ? "Marking…" : "Mark full month present"}
+            </button>
+            {joinKey && !canGoPrev && (
+              <p className="text-xs text-[var(--text-muted)]">Joined {joinKey}</p>
+            )}
+          </div>
+
+          {creditMsg && !selectedDate && (
+            <p className="mb-4 rounded-xl bg-jade-soft/70 px-3 py-2 text-xs text-jade-deep">
+              {creditMsg}
+            </p>
+          )}
 
           <div className="mb-4 flex flex-wrap gap-4 text-xs text-[var(--text-muted)]">
             <span className="flex items-center gap-1.5">
@@ -348,18 +487,24 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     {w.map((day, di) => {
                       if (!day) return <div key={di} />;
                       const key = dateKey(year, month, day);
+                      const beforeJoin = Boolean(joinKey && key < joinKey);
                       const rec = byDate.get(key);
-                      const st = effectiveDayStatus(rec, key, shiftForDate(key));
+                      const st = beforeJoin
+                        ? "FUTURE"
+                        : effectiveDayStatus(rec, key, shiftForDate(key));
                       const isSelected = selectedDate === key;
                       return (
                         <button
                           key={di}
                           type="button"
+                          disabled={beforeJoin}
                           onClick={() => {
+                            if (beforeJoin) return;
                             setSelectedDate(key);
                             setCreditMsg("");
                           }}
                           className={calendarDayClass(String(st), isSelected)}
+                          title={beforeJoin ? "Before join date" : undefined}
                         >
                           {day}
                         </button>
