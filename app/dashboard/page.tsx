@@ -127,6 +127,7 @@ export default function DashboardPage() {
         const status = (data.status as string) || "APPROVED";
         if (!isStandaloneRepair(orderId)) return;
         if (status && status !== "APPROVED") return;
+        if (data.deferToNextBill) return;
         const kid = (data.kaarigerId as string) || "";
         if (!kid) return;
         repairByKaariger.set(

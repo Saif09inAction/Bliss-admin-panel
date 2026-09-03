@@ -298,7 +298,7 @@ export default function RepairingPage() {
       let attachedLabel = "";
       if (status === "APPROVED") {
         if (deferToNextBill) {
-          attachedLabel = "saved for the next bill";
+          attachedLabel = "approved — add to bill from Hisaab when ready (not deducted yet)";
         } else {
           const { attachedToOrderId } = await attachApprovedRepairToLiveBill({
             repairId: id,
@@ -453,13 +453,15 @@ export default function RepairingPage() {
     const target = !standalone
       ? "this bill"
       : deferToNextBill
-        ? "the next bill"
+        ? "Hisaab pending list (not deducted until you add it to the bill)"
         : live
           ? "the live bill"
           : "the next bill";
     if (
       !confirm(
-        `Approve repairing for "${r.productName}" (−${money(faultyTotal)})? This deducts from the kaariger's ${target}.`
+        deferToNextBill
+          ? `Approve repairing for "${r.productName}" (${money(faultyTotal)}) without deducting yet? It will show on the live bill so you can add it later.`
+          : `Approve repairing for "${r.productName}" (−${money(faultyTotal)})? This deducts from the kaariger's ${target}.`
       )
     ) {
       return;
@@ -707,7 +709,7 @@ export default function RepairingPage() {
                         <p>{r.productName || "—"}</p>
                         {isStandaloneRepair(r.orderId) && (
                           <p className="text-xs text-[var(--text-muted)]">
-                            {r.deferToNextBill ? "Next bill · hisaab" : "No bill · hisaab"}
+                            {r.deferToNextBill ? "Pending on bill · hisaab" : "No bill · hisaab"}
                           </p>
                         )}
                       </td>
@@ -804,7 +806,7 @@ export default function RepairingPage() {
                           {r.kaarigerName}
                           {isStandaloneRepair(r.orderId)
                             ? r.deferToNextBill
-                              ? " · next bill"
+                              ? " · pending on bill"
                               : " · no bill"
                             : ""}
                         </p>
@@ -1005,7 +1007,7 @@ export default function RepairingPage() {
                   <span>
                     Include in current live bill
                     <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
-                      Uncheck to keep this repairing for the next bill only.
+                      Uncheck to approve without deducting — add it to the bill later from Hisaab.
                     </span>
                   </span>
                 </label>
@@ -1168,7 +1170,7 @@ export default function RepairingPage() {
                   <span>
                     Include in current live bill
                     <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
-                      Uncheck to keep this repairing for the next bill only.
+                      Uncheck to approve without deducting — add it to the bill later from Hisaab.
                     </span>
                   </span>
                 </label>

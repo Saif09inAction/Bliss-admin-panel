@@ -45,8 +45,9 @@ import {
   totalRemainingAmount,
 } from "@/lib/kaariger-hisaab";
 import { deleteKaarigerPayments } from "@/lib/payment-delete";
+import { attachApprovedRepairToLiveBill } from "@/lib/kaariger-repair";
 import { foldStandaloneRepairsIntoLiveBill } from "@/lib/kaariger-repair";
-import { isStandaloneRepair } from "@/lib/types";
+import { isPendingBillRepair, isRemainingStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
   KaarigerOrder,
@@ -116,6 +117,32 @@ export default function HisaabPage() {
   const [payMsg, setPayMsg] = useState("");
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [historyOrderId, setHistoryOrderId] = useState("");
+  const [attachingRepairId, setAttachingRepairId] = useState<string | null>(null);
+
+  async function attachPendingRepairToBill(repairId: string, orderId: string) {
+    if (!kaarigerId) return;
+    if (
+      !confirm(
+        "Add this repairing to the current bill? It will deduct from ADD and Total Remaining."
+      )
+    ) {
+      return;
+    }
+    setAttachingRepairId(repairId);
+    try {
+      const live = orders.find((o) => o.id === orderId) || null;
+      await attachApprovedRepairToLiveBill({
+        repairId,
+        kaarigerId,
+        liveOrder: live,
+      });
+      await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add repairing to bill.");
+    } finally {
+      setAttachingRepairId(null);
+    }
+  }
 
   async function loadKaarigers() {
     const snap = await getDocs(collection(getDb(), "employees"));
@@ -406,7 +433,7 @@ export default function HisaabPage() {
 
       // Always allocate: old kharcha → week kharcha → opening → credit.
       const standaloneRepairs = repairs
-        .filter((r) => isStandaloneRepair(r.orderId) && (!r.status || r.status === "APPROVED"))
+        .filter((r) => isRemainingStandaloneRepair(r))
         .reduce((s, r) => s + (r.totalRepairCost || 0), 0);
       const result = await payKaarigerKharcha({
         kaarigerId,
@@ -486,12 +513,11 @@ export default function HisaabPage() {
   const oldKharchaBal = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
   const standaloneRepairs = useMemo(
-    () =>
-      repairs.filter(
-        (r) =>
-          isStandaloneRepair(r.orderId) &&
-          (!r.status || r.status === "APPROVED")
-      ),
+    () => repairs.filter((r) => isRemainingStandaloneRepair(r)),
+    [repairs]
+  );
+  const pendingBillRepairs = useMemo(
+    () => repairs.filter((r) => isPendingBillRepair(r)),
     [repairs]
   );
   const standaloneRepairTotal = useMemo(
@@ -1456,12 +1482,17 @@ export default function HisaabPage() {
               </div>
 
               <div className="space-y-4">
-                {activeOrders.map((o) => (
+                {activeOrders.map((o, idx) => (
                   <OrderDetailCard
                     key={o.id}
                     order={o}
                     payments={payments}
                     repairs={repairs}
+                    pendingRepairs={idx === 0 ? pendingBillRepairs : []}
+                    attachingRepairId={attachingRepairId}
+                    onAttachPendingRepair={(repairId) =>
+                      void attachPendingRepairToBill(repairId, o.id)
+                    }
                     openingBalance={openingBal}
                     oldKharcha={oldKharchaBal}
                     onPay={() => {
@@ -1788,6 +1819,9 @@ function OrderDetailCard({
   order,
   payments,
   repairs,
+  pendingRepairs = [],
+  attachingRepairId = null,
+  onAttachPendingRepair,
   openingBalance = 0,
   oldKharcha = 0,
   onPay,
@@ -1795,6 +1829,10 @@ function OrderDetailCard({
   order: KaarigerOrder;
   payments: KaarigerPayment[];
   repairs: OrderRepair[];
+  /** Approved repairs waiting for admin to add to this bill (not deducted yet). */
+  pendingRepairs?: OrderRepair[];
+  attachingRepairId?: string | null;
+  onAttachPendingRepair?: (repairId: string) => void;
   /** Running closing / opening from Saturday bills. */
   openingBalance?: number;
   /** Unpaid weekly kharcha carried from previous weeks. */
@@ -2017,6 +2055,49 @@ function OrderDetailCard({
                 −{money(order.repairDeductionTotal || orderRepairs.reduce((s, r) => s + r.totalRepairCost, 0))}
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {pendingRepairs.length > 0 && !isCompleted && (
+        <div>
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-800">
+            <Wrench className="h-3.5 w-3.5" />
+            Pending repairing (not deducted)
+          </p>
+          <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-amber-200 bg-amber-50/40">
+            {pendingRepairs.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-start justify-between gap-3 p-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--text)]">
+                    {r.productName || "Repairing"}
+                  </p>
+                  {r.faultyQuantity > 0 && (
+                    <p className="text-xs text-[var(--text-muted)]">
+                      Faulty: {r.faultyQuantity} pcs × {money(r.faultyPricePerPiece)} ={" "}
+                      {money(r.totalRepairCost)}
+                    </p>
+                  )}
+                  <p className="text-xs text-[var(--text-faint)]">
+                    Approved · not on this bill yet · no remaining deduction
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <span className="font-bold text-amber-900">{money(r.totalRepairCost)}</span>
+                  {onAttachPendingRepair && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm whitespace-nowrap"
+                      disabled={attachingRepairId === r.id}
+                      onClick={() => onAttachPendingRepair(r.id)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {attachingRepairId === r.id ? "Adding…" : "Add repairing to this bill"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

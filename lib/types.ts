@@ -264,6 +264,32 @@ export function isStandaloneRepair(orderId?: string | null) {
   return !orderId || orderId === STANDALONE_REPAIR_ORDER_ID;
 }
 
+/** Approved repairing waiting for admin to add it to a bill (no remaining impact yet). */
+export function isPendingBillRepair(r: {
+  orderId?: string | null;
+  status?: RepairStatus | string;
+  deferToNextBill?: boolean;
+}) {
+  return (
+    isStandaloneRepair(r.orderId) &&
+    Boolean(r.deferToNextBill) &&
+    (!r.status || r.status === "APPROVED")
+  );
+}
+
+/** Approved standalone repairing that reduces Total Remaining until linked to a bill. */
+export function isRemainingStandaloneRepair(r: {
+  orderId?: string | null;
+  status?: RepairStatus | string;
+  deferToNextBill?: boolean;
+}) {
+  return (
+    isStandaloneRepair(r.orderId) &&
+    (!r.status || r.status === "APPROVED") &&
+    !r.deferToNextBill
+  );
+}
+
 export interface OrderRepair {
   id: string;
   /** Bill id, or STANDALONE_REPAIR_ORDER_ID when there is no bill. */
@@ -286,8 +312,8 @@ export interface OrderRepair {
   reviewedBy?: string;
   reviewedAt?: number;
   /**
-   * When true, stay off the live bill and wait for the next bill create.
-   * Cleared once linked to a bill.
+   * When true, approved but not deducted yet — admin must add it to a bill.
+   * Does not reduce Total Remaining until attached. Cleared once linked.
    */
   deferToNextBill?: boolean;
 }

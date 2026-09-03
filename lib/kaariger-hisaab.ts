@@ -309,7 +309,10 @@ export function buildHisaabLedger(opts: {
   }
 
   const approvedStandaloneRepairs = (opts.repairs || []).filter(
-    (r) => isStandaloneRepair(r.orderId) && isApprovedRepair(r)
+    (r) =>
+      isStandaloneRepair(r.orderId) &&
+      isApprovedRepair(r) &&
+      !r.deferToNextBill
   );
 
   if (approvedStandaloneRepairs.length > 0) {

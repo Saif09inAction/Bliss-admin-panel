@@ -538,7 +538,8 @@ export default function WorkerProfilePanel({
           const status = data.status as string | undefined;
           return (
             isStandaloneRepair(data.orderId as string) &&
-            (!status || status === "APPROVED")
+            (!status || status === "APPROVED") &&
+            !data.deferToNextBill
           );
         })
         .reduce((s, d) => s + ((d.data().totalRepairCost as number) || 0), 0);

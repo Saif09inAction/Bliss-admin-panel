@@ -488,7 +488,12 @@ export default function OrdersPage() {
               deferToNextBill: Boolean(data.deferToNextBill),
             } satisfies OrderRepair;
           })
-          .filter((r) => isStandaloneRepair(r.orderId) && (r.status === "APPROVED" || !r.status));
+          .filter(
+            (r) =>
+              isStandaloneRepair(r.orderId) &&
+              (r.status === "APPROVED" || !r.status) &&
+              !r.deferToNextBill
+          );
 
         const standaloneRepairTotal = approvedStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
 
