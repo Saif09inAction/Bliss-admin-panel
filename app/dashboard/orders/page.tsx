@@ -810,7 +810,7 @@ export default function OrdersPage() {
         totalDealAmount: calc.afterDeductions,
         pricePerPiece: targetQuantity > 0 ? calc.productsTotal / targetQuantity : 0,
         pricingType: "PER_PIECE",
-        status: calc.kharchaAmount > 0 ? "ASSIGNED" : "COMPLETED",
+        status: "ASSIGNED",
         approvedQuantity: 0,
         createdBy: session?.name || "Admin",
         createdAt,

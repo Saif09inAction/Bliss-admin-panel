@@ -45,8 +45,12 @@ import {
   totalRemainingAmount,
 } from "@/lib/kaariger-hisaab";
 import { deleteKaarigerPayments } from "@/lib/payment-delete";
-import { attachApprovedRepairToLiveBill } from "@/lib/kaariger-repair";
-import { foldStandaloneRepairsIntoLiveBill } from "@/lib/kaariger-repair";
+import {
+  attachApprovedRepairToLiveBill,
+  foldStandaloneRepairsIntoLiveBill,
+  pickLiveKaarigerBill,
+  previousKaarigerBills,
+} from "@/lib/kaariger-repair";
 import { isPendingBillRepair, isRemainingStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -472,12 +476,16 @@ export default function HisaabPage() {
     return map;
   }, [payments]);
 
-  // Once an order is fully paid it moves entirely out of the active view —
-  // its products, deductions, repairs and kharcha are only reachable via
-  // "See previous hisaab". The active view never merges multiple orders
-  // together; each one gets its own separate card.
-  const activeOrders = useMemo(() => orders.filter((o) => o.status !== "COMPLETED"), [orders]);
-  const completedOrders = useMemo(() => orders.filter((o) => o.status === "COMPLETED"), [orders]);
+  // Newest bill stays on the main hisaab. Older bills move to
+  // "See previous hisaab" only after a newer bill is created.
+  const liveOrder = useMemo(() => pickLiveKaarigerBill(orders), [orders]);
+  const activeOrders = useMemo(() => (liveOrder ? [liveOrder] : []), [liveOrder]);
+  const completedOrders = useMemo(() => previousKaarigerBills(orders), [orders]);
+
+  useEffect(() => {
+    if (!liveOrder || liveOrder.status !== "COMPLETED") return;
+    void updateDoc(doc(getDb(), "kaariger_orders", liveOrder.id), { status: "ASSIGNED" });
+  }, [liveOrder?.id, liveOrder?.status]);
 
   const activeTotals = useMemo(() => {
     const weekKharcha = activeOrders.reduce((s, o) => s + Math.max(0, o.kharchaGiven || 0), 0);
@@ -810,8 +818,8 @@ export default function HisaabPage() {
             value={historyOrderId}
             onSelect={setHistoryOrderId}
             options={previousHisaabOptions}
-            placeholder={!kaarigerId ? "Select a kaariger first…" : "Search a completed order…"}
-            emptyText="No completed orders yet"
+            placeholder={!kaarigerId ? "Select a kaariger first…" : "Search a previous bill…"}
+            emptyText="No previous bills yet"
             disabled={!kaarigerId || previousHisaabOptions.length === 0}
           />
         </div>
@@ -835,8 +843,8 @@ export default function HisaabPage() {
             <div className="min-w-0 flex-1">
               <p className="font-display text-lg font-bold">{selectedKaariger?.name}</p>
               <p className="text-sm text-[var(--text-muted)]">
-                {selectedKaariger?.phone} · {activeOrders.length} active
-                {completedOrders.length > 0 ? ` · ${completedOrders.length} completed` : ""}
+                {selectedKaariger?.phone} · live bill
+                {completedOrders.length > 0 ? ` · ${completedOrders.length} previous` : ""}
               </p>
             </div>
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
@@ -1447,7 +1455,7 @@ export default function HisaabPage() {
           {activeOrders.length === 0 ? (
             <div className="surface py-10 text-center text-sm text-[var(--text-muted)]">
               {completedOrders.length > 0
-                ? "No active orders — bill hisaab is settled. Use \u201cSee previous hisaab\u201d above for past orders."
+                ? "No live bill. Previous bills are under \u201cSee previous hisaab\u201d."
                 : totalRemaining > 0
                   ? "No active bills — remaining above is from opening balance on the profile."
                   : surplusCredit > 0
@@ -1486,6 +1494,7 @@ export default function HisaabPage() {
                   <OrderDetailCard
                     key={o.id}
                     order={o}
+                    isLiveBill
                     payments={payments}
                     repairs={repairs}
                     pendingRepairs={idx === 0 ? pendingBillRepairs : []}
@@ -1829,6 +1838,7 @@ function PreviousHisaabCard({
  * never merged together; each gets rendered as its own card. */
 function OrderDetailCard({
   order,
+  isLiveBill = false,
   payments,
   repairs,
   pendingRepairs = [],
@@ -1839,6 +1849,7 @@ function OrderDetailCard({
   onPay,
 }: {
   order: KaarigerOrder;
+  isLiveBill?: boolean;
   payments: KaarigerPayment[];
   repairs: OrderRepair[];
   /** Approved repairs waiting for admin to add to this bill (not deducted yet). */
@@ -1868,7 +1879,7 @@ function OrderDetailCard({
   const box = orderKharchaBalance(order, paid);
   const balance = box;
   const week = orderWeekMeta(order);
-  const isCompleted = order.status === "COMPLETED";
+  const isCompleted = !isLiveBill && order.status === "COMPLETED";
 
   return (
     <div className="surface space-y-4 p-4">
@@ -1876,7 +1887,9 @@ function OrderDetailCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-display text-base font-bold">{week.label}</p>
-            <span className={orderStatusBadge(order.status)}>{order.status.replace(/_/g, " ")}</span>
+            <span className={orderStatusBadge(isLiveBill ? "ASSIGNED" : order.status)}>
+              {isLiveBill ? "LIVE" : order.status.replace(/_/g, " ")}
+            </span>
           </div>
           <p className="mt-0.5 text-xs text-[var(--text-muted)]">
             {formatDate(order.createdAt)}

@@ -89,17 +89,35 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
   });
 }
 
-/** Live (not completed) bill for this kaariger, if any. */
+export function isArchivedBillStatus(status?: string): boolean {
+  return status === "CANCELLED" || status === "REJECTED";
+}
+
+/** Newest bill stays live until a newer bill is created. */
+export function pickLiveKaarigerBill(orders: KaarigerOrder[]): KaarigerOrder | null {
+  return (
+    [...orders]
+      .filter((o) => !isArchivedBillStatus(o.status))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null
+  );
+}
+
+export function previousKaarigerBills(orders: KaarigerOrder[]): KaarigerOrder[] {
+  const live = pickLiveKaarigerBill(orders);
+  return [...orders]
+    .filter((o) => o.id !== live?.id && !isArchivedBillStatus(o.status))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+/** Live bill for this kaariger — always the latest bill, if any. */
 export async function findLiveKaarigerBill(kaarigerId: string): Promise<KaarigerOrder | null> {
   if (!kaarigerId) return null;
   const snap = await getDocs(
     query(collection(getDb(), "kaariger_orders"), where("kaarigerId", "==", kaarigerId))
   );
-  const live = snap.docs
-    .map((d) => parseOrder(d.id, d.data() as Record<string, unknown>))
-    .filter((o) => o.status && o.status !== "COMPLETED")
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return live[0] || null;
+  return pickLiveKaarigerBill(
+    snap.docs.map((d) => parseOrder(d.id, d.data() as Record<string, unknown>))
+  );
 }
 
 /**
@@ -128,9 +146,7 @@ export async function foldStandaloneRepairsIntoLiveBill(opts: {
   orders: KaarigerOrder[];
   repairs: OrderRepair[];
 }): Promise<number> {
-  const live = [...opts.orders]
-    .filter((o) => o.status && o.status !== "COMPLETED")
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+  const live = pickLiveKaarigerBill(opts.orders);
   if (!live) return 0;
 
   const orphans = opts.repairs.filter(

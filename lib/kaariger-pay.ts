@@ -2,6 +2,7 @@ import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "fireb
 import { getDb } from "@/lib/firebase";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
 import { orderKharchaBalance } from "@/lib/kaariger-hisaab";
+import { pickLiveKaarigerBill } from "@/lib/kaariger-repair";
 import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
 
 /** Sentinel orderId for kharcha paid against migration / old remaining balance. */
@@ -115,11 +116,9 @@ export function groupPayments(payments: KaarigerPayment[]): PaymentGroup[] {
 }
 
 function hasActiveWeekKharcha(orders: KaarigerOrder[]): KaarigerOrder | null {
-  const active = orders
-    .filter((o) => o.status !== "COMPLETED" && o.status !== "CANCELLED" && o.status !== "REJECTED")
-    .filter((o) => Math.max(0, o.kharchaGiven || 0) > 0)
-    .sort((a, b) => a.createdAt - b.createdAt);
-  return active.length > 0 ? active[active.length - 1] : null;
+  const live = pickLiveKaarigerBill(orders);
+  if (!live || Math.max(0, live.kharchaGiven || 0) <= 0) return null;
+  return live;
 }
 
 /**
