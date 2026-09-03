@@ -3,6 +3,7 @@ import {
   computeEarnedSalaryForCalendarMonth,
   formatDurationMinutes,
   isWorkingDay,
+  isPaidOffDay,
   resolveShiftSettings,
   type EarnedSalarySummary,
   type OverrideMap,
@@ -110,6 +111,10 @@ function countAttendanceInPeriod(opts: {
 
     if (!isWorkingDay(key, overrides, employeePhone)) {
       holidayDays++;
+      // Admin OFF / Sunday is paid as present for salary.
+      if (isPaidOffDay(key, overrides, employeePhone)) {
+        fullDays++;
+      }
       continue;
     }
 

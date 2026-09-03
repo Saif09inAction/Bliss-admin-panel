@@ -135,6 +135,15 @@ export function isWorkingDay(
   return resolveDayKind(dateStr, overrides, employeePhone) === "WORKING";
 }
 
+/** Sunday / admin holiday — paid as a full present day (no punch needed). */
+export function isPaidOffDay(
+  dateStr: string,
+  overrides: OverrideSource,
+  employeePhone?: string
+): boolean {
+  return resolveDayKind(dateStr, overrides, employeePhone) === "HOLIDAY";
+}
+
 export function overrideAppliesToAll(override: CalendarDayOverride | null): boolean {
   return !override || override.appliesTo === "ALL";
 }
@@ -436,7 +445,7 @@ export type EarnedSalarySummary = {
 
 /**
  * Prorate monthly salary across the join-based pay period (join date → day before next anniversary).
- * Only signed-in working days count as earned.
+ * Working days need a punch or admin credit. Sundays / admin OFF days are paid as present.
  */
 export function computeEarnedSalary(opts: {
   monthlySalary: number;
@@ -489,14 +498,16 @@ export function computeEarnedSalary(opts: {
       const key = cursor;
       cursor = addDaysIso(cursor, 1);
       if (key < periodStart || key > until) continue;
-      if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
+      const paidOff = isPaidOffDay(key, overrides, employeePhone);
       const rec = byDate.get(key);
       const credit = rec?.dayCredit;
       const hasPunch = Boolean(rec?.signInTime);
-      if (!hasPunch && credit !== "FULL" && credit !== "HALF") continue;
 
-      const dayFactor = credit === "HALF" ? 0.5 : 1;
+      // OFF / Sunday → paid present. Working day → need punch or admin credit.
+      if (!paidOff && !hasPunch && credit !== "FULL" && credit !== "HALF") continue;
+
+      const dayFactor = !paidOff && credit === "HALF" ? 0.5 : 1;
       const dayShift = resolveShiftSettings(
         employeeShift,
         settings,
@@ -505,11 +516,11 @@ export function computeEarnedSalary(opts: {
         employeePhone
       );
       const late =
-        credit === "FULL" || credit === "HALF"
+        paidOff || credit === "FULL" || credit === "HALF"
           ? 0
           : computeLateMinutes(rec!.signInTime, dayShift.dailySignInTime);
       const early =
-        credit === "FULL" || credit === "HALF"
+        paidOff || credit === "FULL" || credit === "HALF"
           ? 0
           : computeEarlyLeaveMinutes(rec!.signOutTime, dayShift.dailySignOutTime);
       const lost = late + early;
@@ -586,8 +597,9 @@ export function computeEarnedSalary(opts: {
 }
 
 /**
- * Earned salary for a calendar month — counts every working day in that month,
- * using the join-based pay period that contains each day (fixes 0/30 when join day is mid-month).
+ * Earned salary for a calendar month — counts every day in that month that
+ * belongs to a join-based pay period. Working days need punch/credit;
+ * Sundays / admin OFF days are paid as present.
  */
 export function computeEarnedSalaryForCalendarMonth(opts: {
   monthlySalary: number;
@@ -632,13 +644,13 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
   let grossEarned = 0;
   let totalDeduction = 0;
   let fullMonthGross = 0;
+  let paidDaySlots = 0;
 
   if (until >= monthStart && monthlySalary > 0) {
     let cursor = monthStart;
     while (cursor <= monthEnd) {
       const key = cursor;
       cursor = addDaysIso(cursor, 1);
-      if (!isWorkingDay(key, overrides, employeePhone)) continue;
 
       const dayPeriod = payPeriodContainingDate(joinDate, key);
       if (!dayPeriod) continue;
@@ -655,22 +667,25 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
       const dayShiftMins = shiftMinutes(dayShift);
       const perMinuteRate = monthlySalary / (periodDays * dayShiftMins);
 
+      // Working + paid OFF days both contribute to a perfect-month total.
       fullMonthGross += perDayRate;
+      paidDaySlots++;
 
       if (key > until) continue;
 
+      const paidOff = isPaidOffDay(key, overrides, employeePhone);
       const rec = byDate.get(key);
       const credit = rec?.dayCredit;
       const hasPunch = Boolean(rec?.signInTime);
-      if (!hasPunch && credit !== "FULL" && credit !== "HALF") continue;
+      if (!paidOff && !hasPunch && credit !== "FULL" && credit !== "HALF") continue;
 
-      const dayFactor = credit === "HALF" ? 0.5 : 1;
+      const dayFactor = !paidOff && credit === "HALF" ? 0.5 : 1;
       const late =
-        credit === "FULL" || credit === "HALF"
+        paidOff || credit === "FULL" || credit === "HALF"
           ? 0
           : computeLateMinutes(rec!.signInTime, dayShift.dailySignInTime);
       const early =
-        credit === "FULL" || credit === "HALF"
+        paidOff || credit === "FULL" || credit === "HALF"
           ? 0
           : computeEarlyLeaveMinutes(rec!.signOutTime, dayShift.dailySignOutTime);
       const lateDeduction = Math.round(late * perMinuteRate * 100) / 100;
@@ -709,7 +724,8 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
   }
 
   const earnedNet = Math.max(0, Math.round((grossEarned - totalDeduction) * 100) / 100);
-  const fullMonthNet = Math.round(fullMonthGross * 100) / 100;
+  const avgPerDay =
+    paidDaySlots > 0 ? fullMonthGross / paidDaySlots : monthlySalary / daysInPeriod;
 
   return {
     periodStart: monthStart,
@@ -718,19 +734,9 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
     calendarDaysInMonth: daysInPeriod,
     workingDaysInMonth,
     shiftMinutes: shiftMins,
-    perDayRate: Math.round(
-      (workingDaysInMonth > 0 ? fullMonthGross / workingDaysInMonth : monthlySalary / daysInPeriod) *
-        100
-    ) / 100,
-    perHourRate: Math.round(
-      ((workingDaysInMonth > 0 ? fullMonthGross / workingDaysInMonth : monthlySalary / daysInPeriod) /
-        shiftMins) *
-        60 *
-        100
-    ) / 100,
-    perMinuteRate:
-      (workingDaysInMonth > 0 ? fullMonthGross / workingDaysInMonth : monthlySalary / daysInPeriod) /
-      shiftMins,
+    perDayRate: Math.round(avgPerDay * 100) / 100,
+    perHourRate: Math.round((avgPerDay / shiftMins) * 60 * 100) / 100,
+    perMinuteRate: avgPerDay / shiftMins,
     daysWorked: days.length,
     grossEarned: Math.round(grossEarned * 100) / 100,
     totalLateMinutes: totalLate,
