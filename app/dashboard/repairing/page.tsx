@@ -5,13 +5,10 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
-  query,
   setDoc,
   updateDoc,
-  where,
 } from "firebase/firestore";
 import { Check, Pencil, Plus, Trash2, Wrench, X } from "lucide-react";
 import { getDb } from "@/lib/firebase";
@@ -23,6 +20,7 @@ import type {
   RepairStatus,
 } from "@/lib/types";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
+import { attachApprovedRepairToLiveBill, syncOrderRepairAndRemaining } from "@/lib/kaariger-repair";
 import { formatRupee, uuid, formatClockTime, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
@@ -86,40 +84,8 @@ function parseRepair(d: { id: string; data: () => Record<string, unknown> }): Or
   };
 }
 
-/** Recalculate order.repairDeductionTotal from APPROVED repairs only. */
 async function syncOrderRepairTotal(orderId: string) {
-  if (!orderId || isStandaloneRepair(orderId)) return;
-  const db = getDb();
-  const [orderSnap, repairSnap] = await Promise.all([
-    getDoc(doc(db, "kaariger_orders", orderId)),
-    getDocs(query(collection(db, "order_repairs"), where("orderId", "==", orderId))),
-  ]);
-  if (!orderSnap.exists()) return;
-
-  const orderData = orderSnap.data();
-  const original =
-    (orderData.originalDealAmount as number) ?? (orderData.totalDealAmount as number) ?? 0;
-
-  const approved = repairSnap.docs.filter((d) => {
-    const s = d.data().status as string | undefined;
-    return !s || s === "APPROVED";
-  });
-  const totalDeduction = approved.reduce(
-    (sum, d) => sum + ((d.data().totalRepairCost as number) || 0),
-    0
-  );
-  const dealAfter = Math.max(0, original - totalDeduction);
-
-  await updateDoc(doc(db, "kaariger_orders", orderId), {
-    originalDealAmount: original,
-    repairDeductionTotal: totalDeduction,
-  });
-
-  await Promise.all(
-    approved.map((d) =>
-      updateDoc(d.ref, { dealAfterThisRepair: dealAfter, originalDealAmount: original })
-    )
-  );
+  await syncOrderRepairAndRemaining(orderId);
 }
 
 type FilterTab = "PENDING" | "APPROVED" | "REJECTED" | "ALL";
@@ -288,11 +254,22 @@ export default function RepairingPage() {
           : {}),
       });
 
+      let attachedLabel = "";
+      if (status === "APPROVED") {
+        const { attachedToOrderId } = await attachApprovedRepairToLiveBill({
+          repairId: id,
+          kaarigerId,
+        });
+        attachedLabel = attachedToOrderId
+          ? "included in the live bill"
+          : "will go on the next bill";
+      }
+
       setShowAdd(false);
       setTab(status === "APPROVED" ? "APPROVED" : "PENDING");
       setMsg(
         status === "APPROVED"
-          ? `Repairing added — ${money(faultyTotal)} deducted from ${kaarigerName}'s hisaab.`
+          ? `Repairing added — ${money(faultyTotal)} ${attachedLabel}.`
           : `Repairing saved as pending for ${kaarigerName}. Set ₹/pc on approve if needed.`
       );
     } catch (err) {
@@ -418,7 +395,9 @@ export default function RepairingPage() {
     }
     const faultyTotal = Math.round(qty * price * 100) / 100;
     const standalone = isStandaloneRepair(r.orderId);
-    const target = standalone ? "hisaab remaining" : "bill";
+    const target = standalone
+      ? "the live bill if one is open, otherwise the next bill"
+      : "this bill";
     if (
       !confirm(
         `Approve repairing for "${r.productName}" (−${money(faultyTotal)})? This deducts from the kaariger's ${target}.`
@@ -436,7 +415,12 @@ export default function RepairingPage() {
         reviewedBy: session?.name || "Admin",
         reviewedAt: Date.now(),
       });
-      if (!standalone) {
+      if (standalone) {
+        await attachApprovedRepairToLiveBill({
+          repairId: r.id,
+          kaarigerId: r.kaarigerId,
+        });
+      } else {
         await syncOrderRepairTotal(r.orderId);
       }
       setApproveRepairDoc(null);
