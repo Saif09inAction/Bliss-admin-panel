@@ -374,7 +374,6 @@ export default function RepairingPage() {
   }
 
   function startApprove(r: OrderRepair) {
-    setApproveIncludeInLiveBill(true);
     setMsg("");
     // Standalone approvals use the modal so admin can choose live vs next bill.
     if (isStandaloneRepair(r.orderId) || r.faultyPricePerPiece <= 0 || r.totalRepairCost <= 0) {
