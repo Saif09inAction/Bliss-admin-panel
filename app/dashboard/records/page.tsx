@@ -457,7 +457,7 @@ export default function RecordsPage() {
       downloadCsv(
         "kaariger_orders.csv",
         ["Week", "Product", "Kaariger", "Status", "ADD (Deal)"],
-        orders.map((o) => [
+        filteredOrders.map((o) => [
           orderWeekMeta(o).label,
           orderProductsLabel(o),
           o.kaarigerName,
@@ -469,7 +469,7 @@ export default function RecordsPage() {
       downloadCsv(
         "pickups.csv",
         ["Company", "Delivery Partner", "Claris Qty", "Bliss Qty", "Total", "Staff", "Date", "Time"],
-        pickups.map((p) => [
+        filteredPickups.map((p) => [
           p.partner,
           p.deliveryPartner,
           String(p.clarisQuantity || 0),
@@ -484,7 +484,7 @@ export default function RecordsPage() {
       downloadCsv(
         "returns.csv",
         ["Type", "Company", "Delivery Partner", "Claris Qty", "Bliss Qty", "Total", "Staff", "Date", "Time", "Notes"],
-        returns.map((r) => [
+        filteredReturns.map((r) => [
           r.returnType,
           r.partner,
           r.deliveryPartner,

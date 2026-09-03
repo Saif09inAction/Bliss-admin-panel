@@ -270,8 +270,7 @@ export default function RepairingPage() {
     setSaving(true);
     setMsg("");
     try {
-      const deferToNextBill =
-        status === "APPROVED" && addHasLiveBill && !addForm.includeInLiveBill;
+      const deferToNextBill = status === "APPROVED";
       await setDoc(doc(getDb(), "order_repairs", id), {
         id,
         orderId,
@@ -434,7 +433,6 @@ export default function RepairingPage() {
   async function confirmAndApprove(
     r: OrderRepair,
     pricePerPiece: number,
-    includeInLiveBill = approveIncludeInLiveBill
   ) {
     const qty = r.faultyQuantity || 0;
     const price = Math.max(0, pricePerPiece);
@@ -448,15 +446,10 @@ export default function RepairingPage() {
     }
     const faultyTotal = Math.round(qty * price * 100) / 100;
     const standalone = isStandaloneRepair(r.orderId);
-    const live = standalone ? await findLiveKaarigerBill(r.kaarigerId) : null;
-    const deferToNextBill = Boolean(standalone && live && !includeInLiveBill);
+    const deferToNextBill = true;
     const target = !standalone
       ? "this bill"
-      : deferToNextBill
-        ? "Hisaab pending list (not deducted until you add it to the bill)"
-        : live
-          ? "the live bill"
-          : "the next bill";
+      : "Hisaab pending list (not deducted until you add it to the bill)";
     if (
       !confirm(
         deferToNextBill
@@ -994,23 +987,10 @@ export default function RepairingPage() {
                 Apply to hisaab now (approve)
               </label>
 
-              {addForm.applyNow && addHasLiveBill && (
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={addForm.includeInLiveBill}
-                    onChange={(e) =>
-                      setAddForm({ ...addForm, includeInLiveBill: e.target.checked })
-                    }
-                  />
-                  <span>
-                    Include in current live bill
-                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
-                      Uncheck to approve without deducting — add it to the bill later from Hisaab.
-                    </span>
-                  </span>
-                </label>
+              {addForm.applyNow && (
+                <p className="text-xs text-[var(--text-muted)]">
+                  Repairing will be approved but not deducted yet — add it to a bill later from Hisaab.
+                </p>
               )}
 
               {msg && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{msg}</p>}
@@ -1159,22 +1139,9 @@ export default function RepairingPage() {
                   {money((approveRepairDoc.faultyQuantity || 0) * (Number(approvePrice) || 0))}
                 </p>
               )}
-              {approveHasLiveBill && isStandaloneRepair(approveRepairDoc.orderId) && (
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={approveIncludeInLiveBill}
-                    onChange={(e) => setApproveIncludeInLiveBill(e.target.checked)}
-                  />
-                  <span>
-                    Include in current live bill
-                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
-                      Uncheck to approve without deducting — add it to the bill later from Hisaab.
-                    </span>
-                  </span>
-                </label>
-              )}
+              <p className="text-xs text-[var(--text-muted)]">
+                Repairing will be approved but not deducted yet — add it to a bill later from Hisaab.
+              </p>
               <div className="flex gap-2">
                 <button
                   type="button"
