@@ -20,7 +20,7 @@ import type {
   RepairStatus,
 } from "@/lib/types";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
-import { attachApprovedRepairToLiveBill, findLiveKaarigerBill, syncOrderRepairAndRemaining } from "@/lib/kaariger-repair";
+import { syncOrderRepairAndRemaining } from "@/lib/kaariger-repair";
 import { formatRupee, uuid, formatClockTime, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
@@ -121,16 +121,12 @@ export default function RepairingPage() {
     faultyPricePerPiece: "",
     notes: "",
     applyNow: true,
-    includeInLiveBill: true,
   });
-  const [addHasLiveBill, setAddHasLiveBill] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [approveRepairDoc, setApproveRepairDoc] = useState<OrderRepair | null>(null);
   const [approvePrice, setApprovePrice] = useState("");
-  const [approveIncludeInLiveBill, setApproveIncludeInLiveBill] = useState(true);
-  const [approveHasLiveBill, setApproveHasLiveBill] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
@@ -178,33 +174,6 @@ export default function RepairingPage() {
     setAddProductId("");
   }, [addKaarigerId]);
 
-  useEffect(() => {
-    if (!addKaarigerId) {
-      setAddHasLiveBill(false);
-      return;
-    }
-    let cancelled = false;
-    findLiveKaarigerBill(addKaarigerId).then((live) => {
-      if (!cancelled) setAddHasLiveBill(Boolean(live));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [addKaarigerId]);
-
-  useEffect(() => {
-    if (!approveRepairDoc?.kaarigerId) {
-      setApproveHasLiveBill(false);
-      return;
-    }
-    let cancelled = false;
-    findLiveKaarigerBill(approveRepairDoc.kaarigerId).then((live) => {
-      if (!cancelled) setApproveHasLiveBill(Boolean(live));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [approveRepairDoc?.kaarigerId]);
 
   const productOptions: ProductOption[] = useMemo(
     () =>
@@ -228,7 +197,6 @@ export default function RepairingPage() {
       faultyPricePerPiece: "",
       notes: "",
       applyNow: true,
-      includeInLiveBill: true,
     });
   }
 
@@ -294,20 +262,9 @@ export default function RepairingPage() {
           : {}),
       });
 
-      let attachedLabel = "";
-      if (status === "APPROVED") {
-        if (deferToNextBill) {
-          attachedLabel = "approved — add to bill from Hisaab when ready (not deducted yet)";
-        } else {
-          const { attachedToOrderId } = await attachApprovedRepairToLiveBill({
-            repairId: id,
-            kaarigerId,
-          });
-          attachedLabel = attachedToOrderId
-            ? "included in the live bill"
-            : "will go on the next bill";
-        }
-      }
+      const attachedLabel = status === "APPROVED"
+        ? "approved — add to bill from Hisaab when ready (not deducted yet)"
+        : "";
 
       setShowAdd(false);
       setTab(status === "APPROVED" ? "APPROVED" : "PENDING");
@@ -1101,8 +1058,7 @@ export default function RepairingPage() {
                 e.preventDefault();
                 void confirmAndApprove(
                   approveRepairDoc,
-                  Number(approvePrice) || 0,
-                  approveIncludeInLiveBill
+                  Number(approvePrice) || 0
                 );
               }}
             >
