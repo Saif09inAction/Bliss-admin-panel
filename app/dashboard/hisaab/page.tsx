@@ -1733,9 +1733,21 @@ function PreviousHisaabCard({
                 value={`−${money(it.lineTotal)}`}
               />
             ))}
-            {repairTotal > 0 && (
-              <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
-            )}
+            {orderRepairs.length > 0
+              ? orderRepairs.map((r) => (
+                  <Row
+                    key={r.id}
+                    label={
+                      r.faultyQuantity > 0
+                        ? `Less: Repairing - ${r.productName || "Repairing"} (${r.faultyQuantity}×₹${r.faultyPricePerPiece})`
+                        : `Less: Repairing - ${r.productName || "Repairing"}`
+                    }
+                    value={`−${money(r.totalRepairCost)}`}
+                  />
+                ))
+              : repairTotal > 0 && (
+                  <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
+                )}
             <div className="my-1 border-t border-[var(--border)]" />
             <Row label="ADD" value={money(addBalance)} bold />
             {weekKharcha > 0 && (
