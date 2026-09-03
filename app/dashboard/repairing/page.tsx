@@ -470,13 +470,7 @@ export default function RepairingPage() {
         reviewedAt: Date.now(),
         deferToNextBill,
       });
-      if (standalone && !deferToNextBill) {
-        await attachApprovedRepairToLiveBill({
-          repairId: r.id,
-          kaarigerId: r.kaarigerId,
-          liveOrder: live,
-        });
-      } else if (!standalone) {
+      if (!standalone) {
         await syncOrderRepairTotal(r.orderId);
       }
       setApproveRepairDoc(null);
