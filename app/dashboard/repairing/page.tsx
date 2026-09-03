@@ -427,7 +427,7 @@ export default function RepairingPage() {
       );
       return;
     }
-    void confirmAndApprove(r, r.faultyPricePerPiece, true);
+    void confirmAndApprove(r, r.faultyPricePerPiece);
   }
 
   async function confirmAndApprove(
