@@ -47,6 +47,7 @@ import {
 import { deleteKaarigerPayments } from "@/lib/payment-delete";
 import {
   attachApprovedRepairToLiveBill,
+  detachRepairFromBill,
   foldStandaloneRepairsIntoLiveBill,
   pickLiveKaarigerBill,
   previousKaarigerBills,
@@ -122,6 +123,7 @@ export default function HisaabPage() {
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [historyOrderId, setHistoryOrderId] = useState("");
   const [attachingRepairId, setAttachingRepairId] = useState<string | null>(null);
+  const [detachingRepairId, setDetachingRepairId] = useState<string | null>(null);
 
   async function attachPendingRepairToBill(repairId: string, orderId: string) {
     if (!kaarigerId) return;
@@ -145,6 +147,26 @@ export default function HisaabPage() {
       alert(err instanceof Error ? err.message : "Failed to add repairing to bill.");
     } finally {
       setAttachingRepairId(null);
+    }
+  }
+
+  async function removeRepairFromBill(repairId: string, orderId: string) {
+    if (!kaarigerId) return;
+    if (
+      !confirm(
+        "Remove this repairing from the bill? Deduction will be undone and it will show again under pending repairing."
+      )
+    ) {
+      return;
+    }
+    setDetachingRepairId(repairId);
+    try {
+      await detachRepairFromBill({ repairId, orderId });
+      await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to remove repairing from bill.");
+    } finally {
+      setDetachingRepairId(null);
     }
   }
 
@@ -1499,9 +1521,11 @@ export default function HisaabPage() {
                     repairs={repairs}
                     pendingRepairs={idx === 0 ? pendingBillRepairs : []}
                     attachingRepairId={attachingRepairId}
+                    detachingRepairId={detachingRepairId}
                     onAttachPendingRepair={(repairId) =>
                       void attachPendingRepairToBill(repairId, o.id)
                     }
+                    onDetachRepair={(repairId) => void removeRepairFromBill(repairId, o.id)}
                     openingBalance={openingBal}
                     oldKharcha={oldKharchaBal}
                     onPay={() => {
@@ -1843,7 +1867,9 @@ function OrderDetailCard({
   repairs,
   pendingRepairs = [],
   attachingRepairId = null,
+  detachingRepairId = null,
   onAttachPendingRepair,
+  onDetachRepair,
   openingBalance = 0,
   oldKharcha = 0,
   onPay,
@@ -1855,7 +1881,9 @@ function OrderDetailCard({
   /** Approved repairs waiting for admin to add to this bill (not deducted yet). */
   pendingRepairs?: OrderRepair[];
   attachingRepairId?: string | null;
+  detachingRepairId?: string | null;
   onAttachPendingRepair?: (repairId: string) => void;
+  onDetachRepair?: (repairId: string) => void;
   /** Running closing / opening from Saturday bills. */
   openingBalance?: number;
   /** Unpaid weekly kharcha carried from previous weeks. */
@@ -2045,7 +2073,19 @@ function OrderDetailCard({
                       {r.notes ? ` · ${r.notes}` : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 font-bold text-danger">−{money(r.totalRepairCost)}</span>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <span className="font-bold text-danger">−{money(r.totalRepairCost)}</span>
+                    {isLiveBill && onDetachRepair && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm !px-2 !py-1 text-xs text-danger"
+                        disabled={detachingRepairId === r.id}
+                        onClick={() => onDetachRepair(r.id)}
+                      >
+                        {detachingRepairId === r.id ? "Removing…" : "Remove"}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {/* Items breakdown */}
                 {r.items && r.items.length > 0 && (

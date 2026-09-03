@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
-import { isStandaloneRepair } from "@/lib/types";
+import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
 import type { KaarigerOrder, OrderRepair } from "@/lib/types";
 import { orderMaal, orderMaterialDeductions, orderWeekKharcha } from "@/lib/kaariger-hisaab";
 
@@ -138,6 +138,23 @@ export async function attachApprovedRepairToLiveBill(opts: {
   });
   await syncOrderRepairAndRemaining(live.id);
   return { attachedToOrderId: live.id };
+}
+
+/**
+ * Remove an approved repairing from a bill (undo accidental add).
+ * Restores ADD / Total Remaining and puts the repair back on the pending list.
+ */
+export async function detachRepairFromBill(opts: {
+  repairId: string;
+  orderId: string;
+}): Promise<void> {
+  if (!opts.repairId || !opts.orderId || isStandaloneRepair(opts.orderId)) return;
+
+  await updateDoc(doc(getDb(), "order_repairs", opts.repairId), {
+    orderId: STANDALONE_REPAIR_ORDER_ID,
+    deferToNextBill: true,
+  });
+  await syncOrderRepairAndRemaining(opts.orderId);
 }
 
 /** Fold leftover standalone approved repairs into the current live bill. */
