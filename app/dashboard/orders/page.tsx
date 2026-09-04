@@ -832,7 +832,7 @@ export default function OrdersPage() {
       // Remaining += ADD − week kharcha. Carry only adjusts the Kharcha box start.
       const openingAtCreation = openingBase;
       const addBalance = orderAddBalance(order);
-      const closingAtCreation = Math.max(0, openingAtCreation + addBalance - calc.kharchaAmount);
+      const closingAtCreation = openingAtCreation + addBalance - calc.kharchaAmount;
       order.openingAtCreation = openingAtCreation;
       order.addBalance = addBalance;
       order.closingAtCreation = closingAtCreation;
@@ -882,7 +882,7 @@ export default function OrdersPage() {
         );
       }
       await updateDoc(doc(db, "employees", kaariger.phone), {
-        openingBalance: Math.max(0, closingAtCreation),
+        openingBalance: closingAtCreation,
         oldKharcha: 0,
         kharchaCarry: 0,
       });

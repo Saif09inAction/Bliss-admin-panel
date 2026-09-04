@@ -59,10 +59,14 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
       ? order.addBalance
       : maal - materials - Math.max(0, order.repairDeductionTotal || 0);
   const newAdd = maal - materials - newRepairTotal;
-  const deltaAdd = Math.round((newAdd - oldAdd) * 100) / 100;
   const weekKharcha = orderWeekKharcha(order);
-  const openingAtCreation = Math.max(0, order.openingAtCreation ?? 0);
-  const newClosing = Math.max(0, openingAtCreation + newAdd - weekKharcha);
+  const openingAtCreation = order.openingAtCreation ?? 0;
+  const newClosing = Math.round((openingAtCreation + newAdd - weekKharcha) * 100) / 100;
+  const oldClosing =
+    order.closingAtCreation != null && Number.isFinite(order.closingAtCreation)
+      ? order.closingAtCreation
+      : Math.round((openingAtCreation + oldAdd - weekKharcha) * 100) / 100;
+  const deltaClosing = Math.round((newClosing - oldClosing) * 100) / 100;
 
   await updateDoc(doc(db, "kaariger_orders", orderId), {
     originalDealAmount: order.originalDealAmount ?? order.totalDealAmount,
@@ -80,12 +84,12 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
     )
   );
 
-  if (deltaAdd === 0 || !order.kaarigerId) return;
+  if (deltaClosing === 0 || !order.kaarigerId) return;
   const empSnap = await getDoc(doc(db, "employees", order.kaarigerId));
   if (!empSnap.exists()) return;
-  const opening = Math.max(0, (empSnap.data().openingBalance as number) || 0);
+  const opening = (empSnap.data().openingBalance as number) || 0;
   await updateDoc(doc(db, "employees", order.kaarigerId), {
-    openingBalance: Math.max(0, Math.round((opening + deltaAdd) * 100) / 100),
+    openingBalance: Math.round((opening + deltaClosing) * 100) / 100,
   });
 }
 

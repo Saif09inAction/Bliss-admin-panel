@@ -74,7 +74,7 @@ export function orderAddBalance(order: KaarigerOrder): number {
 
 /** Closing snapshot before storing: opening + ADD − week kharcha given. */
 export function orderClosingAfterKharcha(openingBalance: number, order: KaarigerOrder): number {
-  return Math.max(0, openingBalance) + orderAddBalance(order) - orderWeekKharcha(order);
+  return (openingBalance || 0) + orderAddBalance(order) - orderWeekKharcha(order);
 }
 
 /**
@@ -82,6 +82,7 @@ export function orderClosingAfterKharcha(openingBalance: number, order: Kaariger
  *   stored openingBalance (already net of week kharcha at create)
  *   − credit − standalone repairs
  * Pay does not change this. Unpaid week kharcha is NOT added back.
+ * Can be negative when week kharcha exceeds ADD.
  */
 export function totalRemainingAmount(opts: {
   openingBalance: number;
@@ -90,11 +91,10 @@ export function totalRemainingAmount(opts: {
   creditBalance?: number;
   standaloneRepairTotal?: number;
 }): number {
-  return Math.max(
-    0,
-    Math.max(0, opts.openingBalance) -
-      Math.max(0, opts.creditBalance || 0) -
-      Math.max(0, opts.standaloneRepairTotal || 0)
+  return (
+    (opts.openingBalance || 0) -
+    Math.max(0, opts.creditBalance || 0) -
+    Math.max(0, opts.standaloneRepairTotal || 0)
   );
 }
 
@@ -274,10 +274,8 @@ export function buildHisaabLedger(opts: {
   // Legacy folds that were written into openingBalance under the old model.
   const foldTotal = orders.reduce((s, o) => s + Math.max(0, o.kharchaCarriedForward || 0), 0);
 
-  const startOpening = Math.max(
-    0,
-    Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
-  );
+  const startOpening =
+    (opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal;
 
   const startAt =
     openingPays[0] != null
@@ -504,7 +502,7 @@ export function buildHisaabLedger(opts: {
   let kharchaBox = 0;
   const lines: HisaabLedgerLine[] = [];
   for (const e of events) {
-    remaining = Math.max(0, remaining + e.deltaRemaining);
+    remaining = remaining + e.deltaRemaining;
     kharchaBox = kharchaBox + e.deltaKharcha;
     lines.push({
       ...e,
@@ -533,9 +531,8 @@ export function grossOpeningBeforePays(opts: {
     (s, o) => s + Math.max(0, o.kharchaCarriedForward || 0),
     0
   );
-  return Math.max(
-    0,
-    Math.max(0, opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
+  return (
+    (opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
   );
 }
 
@@ -558,8 +555,5 @@ export function storedOpeningFromGross(opts: {
     (s, o) => s + Math.max(0, o.kharchaCarriedForward || 0),
     0
   );
-  return Math.max(
-    0,
-    Math.max(0, opts.grossOpening) - openingPaidTotal + billNetTotal + foldTotal
-  );
+  return opts.grossOpening - openingPaidTotal + billNetTotal + foldTotal;
 }

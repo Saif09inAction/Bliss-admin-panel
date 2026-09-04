@@ -51,6 +51,7 @@ import {
   foldStandaloneRepairsIntoLiveBill,
   pickLiveKaarigerBill,
   previousKaarigerBills,
+  syncOrderRepairAndRemaining,
 } from "@/lib/kaariger-repair";
 import { isPendingBillRepair, isRemainingStandaloneRepair } from "@/lib/types";
 import type {
@@ -389,6 +390,53 @@ export default function HisaabPage() {
           })
           .sort((a, b) => b.createdAt - a.createdAt);
         loadedRepairs = reloadedRepairs;
+        await loadKaarigers();
+      }
+
+      // Heal floored closing (ADD − kharcha was clamped to 0) so Remaining can go negative.
+      const liveBill = pickLiveKaarigerBill(loadedOrders);
+      if (liveBill) {
+        await syncOrderRepairAndRemaining(liveBill.id);
+        const orderSnapHeal = await getDocs(
+          query(collection(db, "kaariger_orders"), where("kaarigerId", "==", id))
+        );
+        loadedOrders = orderSnapHeal.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: (data.id as string) || d.id,
+            kaarigerId: (data.kaarigerId as string) || "",
+            kaarigerName: (data.kaarigerName as string) || "",
+            productName: (data.productName as string) || "",
+            targetQuantity: (data.targetQuantity as number) || 0,
+            color: (data.color as string) || "",
+            rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
+            totalDealAmount: (data.totalDealAmount as number) || 0,
+            pricePerPiece: data.pricePerPiece as number | undefined,
+            pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+            status:
+              (data.status as string) === "APPROVED"
+                ? "COMPLETED"
+                : ((data.status as string) || "ASSIGNED"),
+            approvedQuantity: (data.approvedQuantity as number) || 0,
+            createdBy: (data.createdBy as string) || "",
+            createdAt: (data.createdAt as number) || 0,
+            notes: data.notes as string | undefined,
+            products: data.products as OrderProductLine[] | undefined,
+            productsTotal: data.productsTotal as number | undefined,
+            materialDeductions: data.materialDeductions as KaarigerOrder["materialDeductions"],
+            materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+            originalDealAmount: data.originalDealAmount as number | undefined,
+            repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+            kharchaGiven: (data.kharchaGiven as number) || 0,
+            kharchaCarryIn: (data.kharchaCarryIn as number) || 0,
+            kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
+            weekLabel: data.weekLabel as string | undefined,
+            weekKey: data.weekKey as string | undefined,
+            addBalance: data.addBalance as number | undefined,
+            openingAtCreation: data.openingAtCreation as number | undefined,
+            closingAtCreation: data.closingAtCreation as number | undefined,
+          } satisfies KaarigerOrder;
+        }).sort((a, b) => b.createdAt - a.createdAt);
         await loadKaarigers();
       }
 
@@ -1720,11 +1768,8 @@ function PreviousHisaabCard({
   const addBalance =
     order.addBalance != null ? order.addBalance : productsTotal - deductionsTotal - repairTotal;
   const opening =
-    order.openingAtCreation != null ? Math.max(0, order.openingAtCreation) : 0;
-  const closing =
-    order.closingAtCreation != null
-      ? order.closingAtCreation
-      : Math.max(0, opening + addBalance - weekKharcha);
+    order.openingAtCreation != null ? order.openingAtCreation : 0;
+  const closing = opening + addBalance - weekKharcha;
   const paidCash = orderPayments.reduce((s, p) => s + p.amount, 0);
   const priorOverpay = Math.max(0, carryIn);
   const paid = paidCash + priorOverpay;
@@ -2259,17 +2304,14 @@ function GrandTotalBox({
       : productsTotal - deductionsTotal - repairTotal;
   const opening =
     order.openingAtCreation != null
-      ? Math.max(0, order.openingAtCreation)
-      : Math.max(0, (openingBalance || 0) - addBalance + weekKharcha);
-  const closing =
-    order.closingAtCreation != null
-      ? Math.max(0, order.closingAtCreation)
-      : Math.max(0, opening + addBalance - weekKharcha);
+      ? order.openingAtCreation
+      : (openingBalance || 0) - addBalance + weekKharcha;
+  const closingShown = opening + addBalance - weekKharcha;
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   const box = orderKharchaBalance(order, paid);
-  /** Remaining after this bill create (Pay does not change it). */
-  const totalRemainingHere = Math.max(0, closing + old);
+  /** Remaining after this bill create (Pay does not change it). Can be negative. */
+  const totalRemainingHere = closingShown + old;
   const transferLines = [...payments].sort((a, b) =>
     `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
   );
@@ -2310,7 +2352,7 @@ function GrandTotalBox({
         {weekKharcha > 0 && (
           <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
         )}
-        <Row label="Outstanding after create" value={money(closing)} bold accent="amber" />
+        <Row label="Outstanding after create" value={money(closingShown)} bold accent="amber" />
  
 
         <div className="my-1.5 border-t border-jade/20" />
