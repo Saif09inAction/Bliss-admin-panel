@@ -1,5 +1,6 @@
 import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
 import { isStandaloneRepair } from "@/lib/types";
+import { formatDisplayDate } from "@/lib/csv";
 
 /**
  * Simple Remaining + Kharcha:
@@ -346,11 +347,14 @@ export function buildHisaabLedger(opts: {
     const t = order.createdAt || startAt + 100 + i * 10;
 
     if (add !== 0) {
+      const createdLabel = order.createdAt ? formatDisplayDate(order.createdAt) : "";
+      const product = (order.productName || "").trim();
+      const subtitle = [createdLabel, product].filter(Boolean).join(" · ") || undefined;
       events.push({
         id: `add-${order.id}`,
         kind: "bill_add",
         title: `Bill · ${week.label}`,
-        subtitle: order.productName || undefined,
+        subtitle,
         deltaRemaining: add,
         deltaKharcha: 0,
         at: t,
