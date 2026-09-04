@@ -406,7 +406,7 @@ export default function OrdersPage() {
     () => kaarigers.find((k) => k.phone === kaarigerId),
     [kaarigers, kaarigerId]
   );
-  const currentOpening = Math.max(0, selectedKaariger?.openingBalance || 0);
+  const currentOpening = selectedKaariger?.openingBalance || 0;
   const currentOldKharcha = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const currentCredit = Math.max(0, selectedKaariger?.creditBalance || 0);
 
@@ -497,7 +497,7 @@ export default function OrdersPage() {
 
         const standaloneRepairTotal = approvedStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
 
-        const openingBalance = Math.max(0, selectedKaariger.openingBalance || 0);
+        const openingBalance = selectedKaariger.openingBalance || 0;
         const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
         const creditBalance = Math.max(0, selectedKaariger.creditBalance || 0);
         const total = totalRemainingAmount({

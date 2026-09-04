@@ -141,7 +141,7 @@ export default function DashboardPage() {
         const data = d.data();
         const phone = (data.phone as string) || d.id;
         const opening =
-          Math.max(0, (data.openingBalance as number) || 0) +
+          ((data.openingBalance as number) || 0) +
           Math.max(0, (data.oldKharcha as number) || 0);
         kaarigerRemainingDue += totalRemainingAmount({
           openingBalance: opening,

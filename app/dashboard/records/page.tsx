@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import {
   ArrowDownLeft,
   ClipboardList,
@@ -906,8 +906,24 @@ export default function RecordsPage() {
   }
 
 
-  async function cascadeDeleteOrder(orderId: string) {
+  async function cascadeDeleteOrder(order: KaarigerOrder) {
     const db = getDb();
+    const orderId = order.id;
+
+    // If this is the newest bill, roll openingBalance back to before it was created.
+    let shouldRestoreOpening = false;
+    if (order.kaarigerId) {
+      const orderSnap = await getDocs(
+        query(collection(db, "kaariger_orders"), where("kaarigerId", "==", order.kaarigerId))
+      );
+      const newerExists = orderSnap.docs.some((d) => {
+        if (d.id === orderId) return false;
+        const createdAt = (d.data().createdAt as number) || 0;
+        return createdAt > (order.createdAt || 0);
+      });
+      shouldRestoreOpening = !newerExists;
+    }
+
     await deleteDoc(doc(db, "kaariger_orders", orderId));
     try {
       const [paySnap, repairSnap, approvalSnap] = await Promise.all([
@@ -915,19 +931,35 @@ export default function RecordsPage() {
         getDocs(query(collection(db, "order_repairs"), where("orderId", "==", orderId))),
         getDocs(query(collection(db, "order_approval_records"), where("orderId", "==", orderId))),
       ]);
+      // Linked repairs go back to pending (not deleted) so admin can add them later.
       await Promise.all([
         ...paySnap.docs.map((d) => deleteDoc(d.ref)),
-        ...repairSnap.docs.map((d) => deleteDoc(d.ref)),
+        ...repairSnap.docs.map((d) =>
+          updateDoc(d.ref, {
+            orderId: "__standalone__",
+            deferToNextBill: true,
+          })
+        ),
         ...approvalSnap.docs.map((d) => deleteDoc(d.ref)),
       ]);
     } catch {
       // best-effort related cleanup
     }
+
+    if (shouldRestoreOpening && order.kaarigerId) {
+      const restore =
+        order.openingAtCreation != null && Number.isFinite(order.openingAtCreation)
+          ? order.openingAtCreation
+          : 0;
+      await updateDoc(doc(db, "employees", order.kaarigerId), {
+        openingBalance: restore,
+      });
+    }
   }
 
   async function deleteOrderRecord(o: KaarigerOrder) {
-    if (!confirm(`Delete order "${orderProductsLabel(o)}" for ${o.kaarigerName}? Related payments/repairs will also be removed.`)) return;
-    await cascadeDeleteOrder(o.id);
+    if (!confirm(`Delete order "${orderProductsLabel(o)}" for ${o.kaarigerName}? Related payments will also be removed. Repairing on this bill goes back to pending.`)) return;
+    await cascadeDeleteOrder(o);
     setOrders((prev) => prev.filter((x) => x.id !== o.id));
     if (editOrder?.id === o.id) setEditOrder(null);
     if (viewOrder?.id === o.id) setViewOrder(null);
@@ -1021,7 +1053,7 @@ export default function RecordsPage() {
     if (
       !confirm(
         `Delete ${ids.length} selected ${label}${ids.length === 1 ? "" : "s"}?${
-          tab === "kaariger" ? " Related payments/repairs will also be removed." : ""
+          tab === "kaariger" ? " Related payments will also be removed. Repairing goes back to pending." : ""
         }`
       )
     ) {
@@ -1030,7 +1062,12 @@ export default function RecordsPage() {
     setBulkDeleting(true);
     try {
       if (tab === "kaariger") {
-        await Promise.all(ids.map((id) => cascadeDeleteOrder(id)));
+        const toDelete = orders
+          .filter((o) => ids.includes(o.id))
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        for (const o of toDelete) {
+          await cascadeDeleteOrder(o);
+        }
         setOrders((prev) => prev.filter((x) => !ids.includes(x.id)));
         if (editOrder && ids.includes(editOrder.id)) setEditOrder(null);
         if (viewOrder && ids.includes(viewOrder.id)) setViewOrder(null);

@@ -152,7 +152,7 @@ export default function WorkerProfilePanel({
     if (localEmployee.role !== "KAARIGER") return 0;
     return totalRemainingAmount({
       openingBalance:
-        Math.max(0, localEmployee.openingBalance || 0) + Math.max(0, localEmployee.oldKharcha || 0),
+        (localEmployee.openingBalance || 0) + Math.max(0, localEmployee.oldKharcha || 0),
       creditBalance: localEmployee.creditBalance || 0,
     });
   }, [localEmployee]);

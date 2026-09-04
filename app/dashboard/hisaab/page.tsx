@@ -586,8 +586,8 @@ export default function HisaabPage() {
   }, [activeOrders, orderPaidMap]);
 
   // Opening (old pending + bill closings) − credit − repairs = Total Remaining.
-  // Kharcha box is signed (can be negative after overpay). Pay never changes Remaining.
-  const openingBal = Math.max(0, selectedKaariger?.openingBalance || 0);
+  // Can be negative when kharcha / pays exceed ADD. Do not floor at 0.
+  const openingBal = selectedKaariger?.openingBalance || 0;
   const oldKharchaBal = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
   const standaloneRepairs = useMemo(
