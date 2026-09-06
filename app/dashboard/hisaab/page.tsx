@@ -2173,7 +2173,7 @@ function OrderDetailCard({
         <div>
           <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-800">
             <Wrench className="h-3.5 w-3.5" />
-            Pending repairing (not deducted)
+            Pending repairing (add on next bill, or attach here)
           </p>
           <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-amber-200 bg-amber-50/40">
             {pendingRepairs.map((r) => (
@@ -2189,7 +2189,7 @@ function OrderDetailCard({
                     </p>
                   )}
                   <p className="text-xs text-[var(--text-faint)]">
-                    Approved · not on this bill yet · no remaining deduction
+                    Prefer selecting at bill creation · leftover can attach to this live bill
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">

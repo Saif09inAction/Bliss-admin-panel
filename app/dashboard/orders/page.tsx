@@ -27,7 +27,7 @@ import type {
   RepairLineItem,
   OrderRepair,
 } from "@/lib/types";
-import { isStandaloneRepair } from "@/lib/types";
+import { isPendingBillRepair, isStandaloneRepair } from "@/lib/types";
 import { formatRupee, uuid } from "@/lib/csv";
 import {
   orderAddBalance,
@@ -169,6 +169,8 @@ export default function OrdersPage() {
   /** Signed carry from active week(s) that will fold into next kharcha box only. */
   const [pendingKharchaCarry, setPendingKharchaCarry] = useState(0);
   const [activeStandaloneRepairs, setActiveStandaloneRepairs] = useState<OrderRepair[]>([]);
+  /** Repair IDs admin chose to attach on this bill create. */
+  const [repairSelected, setRepairSelected] = useState<Set<string>>(new Set());
 
   // ── Raw Material deductions ──────────────────────────────────────────────
   /** All pending raw-material entries for the selected kaariger. */
@@ -195,11 +197,29 @@ export default function OrdersPage() {
     [rmEntries, rmSelected]
   );
 
+  const selectedRepairs = useMemo(
+    () => activeStandaloneRepairs.filter((r) => repairSelected.has(r.id)),
+    [activeStandaloneRepairs, repairSelected]
+  );
+  const selectedRepairsTotal = useMemo(
+    () => selectedRepairs.reduce((s, r) => s + (r.totalRepairCost || 0), 0),
+    [selectedRepairs]
+  );
+
   function toggleRmEntry(entryId: string) {
     setRmSelected((prev) => {
       const next = new Set(prev);
       if (next.has(entryId)) next.delete(entryId);
       else next.add(entryId);
+      return next;
+    });
+  }
+
+  function toggleRepair(repairId: string) {
+    setRepairSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(repairId)) next.delete(repairId);
+      else next.add(repairId);
       return next;
     });
   }
@@ -217,6 +237,7 @@ export default function OrdersPage() {
     setRmEntries([]);
     setRmSelected(new Set());
     setActiveStandaloneRepairs([]);
+    setRepairSelected(new Set());
     clearBillDraft();
   }
 
@@ -488,14 +509,15 @@ export default function OrdersPage() {
               deferToNextBill: Boolean(data.deferToNextBill),
             } satisfies OrderRepair;
           })
-          .filter(
-            (r) =>
-              isStandaloneRepair(r.orderId) &&
-              (r.status === "APPROVED" || !r.status) &&
-              !r.deferToNextBill
-          );
+          .filter((r) => isPendingBillRepair(r) || (
+            isStandaloneRepair(r.orderId) &&
+            (r.status === "APPROVED" || !r.status) &&
+            !r.deferToNextBill
+          ));
 
-        const standaloneRepairTotal = approvedStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
+        // Pending repairing does not cut Remaining until attached on this bill.
+        const remainingOnly = approvedStandaloneRepairs.filter((r) => !r.deferToNextBill);
+        const standaloneRepairTotal = remainingOnly.reduce((s, r) => s + r.totalRepairCost, 0);
 
         const openingBalance = selectedKaariger.openingBalance || 0;
         const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
@@ -509,6 +531,7 @@ export default function OrdersPage() {
           setPendingKharchaCarry(carryOut);
           setOutstanding(total);
           setActiveStandaloneRepairs(approvedStandaloneRepairs);
+          setRepairSelected(new Set());
         }
       } catch {
         if (!cancelled) {
@@ -560,7 +583,7 @@ export default function OrdersPage() {
     const deductionLines: RepairLineItem[] = [...chargeLines, ...materialItemLines];
     const deductionsTotal = deductionLines.reduce((s, it) => s + it.lineTotal, 0);
 
-    const standaloneRepairsTotal = activeStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
+    const standaloneRepairsTotal = selectedRepairsTotal;
     // Raw-material deductions selected by admin for this bill
     const totalAllDeductions = deductionsTotal + rmDeductionTotal + standaloneRepairsTotal;
 
@@ -575,7 +598,7 @@ export default function OrdersPage() {
       creditBalance: currentCredit,
     });
     const runningAfterAdd = grossOpening + addBalance;
-    const closing = Math.max(0, runningAfterAdd - kharchaAmount);
+    const closing = runningAfterAdd - kharchaAmount;
     const totalRemainingPreview = totalRemainingAmount({
       openingBalance: closing,
       creditBalance: currentCredit,
@@ -611,7 +634,7 @@ export default function OrdersPage() {
     currentCredit,
     pendingKharchaCarry,
     rmDeductionTotal,
-    activeStandaloneRepairs,
+    selectedRepairsTotal,
   ]);
 
   function addMaterialLine() {
@@ -797,7 +820,7 @@ export default function OrdersPage() {
       }));
       const rawMaterialDeductionsTotal = rawMaterialDeductions.reduce((s, r) => s + r.totalAmount, 0);
 
-      const standaloneRepairsCost = activeStandaloneRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
+      const standaloneRepairsCost = selectedRepairsTotal;
 
       const order: KaarigerOrder = {
         id,
@@ -839,10 +862,10 @@ export default function OrdersPage() {
 
       await setDoc(doc(db, "kaariger_orders", id), order);
 
-      // Link standalone repairs to this finalized order
-      if (activeStandaloneRepairs.length > 0) {
+      // Link only repairs admin selected on this bill create
+      if (selectedRepairs.length > 0) {
         await Promise.all(
-          activeStandaloneRepairs.map((r) =>
+          selectedRepairs.map((r) =>
             updateDoc(doc(db, "order_repairs", r.id), {
               orderId: id,
               deferToNextBill: false,
@@ -1301,6 +1324,70 @@ export default function OrdersPage() {
           </div>
         )}
 
+        {/* ── Repairing (attach on this bill) ─────────────────────────── */}
+        {kaarigerId && (
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Wrench className="h-3.5 w-3.5 text-[var(--jade-deep)]" />
+              <p className="label mb-0">Repairing on this bill</p>
+            </div>
+            {activeStandaloneRepairs.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-[var(--border-strong)] px-3 py-3 text-center text-xs text-[var(--text-muted)]">
+                No approved pending repairing for this kaariger. Approve repairing first, then add it here when creating the bill.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {activeStandaloneRepairs.map((r) => {
+                  const added = repairSelected.has(r.id);
+                  return (
+                    <div
+                      key={r.id}
+                      className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition ${
+                        added
+                          ? "border-danger/30 bg-red-50"
+                          : "border-[var(--border)] bg-[var(--surface-raised)]"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{r.productName || "Repairing"}</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {r.faultyQuantity > 0
+                            ? `${r.faultyQuantity} pcs × ₹${r.faultyPricePerPiece}`
+                            : "Approved repairing"}
+                          {r.deferToNextBill ? " · pending until added" : ""}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className={`font-bold ${added ? "text-danger" : "text-[var(--text)]"}`}>
+                          {added ? "−" : ""}
+                          {money(r.totalRepairCost)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleRepair(r.id)}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                            added
+                              ? "bg-danger/10 text-danger hover:bg-danger/20"
+                              : "bg-[var(--jade-soft)] text-[var(--jade-deep)] hover:bg-[var(--jade-soft)]/80"
+                          }`}
+                        >
+                          {added ? "✕ Remove" : "+ Add"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {selectedRepairsTotal > 0 && (
+              <div className="mt-2.5 flex items-center justify-between rounded-xl bg-red-50 px-3 py-2.5 text-sm">
+                <span className="font-medium text-danger">Repairing Total</span>
+                <span className="font-bold text-danger">−{money(selectedRepairsTotal)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="label">
             <span className="inline-flex items-center gap-1.5">
@@ -1352,7 +1439,7 @@ export default function OrdersPage() {
             {rmDeductionTotal > 0 && (
               <Row label="Less: Raw Material deductions" value={`−${money(rmDeductionTotal)}`} />
             )}
-            {activeStandaloneRepairs.map((r, i) => (
+            {selectedRepairs.map((r, i) => (
               <Row
                 key={`preview-standalone-${r.id}-${i}`}
                 label={`Less: Repairing - ${r.productName}`}
