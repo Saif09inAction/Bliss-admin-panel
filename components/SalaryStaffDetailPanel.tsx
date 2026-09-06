@@ -157,23 +157,21 @@ export default function SalaryStaffDetailPanel({
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
             {transactionsBlock}
 
-            {d.carryForward.length > 0 && (
+            {d.carryForward.filter((line) => Math.round(line.balance) > 0).length > 0 && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
                   Previous months balance
                 </p>
                 <div className="mt-2 space-y-1.5">
-                  {d.carryForward.map((line) => (
+                  {d.carryForward
+                    .filter((line) => Math.round(line.balance) > 0)
+                    .map((line) => (
                     <div
                       key={`${line.periodStart}-${line.periodEnd}`}
                       className="flex justify-between text-sm"
                     >
                       <span className="text-amber-900">{line.label}</span>
-                      <span
-                        className={`font-semibold ${
-                          line.balance < 0 ? "text-jade-deep" : "text-amber-900"
-                        }`}
-                      >
+                      <span className="font-semibold text-amber-900">
                         {money(line.balance)}
                         <span className="ml-1 text-xs font-normal opacity-70">
                           (earned {money(line.earned)} − paid {money(line.paid)})
