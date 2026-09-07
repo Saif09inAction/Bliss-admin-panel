@@ -78,6 +78,31 @@ export async function syncEmployeeSalaryRemaining(opts: {
   return earnedDue;
 }
 
+/** After holiday/calendar changes, refresh salaryRemaining for all STAFF so apps stay correct. */
+export async function syncAllStaffSalaryRemaining(opts: {
+  employees: Employee[];
+  payments: PaymentTransaction[];
+  attendance: Attendance[];
+  settings: AttendanceSettings;
+  overrides: OverrideMap;
+  today: string;
+}): Promise<void> {
+  const staff = opts.employees.filter((e) => (e.role || "STAFF") === "STAFF" && e.phone?.trim());
+  await Promise.all(
+    staff.map((employee) =>
+      syncEmployeeSalaryRemaining({
+        employee,
+        payments: opts.payments,
+        attendance: opts.attendance,
+        settings: opts.settings,
+        overrides: opts.overrides,
+        periodOffset: 0,
+        today: opts.today,
+      }).catch(() => 0)
+    )
+  );
+}
+
 /** Admin manually sets remaining salary due (staff app reads salaryRemaining). */
 export async function setManualSalaryRemaining(
   employeePhone: string,

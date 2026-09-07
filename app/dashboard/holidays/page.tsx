@@ -11,13 +11,14 @@ import {
 } from "firebase/firestore";
 import { ChevronLeft, ChevronRight, Clock, Palmtree, Sparkles, Users } from "lucide-react";
 import { getDb } from "@/lib/firebase";
-import type { AttendanceSettings, Employee } from "@/lib/types";
+import type { Attendance, AttendanceSettings, Employee, PaymentTransaction } from "@/lib/types";
 import {
   dateKey,
   daysInMonth,
   formatDisplayTime,
   monthLabel,
   normalizeTime,
+  parseAttendance,
 } from "@/lib/attendance-utils";
 import {
   parseCalendarOverride,
@@ -32,6 +33,8 @@ import {
   parseAttendanceSettingsDoc,
 } from "@/lib/shift-schedule";
 import { formatDisplayDate } from "@/lib/csv";
+import { parsePayment } from "@/lib/salary-utils";
+import { syncAllStaffSalaryRemaining } from "@/lib/salary-sync";
 
 function dayButtonClass(
   kind: DayKind,
@@ -272,6 +275,33 @@ export default function HolidaysPage() {
     }
   }
 
+  async function refreshStaffSalary(nextOverrides: OverrideMap) {
+    try {
+      const db = getDb();
+      const [paySnap, attSnap] = await Promise.all([
+        getDocs(collection(db, "payments")),
+        getDocs(collection(db, "attendance")),
+      ]);
+      const payments: PaymentTransaction[] = paySnap.docs.map((d) =>
+        parsePayment(d.id, d.data() as Record<string, unknown>)
+      );
+      const attendance: Attendance[] = attSnap.docs.map((d) =>
+        parseAttendance(d.id, d.data() as Record<string, unknown>)
+      );
+      const today = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+      await syncAllStaffSalaryRemaining({
+        employees: staff,
+        payments,
+        attendance,
+        settings: attendanceSettings,
+        overrides: nextOverrides,
+        today,
+      });
+    } catch {
+      // Calendar save already succeeded; salary page can re-sync if needed.
+    }
+  }
+
   async function setKind(
     dateStr: string,
     kind: DayKind,
@@ -296,12 +326,19 @@ export default function HolidaysPage() {
       const employeeIds =
         appliesTo === "SELECTED" ? selectedEmployees : [];
 
+      const nextOverrides: OverrideMap = new Map(overrides);
+
       // Default global rule with no custom scope → remove override
       if (kind === defaultKind && appliesTo === "ALL") {
         await deleteDoc(doc(getDb(), "calendar_days", dateStr));
-        setToast(kind === "HOLIDAY" ? "Using Sunday default holiday" : "Marked as working day");
+        nextOverrides.delete(dateStr);
+        setToast(
+          kind === "HOLIDAY"
+            ? "Sunday holiday — salary not deducted"
+            : "Marked as working day"
+        );
       } else {
-        await setDoc(doc(getDb(), "calendar_days", dateStr), {
+        const payload: CalendarDayOverride = {
           date: dateStr,
           kind,
           appliesTo,
@@ -312,18 +349,25 @@ export default function HolidaysPage() {
           ...(dayShiftForm.dailySignOutTime
             ? { dailySignOutTime: normalizeTime(dayShiftForm.dailySignOutTime) }
             : {}),
+        };
+        await setDoc(doc(getDb(), "calendar_days", dateStr), {
+          ...payload,
           updatedAt: Date.now(),
         });
+        nextOverrides.set(dateStr, payload);
         if (kind === "HOLIDAY") {
           setToast(
             appliesTo === "ALL"
-              ? "Holiday for all staff"
-              : `Holiday for ${employeeIds.length} staff`
+              ? "Holiday for all staff — salary not deducted"
+              : `Holiday for ${employeeIds.length} staff — salary not deducted`
           );
         } else {
           setToast("Marked as working day");
         }
       }
+
+      // Keep staff app salaryRemaining in sync (holidays earn full day).
+      void refreshStaffSalary(nextOverrides);
     } catch {
       setToast("Could not save. Try again.");
     } finally {
