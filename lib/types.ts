@@ -466,6 +466,19 @@ export interface RawMaterialCompany {
   createdAt: number;
 }
 
+/** Payment to a raw-material supplier — Firestore `raw_material_payments`. */
+export interface RawMaterialPayment {
+  id: string;
+  companyId: string;
+  companyName: string;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  remarks?: string;
+  createdAt: number;
+  createdBy: string;
+  updatedAt?: number;
+}
+
 // ─── Bill Report ─────────────────────────────────────────────────────────────
 
 /** Client's business entity that buys from suppliers (Bill Report). */

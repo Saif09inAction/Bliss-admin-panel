@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import {
   Archive,
+  Banknote,
   Building2,
   CheckCircle2,
   ChevronDown,
@@ -33,6 +34,7 @@ import type {
   RawMaterialBill,
   RawMaterialCompany,
   RawMaterialKaarigerEntry,
+  RawMaterialPayment,
   RawMaterialRoll,
 } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
@@ -94,6 +96,41 @@ function emptyKaariger(): RawMaterialKaarigerEntry {
     totalAmount: 0,
     adjustmentStatus: "pending",
   };
+}
+
+function normCompany(name: string) {
+  return name.trim().toLowerCase();
+}
+
+/** Active bills billed to this company name. */
+function companyBilledTotal(bills: RawMaterialBill[], companyName: string): number {
+  const key = normCompany(companyName);
+  if (!key) return 0;
+  return bills
+    .filter((b) => b.status === "active" && normCompany(b.companyName || "") === key)
+    .reduce((s, b) => s + (Number(b.grandTotalAmount) || 0), 0);
+}
+
+function companyPaidTotal(
+  payments: RawMaterialPayment[],
+  company: { id: string; name: string }
+): number {
+  const key = normCompany(company.name);
+  return payments
+    .filter(
+      (p) =>
+        p.companyId === company.id ||
+        (key && normCompany(p.companyName) === key)
+    )
+    .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+}
+
+function companyOutstanding(
+  bills: RawMaterialBill[],
+  payments: RawMaterialPayment[],
+  company: { id: string; name: string }
+): number {
+  return Math.round((companyBilledTotal(bills, company.name) - companyPaidTotal(payments, company)) * 100) / 100;
 }
 
 // ─── types for the form ───────────────────────────────────────────────────────
@@ -1104,24 +1141,326 @@ function AddBillModal({
   );
 }
 
+// ─── Pay company modal ────────────────────────────────────────────────────────
+
+function PayCompanyModal({
+  companies,
+  bills,
+  payments,
+  saving,
+  onClose,
+  onPay,
+}: {
+  companies: RawMaterialCompany[];
+  bills: RawMaterialBill[];
+  payments: RawMaterialPayment[];
+  saving: boolean;
+  onClose: () => void;
+  onPay: (payload: {
+    companyId: string;
+    companyName: string;
+    amount: number;
+    date: string;
+    remarks: string;
+  }) => void;
+}) {
+  const [companyId, setCompanyId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(today());
+  const [remarks, setRemarks] = useState("");
+
+  const company = companies.find((c) => c.id === companyId) || null;
+  const billed = company ? companyBilledTotal(bills, company.name) : 0;
+  const paid = company ? companyPaidTotal(payments, company) : 0;
+  const outstanding = company ? companyOutstanding(bills, payments, company) : 0;
+  const payAmt = Number(amount) || 0;
+  const afterPay = Math.round((outstanding - payAmt) * 100) / 100;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!company) {
+      alert("Select a company.");
+      return;
+    }
+    if (payAmt <= 0) {
+      alert("Enter a payment amount greater than 0.");
+      return;
+    }
+    if (!date) {
+      alert("Pick a payment date.");
+      return;
+    }
+    onPay({
+      companyId: company.id,
+      companyName: company.name,
+      amount: Math.round(payAmt * 100) / 100,
+      date,
+      remarks: remarks.trim(),
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-panel max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Banknote className="h-5 w-5 text-[var(--jade-deep)]" />
+            <h3 className="font-display text-lg font-bold">Pay company</h3>
+          </div>
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-4 p-5">
+          <div>
+            <label className="label">Company</label>
+            <select
+              className="input"
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                setAmount("");
+              }}
+              required
+            >
+              <option value="">Select company…</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            {companies.length === 0 && (
+              <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+                Add a company first via the Companies button.
+              </p>
+            )}
+          </div>
+
+          {company && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
+              <div className="flex justify-between gap-2">
+                <span className="text-amber-900/80">Billed (active)</span>
+                <span className="font-semibold text-amber-950">{rupee(billed)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-amber-900/80">Already paid</span>
+                <span className="font-semibold text-amber-950">{rupee(paid)}</span>
+              </div>
+              <div className="mt-2 flex justify-between gap-2 border-t border-amber-200 pt-2">
+                <span className="font-bold text-amber-950">Outstanding</span>
+                <span
+                  className={`font-bold ${
+                    outstanding > 0 ? "text-danger" : "text-[var(--jade-deep)]"
+                  }`}
+                >
+                  {rupee(outstanding)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="label">Pay amount</label>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              required
+            />
+            {company && payAmt > 0 && (
+              <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+                After pay: <strong>{rupee(afterPay)}</strong> outstanding
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="label">Date</label>
+            <input
+              className="input"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+            />
+          </div>
+
+          <div>
+            <label className="label">Remarks (optional)</label>
+            <input
+              className="input"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="UPI / cheque / note…"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={saving || !company || payAmt <= 0}
+            >
+              {saving ? "Saving…" : `Pay ${payAmt > 0 ? rupee(payAmt) : ""}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditPaymentModal({
+  payment,
+  companies,
+  saving,
+  onClose,
+  onSave,
+}: {
+  payment: RawMaterialPayment;
+  companies: RawMaterialCompany[];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (payload: {
+    companyId: string;
+    companyName: string;
+    amount: number;
+    date: string;
+    remarks: string;
+  }) => void;
+}) {
+  const [companyId, setCompanyId] = useState(payment.companyId);
+  const [amount, setAmount] = useState(String(payment.amount));
+  const [date, setDate] = useState(payment.date);
+  const [remarks, setRemarks] = useState(payment.remarks || "");
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const company = companies.find((c) => c.id === companyId);
+    const name = company?.name || payment.companyName;
+    const payAmt = Number(amount) || 0;
+    if (!companyId || !name.trim()) {
+      alert("Select a company.");
+      return;
+    }
+    if (payAmt <= 0) {
+      alert("Enter a payment amount greater than 0.");
+      return;
+    }
+    onSave({
+      companyId,
+      companyName: name,
+      amount: Math.round(payAmt * 100) / 100,
+      date,
+      remarks: remarks.trim(),
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <h3 className="font-display text-lg font-bold">Edit payment</h3>
+          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-4 p-5">
+          <div>
+            <label className="label">Company</label>
+            <select
+              className="input"
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              required
+            >
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+              {!companies.some((c) => c.id === companyId) && (
+                <option value={companyId}>{payment.companyName}</option>
+              )}
+            </select>
+          </div>
+          <div>
+            <label className="label">Amount</label>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="label">Date</label>
+            <input
+              className="input"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="label">Remarks</label>
+            <input
+              className="input"
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function RawMaterialPage() {
   const { session } = useAuth();
   const [bills, setBills] = useState<RawMaterialBill[]>([]);
   const [companies, setCompanies] = useState<RawMaterialCompany[]>([]);
+  const [payments, setPayments] = useState<RawMaterialPayment[]>([]);
   const [kaarigers, setKaarigers] = useState<Employee[]>([]);
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [tab, setTab] = useState<"active" | "history">("active");
+  const [tab, setTab] = useState<"active" | "history" | "transactions">("active");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showCompaniesModal, setShowCompaniesModal] = useState(false);
+  const [showPayModal, setShowPayModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewBill, setViewBill] = useState<RawMaterialBill | null>(null);
   const [editBill, setEditBill] = useState<RawMaterialBill | null>(null);
   const [deletingBill, setDeletingBill] = useState<RawMaterialBill | null>(null);
   const [permDeleteBill, setPermDeleteBill] = useState<RawMaterialBill | null>(null);
+  const [editPayment, setEditPayment] = useState<RawMaterialPayment | null>(null);
+  const [deletePayment, setDeletePayment] = useState<RawMaterialPayment | null>(null);
   const [expandedBills, setExpandedBills] = useState<Set<string>>(new Set());
 
   // Load kaarigers once
@@ -1177,6 +1516,33 @@ export default function RawMaterialPage() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    const unsub = onSnapshot(collection(getDb(), "raw_material_payments"), (snap) => {
+      setPayments(
+        snap.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              companyId: (data.companyId as string) || "",
+              companyName: (data.companyName as string) || "",
+              amount: Number(data.amount) || 0,
+              date: (data.date as string) || "",
+              remarks: (data.remarks as string) || "",
+              createdAt: (data.createdAt as number) || 0,
+              createdBy: (data.createdBy as string) || "",
+              updatedAt: (data.updatedAt as number) || undefined,
+            } satisfies RawMaterialPayment;
+          })
+          .sort((a, b) => {
+            if (a.date !== b.date) return b.date.localeCompare(a.date);
+            return b.createdAt - a.createdAt;
+          })
+      );
+    });
+    return () => unsub();
+  }, []);
+
   const activeBills = useMemo(() => {
     const q = search.trim().toLowerCase();
     return bills
@@ -1227,6 +1593,29 @@ export default function RawMaterialPage() {
     qty: activeBills.reduce((s, b) => s + b.grandTotalQuantity, 0),
     amount: activeBills.reduce((s, b) => s + b.grandTotalAmount, 0),
   }), [activeBills]);
+
+  const totalOutstanding = useMemo(() => {
+    return companies.reduce(
+      (s, c) => s + Math.max(0, companyOutstanding(bills, payments, c)),
+      0
+    );
+  }, [companies, bills, payments]);
+
+  const filteredPayments = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return payments.filter((p) => {
+      if (dateFrom || dateTo) {
+        if (!dateInRange(p.date, dateFrom, dateTo)) return false;
+      }
+      if (!q) return true;
+      return (
+        p.companyName.toLowerCase().includes(q) ||
+        dateMatchesSearch(p.date, q) ||
+        (p.remarks || "").toLowerCase().includes(q) ||
+        String(p.amount).includes(q)
+      );
+    });
+  }, [payments, search, dateFrom, dateTo]);
 
   async function handleSaveBill(
     partial: Omit<RawMaterialBill, "id" | "createdAt" | "createdBy">
@@ -1304,6 +1693,71 @@ export default function RawMaterialPage() {
     }
   }
 
+  async function handlePayCompany(payload: {
+    companyId: string;
+    companyName: string;
+    amount: number;
+    date: string;
+    remarks: string;
+  }) {
+    setSaving(true);
+    try {
+      const id = uuid();
+      const payment: RawMaterialPayment = {
+        id,
+        companyId: payload.companyId,
+        companyName: payload.companyName,
+        amount: payload.amount,
+        date: payload.date,
+        remarks: payload.remarks || "",
+        createdAt: Date.now(),
+        createdBy: session?.name || "Admin",
+      };
+      await setDoc(doc(getDb(), "raw_material_payments", id), payment);
+      setShowPayModal(false);
+      setTab("transactions");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save payment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdatePayment(payload: {
+    companyId: string;
+    companyName: string;
+    amount: number;
+    date: string;
+    remarks: string;
+  }) {
+    if (!editPayment) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(getDb(), "raw_material_payments", editPayment.id), {
+        companyId: payload.companyId,
+        companyName: payload.companyName,
+        amount: payload.amount,
+        date: payload.date,
+        remarks: payload.remarks || "",
+        updatedAt: Date.now(),
+      });
+      setEditPayment(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update payment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeletePayment(payment: RawMaterialPayment) {
+    try {
+      await deleteDoc(doc(getDb(), "raw_material_payments", payment.id));
+      setDeletePayment(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete payment.");
+    }
+  }
+
   return (
     <div className="stagger space-y-5">
       <PageToolbar
@@ -1317,6 +1771,14 @@ export default function RawMaterialPage() {
             >
               <Building2 size={15} />
               Companies
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowPayModal(true)}
+            >
+              <Banknote size={15} />
+              Pay
             </button>
             <button
               type="button"
@@ -1336,7 +1798,7 @@ export default function RawMaterialPage() {
       </PageToolbar>
 
       {/* Stats */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="stat-card">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--jade-soft)]">
@@ -1370,10 +1832,21 @@ export default function RawMaterialPage() {
             </div>
           </div>
         </div>
+        <div className="stat-card">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50">
+              <Banknote className="h-5 w-5 text-amber-800" />
+            </div>
+            <div>
+              <p className="stat-card-label">Outstanding</p>
+              <p className="stat-card-value">{rupee(totalOutstanding)}</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-1">
+      <div className="flex flex-wrap gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-1">
         <button
           type="button"
           onClick={() => setTab("active")}
@@ -1392,6 +1865,27 @@ export default function RawMaterialPage() {
               }`}
             >
               {activeBills.length}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("transactions")}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
+            tab === "transactions"
+              ? "bg-[var(--jade-deep)] text-white shadow-sm"
+              : "text-[var(--text-muted)] hover:text-[var(--text)]"
+          }`}
+        >
+          <Banknote size={14} />
+          Transactions
+          {payments.length > 0 && (
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                tab === "transactions" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-900"
+              }`}
+            >
+              {payments.length}
             </span>
           )}
         </button>
@@ -1426,7 +1920,11 @@ export default function RawMaterialPage() {
         dateTo={dateTo}
         onDateFromChange={setDateFrom}
         onDateToChange={setDateTo}
-        placeholder="Search bill no., company, kaariger, material, date (dd/mm/yy)…"
+        placeholder={
+          tab === "transactions"
+            ? "Search company, amount, remarks, date (dd/mm/yy)…"
+            : "Search bill no., company, kaariger, material, date (dd/mm/yy)…"
+        }
       />
 
       {/* Active bills — single unified table (no duplicate card view) */}
@@ -1550,6 +2048,99 @@ export default function RawMaterialPage() {
           </div>
         </div>
       )}
+
+      {/* Company payment transactions */}
+      {tab === "transactions" && (
+        <div className="space-y-4">
+          {companies.length > 0 && (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {companies.map((c) => {
+                const due = companyOutstanding(bills, payments, c);
+                return (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3.5 py-3"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold">{c.name}</p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        Billed {rupee(companyBilledTotal(bills, c.name))} · Paid{" "}
+                        {rupee(companyPaidTotal(payments, c))}
+                      </p>
+                    </div>
+                    <p
+                      className={`text-sm font-bold ${
+                        due > 0 ? "text-danger" : "text-[var(--jade-deep)]"
+                      }`}
+                    >
+                      {rupee(due)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="data-table-wrap">
+            <div className="overflow-x-auto">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Company</th>
+                    <th>Amount</th>
+                    <th>Remarks</th>
+                    <th>By</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPayments.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-sm text-[var(--text-muted)]">
+                        {search || dateFrom || dateTo
+                          ? "No payments match your search."
+                          : "No payments yet. Tap Pay to record a company payment."}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPayments.map((p) => (
+                      <tr key={p.id}>
+                        <td className="text-[var(--text-muted)]">{fmtDate(p.date)}</td>
+                        <td className="font-semibold">{p.companyName}</td>
+                        <td className="font-bold text-[var(--jade-deep)]">{rupee(p.amount)}</td>
+                        <td className="text-[var(--text-muted)]">{p.remarks || "—"}</td>
+                        <td className="text-[var(--text-muted)]">{p.createdBy || "—"}</td>
+                        <td className="text-right">
+                          <div className="inline-flex gap-1">
+                            <button
+                              type="button"
+                              className="btn-icon !h-8 !w-8"
+                              title="Edit"
+                              onClick={() => setEditPayment(p)}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                              title="Delete"
+                              onClick={() => setDeletePayment(p)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* History bills */}
       {tab === "history" && (
         <div className="data-table-wrap">
@@ -1612,6 +2203,58 @@ export default function RawMaterialPage() {
           companies={companies}
           onClose={() => setShowCompaniesModal(false)}
         />
+      )}
+
+      {showPayModal && (
+        <PayCompanyModal
+          companies={companies}
+          bills={bills}
+          payments={payments}
+          saving={saving}
+          onClose={() => setShowPayModal(false)}
+          onPay={handlePayCompany}
+        />
+      )}
+
+      {editPayment && (
+        <EditPaymentModal
+          payment={editPayment}
+          companies={companies}
+          saving={saving}
+          onClose={() => setEditPayment(null)}
+          onSave={handleUpdatePayment}
+        />
+      )}
+
+      {deletePayment && (
+        <div className="modal-backdrop" onClick={() => setDeletePayment(null)}>
+          <div className="modal-panel max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="space-y-4 p-5">
+              <h3 className="font-display text-lg font-bold">Delete payment?</h3>
+              <p className="text-sm text-[var(--text-muted)]">
+                Remove {rupee(deletePayment.amount)} paid to{" "}
+                <strong>{deletePayment.companyName}</strong> on {fmtDate(deletePayment.date)}?
+                Outstanding will increase again.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setDeletePayment(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary bg-danger hover:bg-danger/90"
+                  onClick={() => handleDeletePayment(deletePayment)}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {showAddModal && (
