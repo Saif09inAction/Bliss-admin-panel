@@ -30,7 +30,7 @@ import { useSelection } from "@/lib/use-selection";
 
 const money = formatRupee;
 
-type CatalogProduct = { id: string; name: string };
+type CatalogProduct = { id: string; name: string; price: number };
 
 function formatDate(ts: number) {
   return ts ? new Date(ts).toLocaleDateString("en-IN") : "—";
@@ -95,6 +95,7 @@ type ProductOption = {
   id: string;
   orderId: string;
   productName: string;
+  price: number;
 };
 
 export default function RepairingPage() {
@@ -163,6 +164,7 @@ export default function RepairingPage() {
           .map((d) => ({
             id: (d.data().id as string) || d.id,
             name: (d.data().name as string) || "",
+            price: Number(d.data().price) || 0,
           }))
           .filter((p) => p.name.trim())
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -181,6 +183,7 @@ export default function RepairingPage() {
         id: `catalog::${p.id}`,
         orderId: STANDALONE_REPAIR_ORDER_ID,
         productName: p.name,
+        price: p.price,
       })),
     [catalogProducts]
   );
@@ -202,6 +205,13 @@ export default function RepairingPage() {
 
   function onPickProduct(id: string) {
     setAddProductId(id);
+    const picked = productOptions.find((p) => p.id === id);
+    if (picked && picked.price > 0) {
+      setAddForm((prev) => ({
+        ...prev,
+        faultyPricePerPiece: String(picked.price),
+      }));
+    }
   }
 
   async function saveAdd(e: React.FormEvent) {
@@ -378,9 +388,15 @@ export default function RepairingPage() {
     // Standalone approvals use the modal so admin can choose live vs next bill.
     if (isStandaloneRepair(r.orderId) || r.faultyPricePerPiece <= 0 || r.totalRepairCost <= 0) {
       setApproveRepairDoc(r);
-      setApprovePrice(
-        r.faultyPricePerPiece > 0 ? String(r.faultyPricePerPiece) : ""
-      );
+      const fromRepair = r.faultyPricePerPiece > 0 ? r.faultyPricePerPiece : 0;
+      const fromCatalog =
+        fromRepair > 0
+          ? 0
+          : catalogProducts.find(
+              (p) => p.name.trim().toLowerCase() === r.productName.trim().toLowerCase()
+            )?.price || 0;
+      const price = fromRepair > 0 ? fromRepair : fromCatalog;
+      setApprovePrice(price > 0 ? String(price) : "");
       return;
     }
     void confirmAndApprove(r, r.faultyPricePerPiece);
