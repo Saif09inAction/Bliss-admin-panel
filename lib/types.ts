@@ -454,6 +454,8 @@ export interface RawMaterialBill {
   grandTotalQuantity: number;
   grandTotalAmount: number;
   status: "active" | "deleted";
+  /** Soft-hide from main list; still counts toward company outstanding. */
+  hidden?: boolean;
   createdAt: number;
   createdBy: string;
   deletedAt?: number;

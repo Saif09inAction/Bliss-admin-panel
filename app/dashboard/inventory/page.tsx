@@ -18,6 +18,8 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Eye,
+  EyeOff,
   FileText,
   History,
   Package,
@@ -1200,124 +1202,127 @@ function PayCompanyModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-panel max-w-md"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Banknote className="h-5 w-5 text-[var(--jade-deep)]" />
-            <h3 className="font-display text-lg font-bold">Pay company</h3>
-          </div>
-          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <form onSubmit={submit} className="space-y-4 p-5">
-          <div>
-            <label className="label">Company</label>
-            <select
-              className="input"
-              value={companyId}
-              onChange={(e) => {
-                setCompanyId(e.target.value);
-                setAmount("");
-              }}
-              required
-            >
-              <option value="">Select company…</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            {companies.length === 0 && (
-              <p className="mt-1.5 text-xs text-[var(--text-muted)]">
-                Add a company first via the Companies button.
-              </p>
-            )}
-          </div>
-
-          {company && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
-              <div className="flex justify-between gap-2">
-                <span className="text-amber-900/80">Billed (active)</span>
-                <span className="font-semibold text-amber-950">{rupee(billed)}</span>
-              </div>
-              <div className="mt-1 flex justify-between gap-2">
-                <span className="text-amber-900/80">Already paid</span>
-                <span className="font-semibold text-amber-950">{rupee(paid)}</span>
-              </div>
-              <div className="mt-2 flex justify-between gap-2 border-t border-amber-200 pt-2">
-                <span className="font-bold text-amber-950">Outstanding</span>
-                <span
-                  className={`font-bold ${
-                    outstanding > 0 ? "text-danger" : "text-[var(--jade-deep)]"
-                  }`}
-                >
-                  {rupee(outstanding)}
-                </span>
-              </div>
+    <>
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-16 sm:items-center sm:pt-4">
+        <div
+          className="w-full max-w-md overflow-hidden rounded-2xl bg-[var(--surface-raised)] shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+            <div className="flex items-center gap-2">
+              <Banknote className="h-5 w-5 text-[var(--jade-deep)]" />
+              <h3 className="font-display text-lg font-bold">Pay company</h3>
             </div>
-          )}
+            <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+              <X size={18} />
+            </button>
+          </div>
+          <form onSubmit={submit} className="space-y-4 p-5">
+            <div>
+              <label className="label">Company</label>
+              <select
+                className="input"
+                value={companyId}
+                onChange={(e) => {
+                  setCompanyId(e.target.value);
+                  setAmount("");
+                }}
+                required
+              >
+                <option value="">Select company…</option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {companies.length === 0 && (
+                <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+                  Add a company first via the Companies button.
+                </p>
+              )}
+            </div>
 
-          <div>
-            <label className="label">Pay amount</label>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0"
-              required
-            />
-            {company && payAmt > 0 && (
-              <p className="mt-1.5 text-xs text-[var(--text-muted)]">
-                After pay: <strong>{rupee(afterPay)}</strong> outstanding
-              </p>
+            {company && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
+                <div className="flex justify-between gap-2">
+                  <span className="text-amber-900/80">Billed (active)</span>
+                  <span className="font-semibold text-amber-950">{rupee(billed)}</span>
+                </div>
+                <div className="mt-1 flex justify-between gap-2">
+                  <span className="text-amber-900/80">Already paid</span>
+                  <span className="font-semibold text-amber-950">{rupee(paid)}</span>
+                </div>
+                <div className="mt-2 flex justify-between gap-2 border-t border-amber-200 pt-2">
+                  <span className="font-bold text-amber-950">Outstanding</span>
+                  <span
+                    className={`font-bold ${
+                      outstanding > 0 ? "text-danger" : "text-[var(--jade-deep)]"
+                    }`}
+                  >
+                    {rupee(outstanding)}
+                  </span>
+                </div>
+              </div>
             )}
-          </div>
 
-          <div>
-            <label className="label">Date</label>
-            <input
-              className="input"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-            />
-          </div>
+            <div>
+              <label className="label">Pay amount</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0"
+                required
+              />
+              {company && payAmt > 0 && (
+                <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+                  After pay: <strong>{rupee(afterPay)}</strong> outstanding
+                </p>
+              )}
+            </div>
 
-          <div>
-            <label className="label">Remarks (optional)</label>
-            <input
-              className="input"
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              placeholder="UPI / cheque / note…"
-            />
-          </div>
+            <div>
+              <label className="label">Date</label>
+              <input
+                className="input"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+            </div>
 
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={saving || !company || payAmt <= 0}
-            >
-              {saving ? "Saving…" : `Pay ${payAmt > 0 ? rupee(payAmt) : ""}`}
-            </button>
-          </div>
-        </form>
+            <div>
+              <label className="label">Remarks (optional)</label>
+              <input
+                className="input"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="UPI / cheque / note…"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={saving || !company || payAmt <= 0}
+              >
+                {saving ? "Saving…" : `Pay ${payAmt > 0 ? rupee(payAmt) : ""}`}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1368,74 +1373,80 @@ function EditPaymentModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel max-w-md" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <h3 className="font-display text-lg font-bold">Edit payment</h3>
-          <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
+    <>
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-16 sm:items-center sm:pt-4">
+        <div
+          className="w-full max-w-md overflow-hidden rounded-2xl bg-[var(--surface-raised)] shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+            <h3 className="font-display text-lg font-bold">Edit payment</h3>
+            <button type="button" className="btn-icon" onClick={onClose} aria-label="Close">
+              <X size={18} />
+            </button>
+          </div>
+          <form onSubmit={submit} className="space-y-4 p-5">
+            <div>
+              <label className="label">Company</label>
+              <select
+                className="input"
+                value={companyId}
+                onChange={(e) => setCompanyId(e.target.value)}
+                required
+              >
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+                {!companies.some((c) => c.id === companyId) && (
+                  <option value={companyId}>{payment.companyName}</option>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="label">Amount</label>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="label">Date</label>
+              <input
+                className="input"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="label">Remarks</label>
+              <input
+                className="input"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </form>
         </div>
-        <form onSubmit={submit} className="space-y-4 p-5">
-          <div>
-            <label className="label">Company</label>
-            <select
-              className="input"
-              value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
-              required
-            >
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-              {!companies.some((c) => c.id === companyId) && (
-                <option value={companyId}>{payment.companyName}</option>
-              )}
-            </select>
-          </div>
-          <div>
-            <label className="label">Amount</label>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label className="label">Date</label>
-            <input
-              className="input"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label className="label">Remarks</label>
-            <input
-              className="input"
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </form>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1450,7 +1461,7 @@ export default function RawMaterialPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [tab, setTab] = useState<"active" | "history" | "transactions">("active");
+  const [tab, setTab] = useState<"active" | "hidden" | "history" | "transactions">("active");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showCompaniesModal, setShowCompaniesModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -1546,7 +1557,29 @@ export default function RawMaterialPage() {
   const activeBills = useMemo(() => {
     const q = search.trim().toLowerCase();
     return bills
-      .filter((b) => b.status === "active")
+      .filter((b) => b.status === "active" && !b.hidden)
+      .filter((b) => {
+        if (dateFrom || dateTo) {
+          if (!dateInRange(b.date, dateFrom, dateTo)) return false;
+        }
+        if (!q) return true;
+        return (
+          b.billNo.toLowerCase().includes(q) ||
+          (b.companyName && b.companyName.toLowerCase().includes(q)) ||
+          dateMatchesSearch(b.date, q) ||
+          b.kaarigers.some(
+            (k) =>
+              k.kaarigerName.toLowerCase().includes(q) ||
+              k.materialName.toLowerCase().includes(q)
+          )
+        );
+      });
+  }, [bills, search, dateFrom, dateTo]);
+
+  const hiddenBills = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return bills
+      .filter((b) => b.status === "active" && !!b.hidden)
       .filter((b) => {
         if (dateFrom || dateTo) {
           if (!dateInRange(b.date, dateFrom, dateTo)) return false;
@@ -1661,6 +1694,26 @@ export default function RawMaterialPage() {
     }
   }
 
+  async function handleHideBill(bill: RawMaterialBill) {
+    try {
+      await updateDoc(doc(getDb(), "raw_material_bills", bill.id), {
+        hidden: true,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to hide bill.");
+    }
+  }
+
+  async function handleUnhideBill(bill: RawMaterialBill) {
+    try {
+      await updateDoc(doc(getDb(), "raw_material_bills", bill.id), {
+        hidden: false,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to unhide bill.");
+    }
+  }
+
   async function handlePermanentDelete(bill: RawMaterialBill) {
     try {
       const { deleteDoc } = await import("firebase/firestore");
@@ -1766,6 +1819,14 @@ export default function RawMaterialPage() {
           <>
             <button
               type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setShowPayModal(true)}
+            >
+              <Banknote size={15} />
+              Pay
+            </button>
+            <button
+              type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => setShowCompaniesModal(true)}
             >
@@ -1775,14 +1836,6 @@ export default function RawMaterialPage() {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              onClick={() => setShowPayModal(true)}
-            >
-              <Banknote size={15} />
-              Pay
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
               onClick={() => setShowAddModal(true)}
             >
               <Plus size={15} />
@@ -1870,6 +1923,27 @@ export default function RawMaterialPage() {
         </button>
         <button
           type="button"
+          onClick={() => setTab("hidden")}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
+            tab === "hidden"
+              ? "bg-[var(--jade-deep)] text-white shadow-sm"
+              : "text-[var(--text-muted)] hover:text-[var(--text)]"
+          }`}
+        >
+          <EyeOff size={14} />
+          Hidden
+          {hiddenBills.length > 0 && (
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                tab === "hidden" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
+              }`}
+            >
+              {hiddenBills.length}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("transactions")}
           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
             tab === "transactions"
@@ -1899,7 +1973,7 @@ export default function RawMaterialPage() {
           }`}
         >
           <History size={14} />
-          Raw Material History
+          History
           {historyBills.length > 0 && (
             <span
               className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
@@ -2008,6 +2082,14 @@ export default function RawMaterialPage() {
                             </button>
                             <button
                               type="button"
+                              className="btn-icon !h-8 !w-8"
+                              title="Hide"
+                              onClick={(e) => { e.stopPropagation(); handleHideBill(bill); }}
+                            >
+                              <EyeOff size={14} />
+                            </button>
+                            <button
+                              type="button"
                               className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
                               title="Archive"
                               onClick={(e) => { e.stopPropagation(); setDeletingBill(bill); }}
@@ -2041,6 +2123,87 @@ export default function RawMaterialPage() {
                           </tr>
                         ))}
                     </>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden bills — unhide from here */}
+      {tab === "hidden" && (
+        <div className="data-table-wrap">
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Bill No.</th>
+                  <th>Date</th>
+                  <th>Company</th>
+                  <th>Kaarigers</th>
+                  <th>Total Qty</th>
+                  <th>Total Amount</th>
+                  <th>Status</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hiddenBills.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-sm text-[var(--text-muted)]">
+                      {search || dateFrom || dateTo
+                        ? "No hidden bills match your search."
+                        : "No hidden bills. Use Hide on a bill to move it here."}
+                    </td>
+                  </tr>
+                ) : (
+                  hiddenBills.map((bill) => (
+                    <tr key={bill.id} className="opacity-90">
+                      <td>
+                        <span className="font-semibold">#{bill.billNo}</span>
+                      </td>
+                      <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
+                      <td>{bill.companyName || "—"}</td>
+                      <td>{bill.kaarigers.length}</td>
+                      <td className="font-semibold">
+                        {bill.grandTotalQuantity.toLocaleString("en-IN")} pcs
+                      </td>
+                      <td className="font-bold text-[var(--jade-deep)]">
+                        {rupee(bill.grandTotalAmount)}
+                      </td>
+                      <td>
+                        <span className="badge badge-success">Hidden</span>
+                      </td>
+                      <td className="text-right">
+                        <div className="inline-flex gap-1">
+                          <button
+                            type="button"
+                            className="btn-icon !h-8 !w-8"
+                            title="View"
+                            onClick={() => setViewBill(bill)}
+                          >
+                            <FileText size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-icon !h-8 !w-8"
+                            title="Unhide"
+                            onClick={() => handleUnhideBill(bill)}
+                          >
+                            <Eye size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                            title="Archive"
+                            onClick={() => setDeletingBill(bill)}
+                          >
+                            <Archive size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   ))
                 )}
               </tbody>
@@ -2227,34 +2390,43 @@ export default function RawMaterialPage() {
       )}
 
       {deletePayment && (
-        <div className="modal-backdrop" onClick={() => setDeletePayment(null)}>
-          <div className="modal-panel max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <div className="space-y-4 p-5">
-              <h3 className="font-display text-lg font-bold">Delete payment?</h3>
-              <p className="text-sm text-[var(--text-muted)]">
-                Remove {rupee(deletePayment.amount)} paid to{" "}
-                <strong>{deletePayment.companyName}</strong> on {fmtDate(deletePayment.date)}?
-                Outstanding will increase again.
-              </p>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setDeletePayment(null)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary bg-danger hover:bg-danger/90"
-                  onClick={() => handleDeletePayment(deletePayment)}
-                >
-                  Delete
-                </button>
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+            onClick={() => setDeletePayment(null)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--surface-raised)] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="space-y-4 p-5">
+                <h3 className="font-display text-lg font-bold">Delete payment?</h3>
+                <p className="text-sm text-[var(--text-muted)]">
+                  Remove {rupee(deletePayment.amount)} paid to{" "}
+                  <strong>{deletePayment.companyName}</strong> on {fmtDate(deletePayment.date)}?
+                  Outstanding will increase again.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setDeletePayment(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary bg-danger hover:bg-danger/90"
+                    onClick={() => handleDeletePayment(deletePayment)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {showAddModal && (

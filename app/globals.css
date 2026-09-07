@@ -1002,6 +1002,16 @@ body {
   animation-delay: 0.24s;
 }
 
+.modal-backdrop {
+  @apply fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm;
+}
+
+.modal-panel {
+  @apply w-full overflow-hidden rounded-2xl bg-[var(--surface-raised)] shadow-2xl;
+  max-height: min(92vh, 900px);
+  overflow-y: auto;
+}
+
 .record-card {
   @apply surface p-4;
 }
