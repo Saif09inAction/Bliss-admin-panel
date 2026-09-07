@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   collection,
   deleteDoc,
@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import {
   Archive,
+  ArrowLeft,
   Banknote,
   Building2,
   CheckCircle2,
@@ -41,8 +42,10 @@ import type {
 } from "@/lib/types";
 import PageToolbar from "@/components/admin/PageToolbar";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
+import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import SearchSelect from "@/components/admin/SearchSelect";
 import { dateInRange, dateMatchesSearch } from "@/lib/csv";
+import { useSelection } from "@/lib/use-selection";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -1150,6 +1153,7 @@ function PayCompanyModal({
   bills,
   payments,
   saving,
+  initialCompanyId,
   onClose,
   onPay,
 }: {
@@ -1157,6 +1161,7 @@ function PayCompanyModal({
   bills: RawMaterialBill[];
   payments: RawMaterialPayment[];
   saving: boolean;
+  initialCompanyId?: string;
   onClose: () => void;
   onPay: (payload: {
     companyId: string;
@@ -1166,7 +1171,7 @@ function PayCompanyModal({
     remarks: string;
   }) => void;
 }) {
-  const [companyId, setCompanyId] = useState("");
+  const [companyId, setCompanyId] = useState(initialCompanyId || "");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(today());
   const [remarks, setRemarks] = useState("");
@@ -1450,6 +1455,229 @@ function EditPaymentModal({
   );
 }
 
+// ─── Company detail (bills + payments) ────────────────────────────────────────
+
+function CompanyDetailView({
+  company,
+  bills,
+  payments,
+  onBack,
+  onViewBill,
+  onPay,
+  onEditPayment,
+  onDeletePayment,
+}: {
+  company: RawMaterialCompany;
+  bills: RawMaterialBill[];
+  payments: RawMaterialPayment[];
+  onBack: () => void;
+  onViewBill: (bill: RawMaterialBill) => void;
+  onPay: () => void;
+  onEditPayment: (p: RawMaterialPayment) => void;
+  onDeletePayment: (p: RawMaterialPayment) => void;
+}) {
+  const key = normCompany(company.name);
+  const companyBills = useMemo(
+    () =>
+      bills
+        .filter(
+          (b) =>
+            b.status === "active" &&
+            normCompany(b.companyName || "") === key
+        )
+        .sort((a, b) => b.createdAt - a.createdAt),
+    [bills, key]
+  );
+  const companyPayments = useMemo(
+    () =>
+      payments
+        .filter(
+          (p) =>
+            (company.id && p.companyId === company.id) ||
+            (key && normCompany(p.companyName) === key)
+        )
+        .sort((a, b) => {
+          if (a.date !== b.date) return b.date.localeCompare(a.date);
+          return b.createdAt - a.createdAt;
+        }),
+    [payments, company.id, key]
+  );
+
+  const billed = companyBilledTotal(bills, company.name);
+  const paid = companyPaidTotal(payments, company);
+  const outstanding = companyOutstanding(bills, payments, company);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onBack}>
+          <ArrowLeft size={14} />
+          Back
+        </button>
+        <button type="button" className="btn btn-primary btn-sm ml-auto" onClick={onPay}>
+          <Banknote size={14} />
+          Pay
+        </button>
+      </div>
+
+      <div className="surface p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--jade-soft)]">
+            <Building2 className="h-5 w-5 text-[var(--jade-deep)]" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-display text-xl font-bold">{company.name}</h3>
+            <p className="text-sm text-[var(--text-muted)]">
+              {companyBills.length} bill{companyBills.length !== 1 ? "s" : ""} ·{" "}
+              {companyPayments.length} payment{companyPayments.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3.5 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Billed
+            </p>
+            <p className="mt-1 font-display text-lg font-bold">{rupee(billed)}</p>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] px-3.5 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Paid
+            </p>
+            <p className="mt-1 font-display text-lg font-bold text-[var(--jade-deep)]">
+              {rupee(paid)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3.5 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-900/70">
+              Outstanding
+            </p>
+            <p
+              className={`mt-1 font-display text-lg font-bold ${
+                outstanding > 0 ? "text-danger" : "text-[var(--jade-deep)]"
+              }`}
+            >
+              {rupee(outstanding)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="surface overflow-hidden">
+        <div className="border-b border-[var(--border)] px-4 py-3">
+          <p className="font-display text-sm font-bold">Bills</p>
+        </div>
+        {companyBills.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">
+            No active bills for this company.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Bill No.</th>
+                  <th>Date</th>
+                  <th>Qty</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th className="text-right">View</th>
+                </tr>
+              </thead>
+              <tbody>
+                {companyBills.map((bill) => (
+                  <tr key={bill.id}>
+                    <td className="font-semibold">#{bill.billNo}</td>
+                    <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
+                    <td>{bill.grandTotalQuantity.toLocaleString("en-IN")} pcs</td>
+                    <td className="font-bold text-[var(--jade-deep)]">
+                      {rupee(bill.grandTotalAmount)}
+                    </td>
+                    <td>
+                      {bill.hidden ? (
+                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                          Hidden
+                        </span>
+                      ) : (
+                        <span className="badge badge-success">Active</span>
+                      )}
+                    </td>
+                    <td className="text-right">
+                      <button
+                        type="button"
+                        className="btn-icon !h-8 !w-8"
+                        title="View bill"
+                        onClick={() => onViewBill(bill)}
+                      >
+                        <FileText size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="surface overflow-hidden">
+        <div className="border-b border-[var(--border)] px-4 py-3">
+          <p className="font-display text-sm font-bold">Transactions</p>
+        </div>
+        {companyPayments.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">
+            No payments yet. Tap Pay to record one.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Remarks</th>
+                  <th>By</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {companyPayments.map((p) => (
+                  <tr key={p.id}>
+                    <td className="text-[var(--text-muted)]">{fmtDate(p.date)}</td>
+                    <td className="font-bold text-[var(--jade-deep)]">{rupee(p.amount)}</td>
+                    <td className="text-[var(--text-muted)]">{p.remarks || "—"}</td>
+                    <td className="text-[var(--text-muted)]">{p.createdBy || "—"}</td>
+                    <td className="text-right">
+                      <div className="inline-flex gap-1">
+                        <button
+                          type="button"
+                          className="btn-icon !h-8 !w-8"
+                          title="Edit"
+                          onClick={() => onEditPayment(p)}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon !h-8 !w-8 hover:!border-danger hover:!bg-red-50 hover:!text-danger"
+                          title="Delete"
+                          onClick={() => onDeletePayment(p)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function RawMaterialPage() {
@@ -1473,6 +1701,9 @@ export default function RawMaterialPage() {
   const [editPayment, setEditPayment] = useState<RawMaterialPayment | null>(null);
   const [deletePayment, setDeletePayment] = useState<RawMaterialPayment | null>(null);
   const [expandedBills, setExpandedBills] = useState<Set<string>>(new Set());
+  const [detailCompany, setDetailCompany] = useState<RawMaterialCompany | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [payPrefillCompanyId, setPayPrefillCompanyId] = useState<string | undefined>();
 
   // Load kaarigers once
   useEffect(() => {
@@ -1575,6 +1806,9 @@ export default function RawMaterialPage() {
         );
       });
   }, [bills, search, dateFrom, dateTo]);
+
+  const visibleActiveIds = useMemo(() => activeBills.map((b) => b.id), [activeBills]);
+  const selection = useSelection(visibleActiveIds);
 
   const hiddenBills = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1714,6 +1948,61 @@ export default function RawMaterialPage() {
     }
   }
 
+  function openCompanyDetail(nameOrCompany: string | RawMaterialCompany) {
+    if (typeof nameOrCompany !== "string") {
+      setDetailCompany(nameOrCompany);
+      return;
+    }
+    const name = nameOrCompany.trim();
+    if (!name) return;
+    const found = companies.find((c) => normCompany(c.name) === normCompany(name));
+    setDetailCompany(found || { id: "", name, createdAt: 0 });
+  }
+
+  async function handleBulkHide() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    if (!confirm(`Hide ${ids.length} selected bill${ids.length === 1 ? "" : "s"}?`)) return;
+    setBulkBusy(true);
+    try {
+      for (const id of ids) {
+        await updateDoc(doc(getDb(), "raw_material_bills", id), { hidden: true });
+      }
+      selection.clear();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to hide selected bills.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkArchive() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Archive ${ids.length} selected bill${ids.length === 1 ? "" : "s"}? They move to History.`
+      )
+    ) {
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const now = Date.now();
+      for (const id of ids) {
+        await updateDoc(doc(getDb(), "raw_material_bills", id), {
+          status: "deleted",
+          deletedAt: now,
+        });
+      }
+      selection.clear();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to archive selected bills.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   async function handlePermanentDelete(bill: RawMaterialBill) {
     try {
       const { deleteDoc } = await import("firebase/firestore");
@@ -1768,7 +2057,8 @@ export default function RawMaterialPage() {
       };
       await setDoc(doc(getDb(), "raw_material_payments", id), payment);
       setShowPayModal(false);
-      setTab("transactions");
+      setPayPrefillCompanyId(undefined);
+      if (!detailCompany) setTab("transactions");
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to save payment.");
     } finally {
@@ -1898,11 +2188,30 @@ export default function RawMaterialPage() {
         </div>
       </div>
 
+      {detailCompany ? (
+        <CompanyDetailView
+          company={detailCompany}
+          bills={bills}
+          payments={payments}
+          onBack={() => setDetailCompany(null)}
+          onViewBill={setViewBill}
+          onPay={() => {
+            setPayPrefillCompanyId(detailCompany.id || undefined);
+            setShowPayModal(true);
+          }}
+          onEditPayment={setEditPayment}
+          onDeletePayment={setDeletePayment}
+        />
+      ) : (
+      <>
       {/* Tab switcher */}
       <div className="flex flex-wrap gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-1">
         <button
           type="button"
-          onClick={() => setTab("active")}
+          onClick={() => {
+            setTab("active");
+            selection.clear();
+          }}
           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
             tab === "active"
               ? "bg-[var(--jade-deep)] text-white shadow-sm"
@@ -1923,7 +2232,10 @@ export default function RawMaterialPage() {
         </button>
         <button
           type="button"
-          onClick={() => setTab("hidden")}
+          onClick={() => {
+            setTab("hidden");
+            selection.clear();
+          }}
           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
             tab === "hidden"
               ? "bg-[var(--jade-deep)] text-white shadow-sm"
@@ -1944,7 +2256,10 @@ export default function RawMaterialPage() {
         </button>
         <button
           type="button"
-          onClick={() => setTab("transactions")}
+          onClick={() => {
+            setTab("transactions");
+            selection.clear();
+          }}
           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
             tab === "transactions"
               ? "bg-[var(--jade-deep)] text-white shadow-sm"
@@ -1965,7 +2280,10 @@ export default function RawMaterialPage() {
         </button>
         <button
           type="button"
-          onClick={() => setTab("history")}
+          onClick={() => {
+            setTab("history");
+            selection.clear();
+          }}
           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition ${
             tab === "history"
               ? "bg-[var(--jade-deep)] text-white shadow-sm"
@@ -2003,11 +2321,41 @@ export default function RawMaterialPage() {
 
       {/* Active bills — single unified table (no duplicate card view) */}
       {tab === "active" && (
+        <>
+          <BulkSelectBar
+            selectedCount={selection.selectedCount}
+            totalVisible={visibleActiveIds.length}
+            allVisibleSelected={selection.allVisibleSelected}
+            someVisibleSelected={selection.someVisibleSelected}
+            onToggleAll={selection.toggleAllVisible}
+            onClear={selection.clear}
+            onDelete={() => void handleBulkArchive()}
+            deleting={bulkBusy}
+            noun="bill"
+            extraActions={
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => void handleBulkHide()}
+                disabled={bulkBusy}
+              >
+                <EyeOff className="h-3.5 w-3.5" />
+                {bulkBusy ? "Working…" : `Hide ${selection.selectedCount}`}
+              </button>
+            }
+          />
         <div className="data-table-wrap">
           <div className="overflow-x-auto">
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-10">
+                    <SelectCheckbox
+                      checked={selection.allVisibleSelected}
+                      onChange={selection.toggleAllVisible}
+                      label="Select all bills"
+                    />
+                  </th>
                   <th>Bill No.</th>
                   <th>Date</th>
                   <th>Company</th>
@@ -2021,16 +2369,17 @@ export default function RawMaterialPage() {
               <tbody>
                 {activeBills.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-sm text-[var(--text-muted)]">
+                    <td colSpan={9} className="py-12 text-center text-sm text-[var(--text-muted)]">
                       {search ? "No bills match your search." : "No raw material bills yet. Click \"+ Add Raw Material\" to create one."}
                     </td>
                   </tr>
                 ) : (
                   activeBills.map((bill) => (
-                    <>
+                    <Fragment key={bill.id}>
                       <tr
-                        key={bill.id}
-                        className="cursor-pointer hover:bg-[var(--surface-mist)]"
+                        className={`cursor-pointer hover:bg-[var(--surface-mist)] ${
+                          selection.isSelected(bill.id) ? "bg-jade-soft/30" : ""
+                        }`}
                         onClick={() =>
                           setExpandedBills((prev) => {
                             const next = new Set(prev);
@@ -2040,6 +2389,13 @@ export default function RawMaterialPage() {
                           })
                         }
                       >
+                        <td>
+                          <SelectCheckbox
+                            checked={selection.isSelected(bill.id)}
+                            onChange={() => selection.toggle(bill.id)}
+                            label={`Select bill ${bill.billNo}`}
+                          />
+                        </td>
                         <td>
                           <div className="flex items-center gap-2">
                             {expandedBills.has(bill.id) ? (
@@ -2051,7 +2407,22 @@ export default function RawMaterialPage() {
                           </div>
                         </td>
                         <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
-                        <td>{bill.companyName || "—"}</td>
+                        <td>
+                          {bill.companyName ? (
+                            <button
+                              type="button"
+                              className="font-medium text-[var(--jade-deep)] underline-offset-2 hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openCompanyDetail(bill.companyName!);
+                              }}
+                            >
+                              {bill.companyName}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td>{bill.kaarigers.length}</td>
                         <td className="font-semibold">
                           {bill.grandTotalQuantity.toLocaleString("en-IN")} pcs
@@ -2104,6 +2475,7 @@ export default function RawMaterialPage() {
                       {expandedBills.has(bill.id) &&
                         bill.kaarigers.map((k, ki) => (
                           <tr key={`${bill.id}-k${ki}`} className="bg-[var(--jade-soft)]/30 text-sm">
+                            <td />
                             <td className="pl-8 text-[var(--text-muted)]">└ {k.kaarigerName}</td>
                             <td className="text-[var(--text-muted)]">{k.materialName}</td>
                             <td />
@@ -2122,13 +2494,14 @@ export default function RawMaterialPage() {
                             <td />
                           </tr>
                         ))}
-                    </>
+                    </Fragment>
                   ))
                 )}
               </tbody>
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* Hidden bills — unhide from here */}
@@ -2164,7 +2537,19 @@ export default function RawMaterialPage() {
                         <span className="font-semibold">#{bill.billNo}</span>
                       </td>
                       <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
-                      <td>{bill.companyName || "—"}</td>
+                      <td>
+                        {bill.companyName ? (
+                          <button
+                            type="button"
+                            className="font-medium text-[var(--jade-deep)] underline-offset-2 hover:underline"
+                            onClick={() => openCompanyDetail(bill.companyName!)}
+                          >
+                            {bill.companyName}
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td>{bill.kaarigers.length}</td>
                       <td className="font-semibold">
                         {bill.grandTotalQuantity.toLocaleString("en-IN")} pcs
@@ -2220,15 +2605,20 @@ export default function RawMaterialPage() {
               {companies.map((c) => {
                 const due = companyOutstanding(bills, payments, c);
                 return (
-                  <div
+                  <button
                     key={c.id}
-                    className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3.5 py-3"
+                    type="button"
+                    onClick={() => openCompanyDetail(c)}
+                    className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-3.5 py-3 text-left transition hover:border-[var(--jade)] hover:shadow-sm"
                   >
                     <div>
                       <p className="text-sm font-semibold">{c.name}</p>
                       <p className="text-xs text-[var(--text-muted)]">
                         Billed {rupee(companyBilledTotal(bills, c.name))} · Paid{" "}
                         {rupee(companyPaidTotal(payments, c))}
+                      </p>
+                      <p className="mt-0.5 text-[10px] font-medium text-[var(--jade-deep)]">
+                        Tap for bills &amp; transactions
                       </p>
                     </div>
                     <p
@@ -2238,7 +2628,7 @@ export default function RawMaterialPage() {
                     >
                       {rupee(due)}
                     </p>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -2270,7 +2660,15 @@ export default function RawMaterialPage() {
                     filteredPayments.map((p) => (
                       <tr key={p.id}>
                         <td className="text-[var(--text-muted)]">{fmtDate(p.date)}</td>
-                        <td className="font-semibold">{p.companyName}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="font-semibold text-[var(--jade-deep)] underline-offset-2 hover:underline"
+                            onClick={() => openCompanyDetail(p.companyName)}
+                          >
+                            {p.companyName}
+                          </button>
+                        </td>
                         <td className="font-bold text-[var(--jade-deep)]">{rupee(p.amount)}</td>
                         <td className="text-[var(--text-muted)]">{p.remarks || "—"}</td>
                         <td className="text-[var(--text-muted)]">{p.createdBy || "—"}</td>
@@ -2333,7 +2731,19 @@ export default function RawMaterialPage() {
                     <tr key={bill.id} className="opacity-75">
                       <td><span className="font-semibold">#{bill.billNo}</span></td>
                       <td className="text-[var(--text-muted)]">{fmtDate(bill.date)}</td>
-                      <td>{bill.companyName || "—"}</td>
+                      <td>
+                        {bill.companyName ? (
+                          <button
+                            type="button"
+                            className="font-medium text-[var(--jade-deep)] underline-offset-2 hover:underline"
+                            onClick={() => openCompanyDetail(bill.companyName!)}
+                          >
+                            {bill.companyName}
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td className="text-[var(--text-muted)]">{bill.deletedAt ? fmtTs(bill.deletedAt) : "—"}</td>
                       <td>{bill.kaarigers.length}</td>
                       <td>{bill.grandTotalQuantity.toLocaleString("en-IN")} pcs</td>
@@ -2360,6 +2770,9 @@ export default function RawMaterialPage() {
         </div>
       )}
 
+      </>
+      )}
+
       {/* Modals */}
       {showCompaniesModal && (
         <CompaniesManageModal
@@ -2374,7 +2787,11 @@ export default function RawMaterialPage() {
           bills={bills}
           payments={payments}
           saving={saving}
-          onClose={() => setShowPayModal(false)}
+          initialCompanyId={payPrefillCompanyId}
+          onClose={() => {
+            setShowPayModal(false);
+            setPayPrefillCompanyId(undefined);
+          }}
           onPay={handlePayCompany}
         />
       )}
