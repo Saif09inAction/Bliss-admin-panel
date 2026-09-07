@@ -129,6 +129,8 @@ export default function RepairingPage() {
   const [approveRepairDoc, setApproveRepairDoc] = useState<OrderRepair | null>(null);
   const [approvePrice, setApprovePrice] = useState("");
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(getDb(), "order_repairs"), (snap) => {
@@ -388,14 +390,7 @@ export default function RepairingPage() {
     // Standalone approvals use the modal so admin can choose live vs next bill.
     if (isStandaloneRepair(r.orderId) || r.faultyPricePerPiece <= 0 || r.totalRepairCost <= 0) {
       setApproveRepairDoc(r);
-      const fromRepair = r.faultyPricePerPiece > 0 ? r.faultyPricePerPiece : 0;
-      const fromCatalog =
-        fromRepair > 0
-          ? 0
-          : catalogProducts.find(
-              (p) => p.name.trim().toLowerCase() === r.productName.trim().toLowerCase()
-            )?.price || 0;
-      const price = fromRepair > 0 ? fromRepair : fromCatalog;
+      const price = resolveApprovePrice(r);
       setApprovePrice(price > 0 ? String(price) : "");
       return;
     }
@@ -528,6 +523,137 @@ export default function RepairingPage() {
     }
   }
 
+  function resolveApprovePrice(r: OrderRepair): number {
+    if (r.faultyPricePerPiece > 0) return r.faultyPricePerPiece;
+    const catalogPrice =
+      catalogProducts.find(
+        (p) => p.name.trim().toLowerCase() === r.productName.trim().toLowerCase()
+      )?.price || 0;
+    return catalogPrice > 0 ? catalogPrice : 0;
+  }
+
+  async function approveSelectedRepairs() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    const selectedRows = repairs.filter((r) => ids.includes(r.id));
+    const pending = selectedRows.filter((r) => repairStatus(r) === "PENDING");
+    if (pending.length === 0) {
+      alert("Select pending repairing rows to approve.");
+      return;
+    }
+
+    const priced: { repair: OrderRepair; price: number; total: number }[] = [];
+    const missingPrice: string[] = [];
+    for (const r of pending) {
+      const price = resolveApprovePrice(r);
+      const qty = r.faultyQuantity || 0;
+      if (qty <= 0) {
+        missingPrice.push(`${r.productName || "Repair"} (qty missing)`);
+        continue;
+      }
+      if (price <= 0) {
+        missingPrice.push(r.productName || r.id);
+        continue;
+      }
+      priced.push({
+        repair: r,
+        price,
+        total: Math.round(qty * price * 100) / 100,
+      });
+    }
+
+    if (priced.length === 0) {
+      alert(
+        missingPrice.length
+          ? `Cannot approve — set ₹/pc (or catalog price) for: ${missingPrice.slice(0, 5).join(", ")}${
+              missingPrice.length > 5 ? "…" : ""
+            }`
+          : "Nothing to approve."
+      );
+      return;
+    }
+
+    const batchTotal = priced.reduce((s, p) => s + p.total, 0);
+    const skipNote =
+      missingPrice.length > 0
+        ? `\n\nSkipped ${missingPrice.length} without price/qty: ${missingPrice.slice(0, 3).join(", ")}${
+            missingPrice.length > 3 ? "…" : ""
+          }`
+        : "";
+    if (
+      !confirm(
+        `Approve ${priced.length} repairing${priced.length === 1 ? "" : "s"} (${money(batchTotal)}) as pending on bill (not deducted until added to bill)?${skipNote}`
+      )
+    ) {
+      return;
+    }
+
+    setBulkApproving(true);
+    try {
+      const orderIdsToSync = new Set<string>();
+      for (const { repair: r, price, total } of priced) {
+        await updateDoc(doc(getDb(), "order_repairs", r.id), {
+          status: "APPROVED",
+          faultyPricePerPiece: price,
+          faultyTotal: total,
+          totalRepairCost: total,
+          reviewedBy: session?.name || "Admin",
+          reviewedAt: Date.now(),
+          deferToNextBill: true,
+        });
+        if (!isStandaloneRepair(r.orderId)) {
+          orderIdsToSync.add(r.orderId);
+        }
+      }
+      await Promise.all(Array.from(orderIdsToSync).map((id) => syncOrderRepairTotal(id)));
+      selection.clear();
+      setMsg(
+        `Approved ${priced.length} repairing${priced.length === 1 ? "" : "s"}${
+          missingPrice.length ? ` · skipped ${missingPrice.length}` : ""
+        }.`
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to approve selected.");
+    } finally {
+      setBulkApproving(false);
+    }
+  }
+
+  async function rejectSelectedRepairs() {
+    const ids = selection.selectedIds;
+    if (ids.length === 0) return;
+    const selectedRows = repairs.filter((r) => ids.includes(r.id));
+    const pending = selectedRows.filter((r) => repairStatus(r) === "PENDING");
+    if (pending.length === 0) {
+      alert("Select pending repairing rows to reject.");
+      return;
+    }
+    if (
+      !confirm(
+        `Reject ${pending.length} pending repairing${pending.length === 1 ? "" : "s"}? Nothing will be deducted from hisaab.`
+      )
+    ) {
+      return;
+    }
+
+    setBulkRejecting(true);
+    try {
+      for (const r of pending) {
+        await updateDoc(doc(getDb(), "order_repairs", r.id), {
+          status: "REJECTED",
+          reviewedBy: session?.name || "Admin",
+          reviewedAt: Date.now(),
+        });
+      }
+      selection.clear();
+      setMsg(`Rejected ${pending.length} repairing${pending.length === 1 ? "" : "s"}.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to reject selected.");
+    } finally {
+      setBulkRejecting(false);
+    }
+  }
+
   function statusBadge(status: RepairStatus) {
     switch (status) {
       case "PENDING":
@@ -611,6 +737,10 @@ export default function RepairingPage() {
         onDelete={() => void deleteSelectedRepairs()}
         deleting={bulkDeleting}
         noun="repairing"
+        onApprove={() => void approveSelectedRepairs()}
+        onReject={() => void rejectSelectedRepairs()}
+        approving={bulkApproving}
+        rejecting={bulkRejecting}
       />
 
       {filtered.length === 0 ? (

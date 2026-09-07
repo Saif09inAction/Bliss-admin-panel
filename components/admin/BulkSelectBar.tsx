@@ -1,6 +1,7 @@
 "use client";
 
-import { Trash2, X } from "lucide-react";
+import { Check, Trash2, X } from "lucide-react";
+import type { ReactNode } from "react";
 
 export default function BulkSelectBar({
   selectedCount,
@@ -12,6 +13,11 @@ export default function BulkSelectBar({
   onDelete,
   deleting = false,
   noun = "record",
+  onApprove,
+  onReject,
+  approving = false,
+  rejecting = false,
+  extraActions,
 }: {
   selectedCount: number;
   totalVisible: number;
@@ -22,8 +28,15 @@ export default function BulkSelectBar({
   onDelete: () => void;
   deleting?: boolean;
   noun?: string;
+  onApprove?: () => void;
+  onReject?: () => void;
+  approving?: boolean;
+  rejecting?: boolean;
+  extraActions?: ReactNode;
 }) {
   if (selectedCount <= 0) return null;
+
+  const busy = deleting || approving || rejecting;
 
   return (
     <div className="sticky top-2 z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-danger/25 bg-red-50/95 px-3 py-2.5 shadow-sm backdrop-blur sm:px-4">
@@ -46,15 +59,38 @@ export default function BulkSelectBar({
         ) : null}
       </label>
       <div className="ml-auto flex flex-wrap items-center gap-2">
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onClear} disabled={deleting}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onClear} disabled={busy}>
           <X className="h-3.5 w-3.5" />
           Clear
         </button>
+        {extraActions}
+        {onApprove && (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={onApprove}
+            disabled={busy}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {approving ? "Approving…" : `Approve ${selectedCount}`}
+          </button>
+        )}
+        {onReject && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onReject}
+            disabled={busy}
+          >
+            <X className="h-3.5 w-3.5" />
+            {rejecting ? "Rejecting…" : `Reject ${selectedCount}`}
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-sm !bg-danger !text-white hover:!brightness-95"
           onClick={onDelete}
-          disabled={deleting}
+          disabled={busy}
         >
           <Trash2 className="h-3.5 w-3.5" />
           {deleting ? "Deleting…" : `Delete ${selectedCount} ${noun}${selectedCount === 1 ? "" : "s"}`}
