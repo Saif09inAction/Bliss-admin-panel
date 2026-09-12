@@ -53,6 +53,7 @@ import {
   previousKaarigerBills,
   syncOrderRepairAndRemaining,
 } from "@/lib/kaariger-repair";
+import { settleUnsettledCreditForAllKaarigers, settleUnsettledCreditIntoLiveBill } from "@/lib/settle-credit";
 import { isPendingBillRepair, isRemainingStandaloneRepair } from "@/lib/types";
 import type {
   Employee,
@@ -171,29 +172,39 @@ export default function HisaabPage() {
     }
   }
 
-  async function loadKaarigers() {
+  async function loadKaarigers(opts?: { settleCredits?: boolean }) {
     const snap = await getDocs(collection(getDb(), "employees"));
-    setKaarigers(
-      snap.docs
-        .filter((d) => d.data().role === "KAARIGER")
-        .map((d) => ({
-          id: d.id,
-          name: (d.data().name as string) || "",
-          phone: (d.data().phone as string) || "",
-          joiningDate: "",
-          monthlySalary: 0,
-          attendancePercentage: 0,
-          role: "KAARIGER" as const,
-          creditBalance: (d.data().creditBalance as number) || 0,
-          openingBalance: (d.data().openingBalance as number) || 0,
-          oldKharcha: (d.data().oldKharcha as number) || 0,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name))
-    );
+    const list = snap.docs
+      .filter((d) => d.data().role === "KAARIGER")
+      .map((d) => ({
+        id: d.id,
+        name: (d.data().name as string) || "",
+        phone: (d.data().phone as string) || "",
+        joiningDate: "",
+        monthlySalary: 0,
+        attendancePercentage: 0,
+        role: "KAARIGER" as const,
+        creditBalance: (d.data().creditBalance as number) || 0,
+        openingBalance: (d.data().openingBalance as number) || 0,
+        oldKharcha: (d.data().oldKharcha as number) || 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    setKaarigers(list);
+
+    // One-shot: bake open credit into each kaariger's current live bill (RAZIULLAH, etc.).
+    if (opts?.settleCredits) {
+      const withCredit = list.filter((k) => (k.creditBalance || 0) > 0 && k.phone);
+      if (withCredit.length > 0) {
+        const settled = await settleUnsettledCreditForAllKaarigers(withCredit);
+        if (settled > 0) {
+          await loadKaarigers();
+        }
+      }
+    }
   }
 
   useEffect(() => {
-    loadKaarigers();
+    void loadKaarigers({ settleCredits: true });
   }, []);
 
   async function loadKaarigerData(id: string) {
@@ -451,15 +462,70 @@ export default function HisaabPage() {
       const explicitCredit = loadedPayments
         .filter(isCreditPayment)
         .reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
-      const storedCredit = Math.max(
+      let creditNow = Math.max(
         0,
         kaarigers.find((k) => k.phone === id)?.creditBalance || 0
       );
-      if (storedCredit > explicitCredit + 0.5) {
+      if (creditNow > explicitCredit + 0.5) {
+        creditNow = explicitCredit;
         await updateDoc(doc(db, "employees", id), { creditBalance: explicitCredit });
         setKaarigers((prev) =>
           prev.map((k) => (k.phone === id ? { ...k, creditBalance: explicitCredit } : k))
         );
+      }
+
+      // Bake any open credit into the current live bill (RAZIULLAH / test credit / etc.).
+      const settled = await settleUnsettledCreditIntoLiveBill({
+        kaarigerId: id,
+        creditBalance: creditNow,
+        orders: loadedOrders,
+      });
+      if (settled.applied > 0) {
+        const orderSnapSettled = await getDocs(
+          query(collection(db, "kaariger_orders"), where("kaarigerId", "==", id))
+        );
+        loadedOrders = orderSnapSettled.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: (data.id as string) || d.id,
+              kaarigerId: data.kaarigerId as string,
+              kaarigerName: data.kaarigerName as string,
+              productName: (data.productName as string) || "",
+              targetQuantity: (data.targetQuantity as number) || 0,
+              color: (data.color as string) || "",
+              rawMaterials: (data.rawMaterials as OrderMaterial[]) || [],
+              totalDealAmount: (data.totalDealAmount as number) || 0,
+              pricePerPiece: data.pricePerPiece as number | undefined,
+              pricingType: (data.pricingType as "OVERALL" | "PER_PIECE") || "OVERALL",
+              status:
+                (data.status as string) === "APPROVED"
+                  ? "COMPLETED"
+                  : ((data.status as string) || "ASSIGNED"),
+              approvedQuantity: (data.approvedQuantity as number) || 0,
+              createdBy: (data.createdBy as string) || "",
+              createdAt: (data.createdAt as number) || 0,
+              notes: data.notes as string | undefined,
+              originalDealAmount: data.originalDealAmount as number | undefined,
+              repairDeductionTotal: (data.repairDeductionTotal as number) || 0,
+              products: (data.products as OrderProductLine[]) || [],
+              productsTotal: data.productsTotal as number | undefined,
+              materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
+              materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+              kharchaGiven: data.kharchaGiven as number | undefined,
+              kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
+              kharchaCarryIn: data.kharchaCarryIn as number | undefined,
+              weekLabel: data.weekLabel as string | undefined,
+              weekKey: data.weekKey as string | undefined,
+              openingAtCreation: data.openingAtCreation as number | undefined,
+              addBalance: data.addBalance as number | undefined,
+              closingAtCreation: data.closingAtCreation as number | undefined,
+              creditApplied: data.creditApplied as number | undefined,
+            } satisfies KaarigerOrder;
+          })
+          .sort((a, b) => b.createdAt - a.createdAt);
+        setOrders(loadedOrders);
+        await loadKaarigers();
       }
 
       setRepairs(loadedRepairs);
