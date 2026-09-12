@@ -1576,6 +1576,7 @@ export default function HisaabPage() {
                     onDetachRepair={(repairId) => void removeRepairFromBill(repairId, o.id)}
                     openingBalance={openingBal}
                     oldKharcha={oldKharchaBal}
+                    creditBalance={creditBal}
                     onPay={() => {
                       setPayTarget(
                         Math.max(0, o.kharchaGiven || 0) > 0 ? "kharcha" : "remaining"
@@ -1917,6 +1918,7 @@ function OrderDetailCard({
   onDetachRepair,
   openingBalance = 0,
   oldKharcha = 0,
+  creditBalance = 0,
   onPay,
 }: {
   order: KaarigerOrder;
@@ -1933,6 +1935,8 @@ function OrderDetailCard({
   openingBalance?: number;
   /** Unpaid weekly kharcha carried from previous weeks. */
   oldKharcha?: number;
+  /** Profile credit subtracted from Total Remaining (same as header). */
+  creditBalance?: number;
   onPay?: () => void;
 }) {
   const [showWhatsApp, setShowWhatsApp] = useState(false);
@@ -2265,6 +2269,7 @@ function OrderDetailCard({
         payments={orderPayments}
         openingBalance={openingBalance}
         oldKharcha={oldKharcha}
+        creditBalance={creditBalance}
         billRepairs={orderRepairs}
       />
     </div>
@@ -2281,12 +2286,14 @@ function GrandTotalBox({
   payments,
   openingBalance = 0,
   oldKharcha = 0,
+  creditBalance = 0,
   billRepairs = [],
 }: {
   order: KaarigerOrder;
   payments: KaarigerPayment[];
   openingBalance?: number;
   oldKharcha?: number;
+  creditBalance?: number;
   billRepairs?: OrderRepair[];
 }) {
   const productsTotal = order.productsTotal ?? 0;
@@ -2310,8 +2317,12 @@ function GrandTotalBox({
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   const box = orderKharchaBalance(order, paid);
-  /** Remaining after this bill create (Pay does not change it). Can be negative. */
-  const totalRemainingHere = closingShown + old;
+  /** Gross remaining after this bill (before profile credit). */
+  const beforeCredit = closingShown + old;
+  const credit = Math.max(0, creditBalance || 0);
+  const creditApplied = Math.min(credit, Math.max(0, beforeCredit));
+  /** Matches Hisaab header Total Remaining when this is the live bill. */
+  const totalRemainingHere = beforeCredit - creditApplied;
   const transferLines = [...payments].sort((a, b) =>
     `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
   );
@@ -2353,7 +2364,16 @@ function GrandTotalBox({
           <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
         )}
         <Row label="Outstanding after create" value={money(closingShown)} bold accent="amber" />
- 
+        {old > 0 && (
+          <Row label="Old kharcha on profile" value={`+${money(old)}`} accent="amber" />
+        )}
+        {creditApplied > 0 && (
+          <Row
+            label="Credit applied"
+            value={`−${money(creditApplied)}`}
+            accent="green"
+          />
+        )}
 
         <div className="my-1.5 border-t border-jade/20" />
         <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">

@@ -482,24 +482,6 @@ export function buildHisaabLedger(opts: {
     });
   }
 
-  const creditBal = Math.max(0, opts.creditBalance || 0);
-  const creditFromPays = payments
-    .filter(payIsCredit)
-    .reduce((s, p) => s + Math.max(0, p.amount || 0), 0);
-  const creditShow = Math.max(creditBal, creditFromPays);
-  if (creditShow > 0) {
-    const lastPayAt = paymentGroupsChrono.reduce((m, g) => Math.max(m, g.at), startAt);
-    events.push({
-      id: "credit_balance",
-      kind: "credit",
-      title: "Credit (next bill)",
-      deltaRemaining: 0,
-      deltaKharcha: 0,
-      at: lastPayAt + 1,
-      creditAdded: creditShow,
-    });
-  }
-
   events.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
 
   let remaining = 0;
@@ -514,6 +496,50 @@ export function buildHisaabLedger(opts: {
       kharchaAfter: kharchaBox,
     });
   }
+
+  /**
+   * Apply stored creditBalance last — same as Total Remaining header and Android.
+   * Previously this line used deltaRemaining: 0 so the breakdown ended higher
+   * than the amber Total remaining card (e.g. ₹71,772 vs ₹51,649).
+   */
+  const creditBal = Math.max(0, opts.creditBalance || 0);
+  const creditApplied = Math.min(creditBal, Math.max(0, remaining));
+  if (creditApplied > 0) {
+    remaining -= creditApplied;
+    const lastAt = lines.reduce((m, l) => Math.max(m, l.at), startAt);
+    lines.push({
+      id: "credit_balance",
+      kind: "credit",
+      title: "Credit applied",
+      subtitle:
+        creditBal > creditApplied
+          ? `Of ₹${Math.round(creditBal).toLocaleString("en-IN")} · surplus ₹${Math.round(creditBal - creditApplied).toLocaleString("en-IN")}`
+          : "Subtracted from remaining",
+      deltaRemaining: -creditApplied,
+      deltaKharcha: 0,
+      at: lastAt + 1,
+      remainingAfter: remaining,
+      kharchaAfter: kharchaBox,
+      creditAdded: creditBal,
+    });
+  }
+
+  // Keep last Remaining in sync with the header formula (float / reconstruction drift).
+  const liveRemaining = totalRemainingAmount({
+    openingBalance: (opts.openingBalance || 0) + Math.max(0, opts.oldKharcha || 0),
+    creditBalance: creditBal,
+    standaloneRepairTotal: opts.standaloneRepairTotal,
+  });
+  if (
+    lines.length > 0 &&
+    Math.abs(lines[lines.length - 1].remainingAfter - liveRemaining) > 0.5
+  ) {
+    lines[lines.length - 1] = {
+      ...lines[lines.length - 1],
+      remainingAfter: liveRemaining,
+    };
+  }
+
   return lines;
 }
 
