@@ -214,6 +214,7 @@ export default function WorkerProfilePanel({
               addBalance: data.addBalance as number | undefined,
               openingAtCreation: data.openingAtCreation as number | undefined,
               closingAtCreation: data.closingAtCreation as number | undefined,
+              creditApplied: data.creditApplied as number | undefined,
               productsTotal: data.productsTotal as number | undefined,
               materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
               repairDeductionTotal: (data.repairDeductionTotal as number) || 0,

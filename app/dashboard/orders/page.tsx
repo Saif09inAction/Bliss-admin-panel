@@ -852,13 +852,17 @@ export default function OrdersPage() {
         weekKey: weekMeta.key,
       };
 
-      // Remaining += ADD − week kharcha. Carry only adjusts the Kharcha box start.
+      // Remaining += ADD − week kharcha − settled credit. Carry only adjusts Kharcha box.
       const openingAtCreation = openingBase;
       const addBalance = orderAddBalance(order);
-      const closingAtCreation = openingAtCreation + addBalance - calc.kharchaAmount;
+      const grossClosing = openingAtCreation + addBalance - calc.kharchaAmount;
+      const creditApplied = Math.min(liveCredit, Math.max(0, grossClosing));
+      const closingAtCreation = grossClosing - creditApplied;
+      const creditLeft = Math.max(0, liveCredit - creditApplied);
       order.openingAtCreation = openingAtCreation;
       order.addBalance = addBalance;
       order.closingAtCreation = closingAtCreation;
+      order.creditApplied = creditApplied;
 
       await setDoc(doc(db, "kaariger_orders", id), order);
 
@@ -908,15 +912,21 @@ export default function OrdersPage() {
         openingBalance: closingAtCreation,
         oldKharcha: 0,
         kharchaCarry: 0,
+        creditBalance: creditLeft,
       });
 
       const totalAfterCreate = totalRemainingAmount({
         openingBalance: closingAtCreation,
-        creditBalance: liveCredit,
+        creditBalance: creditLeft,
       });
       const boxStart = calc.kharchaAmount - carryIn;
       setSuccessMsg(
         `${weekMeta.label} bill for ${kaariger.name} saved. Total remaining ${money(totalAfterCreate)}` +
+          (creditApplied > 0
+            ? ` · Credit applied ${money(creditApplied)}${
+                creditLeft > 0 ? ` (left ${money(creditLeft)})` : ""
+              }`
+            : "") +
           (calc.kharchaAmount > 0
             ? ` · Kharcha box ${money(boxStart)}${
                 carryIn !== 0
@@ -927,8 +937,7 @@ export default function OrdersPage() {
                     })`
                   : ""
               }.`
-            : ".") +
-          (liveCredit > 0 ? `` : "")
+            : ".")
       );
       resetForm();
       loadMeta();

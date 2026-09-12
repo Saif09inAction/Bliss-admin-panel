@@ -31,6 +31,7 @@ function parseOrder(id: string, data: Record<string, unknown>): KaarigerOrder {
     addBalance: data.addBalance as number | undefined,
     openingAtCreation: data.openingAtCreation as number | undefined,
     closingAtCreation: data.closingAtCreation as number | undefined,
+    creditApplied: data.creditApplied as number | undefined,
     kharchaGiven: (data.kharchaGiven as number) || 0,
   };
 }
@@ -61,11 +62,13 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
   const newAdd = maal - materials - newRepairTotal;
   const weekKharcha = orderWeekKharcha(order);
   const openingAtCreation = order.openingAtCreation ?? 0;
-  const newClosing = Math.round((openingAtCreation + newAdd - weekKharcha) * 100) / 100;
+  const creditApplied = Math.max(0, order.creditApplied || 0);
+  const newGross = Math.round((openingAtCreation + newAdd - weekKharcha) * 100) / 100;
+  const newClosing = Math.round((newGross - creditApplied) * 100) / 100;
   const oldClosing =
     order.closingAtCreation != null && Number.isFinite(order.closingAtCreation)
       ? order.closingAtCreation
-      : Math.round((openingAtCreation + oldAdd - weekKharcha) * 100) / 100;
+      : Math.round((openingAtCreation + oldAdd - weekKharcha - creditApplied) * 100) / 100;
   const deltaClosing = Math.round((newClosing - oldClosing) * 100) / 100;
 
   await updateDoc(doc(db, "kaariger_orders", orderId), {
@@ -73,6 +76,7 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
     repairDeductionTotal: newRepairTotal,
     addBalance: newAdd,
     closingAtCreation: newClosing,
+    creditApplied,
   });
 
   await Promise.all(

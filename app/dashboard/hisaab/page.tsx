@@ -245,6 +245,7 @@ export default function HisaabPage() {
             openingAtCreation: data.openingAtCreation as number | undefined,
             addBalance: data.addBalance as number | undefined,
             closingAtCreation: data.closingAtCreation as number | undefined,
+            creditApplied: data.creditApplied as number | undefined,
           } satisfies KaarigerOrder;
         })
         .sort((a, b) => b.createdAt - a.createdAt);
@@ -352,6 +353,7 @@ export default function HisaabPage() {
               openingAtCreation: data.openingAtCreation as number | undefined,
               addBalance: data.addBalance as number | undefined,
               closingAtCreation: data.closingAtCreation as number | undefined,
+            creditApplied: data.creditApplied as number | undefined,
             } satisfies KaarigerOrder;
           })
           .sort((a, b) => b.createdAt - a.createdAt);
@@ -435,6 +437,7 @@ export default function HisaabPage() {
             openingAtCreation: data.openingAtCreation as number | undefined,
             addBalance: data.addBalance as number | undefined,
             closingAtCreation: data.closingAtCreation as number | undefined,
+            creditApplied: data.creditApplied as number | undefined,
           } satisfies KaarigerOrder;
         }).sort((a, b) => b.createdAt - a.createdAt);
         await loadKaarigers();
@@ -1770,7 +1773,12 @@ function PreviousHisaabCard({
     order.addBalance != null ? order.addBalance : productsTotal - deductionsTotal - repairTotal;
   const opening =
     order.openingAtCreation != null ? order.openingAtCreation : 0;
-  const closing = opening + addBalance - weekKharcha;
+  const creditSettled = Math.max(0, order.creditApplied || 0);
+  const grossClosing = opening + addBalance - weekKharcha;
+  const closing =
+    order.closingAtCreation != null
+      ? order.closingAtCreation
+      : grossClosing - creditSettled;
   const paidCash = orderPayments.reduce((s, p) => s + p.amount, 0);
   const priorOverpay = Math.max(0, carryIn);
   const paid = paidCash + priorOverpay;
@@ -1832,7 +1840,15 @@ function PreviousHisaabCard({
             {weekKharcha > 0 && (
               <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
             )}
-            <Row label="Outstanding after create" value={money(closing)} bold accent="amber" />
+            <Row label="Outstanding after create" value={money(grossClosing)} bold accent="amber" />
+            {creditSettled > 0 && (
+              <Row
+                label="Credit settled on this bill"
+                value={`−${money(creditSettled)}`}
+                accent="green"
+              />
+            )}
+            <Row label="Total remaining after bill" value={money(closing)} bold accent="amber" />
           </div>
  
         </div>
@@ -2270,6 +2286,7 @@ function OrderDetailCard({
         openingBalance={openingBalance}
         oldKharcha={oldKharcha}
         creditBalance={creditBalance}
+        isLiveBill={isLiveBill}
         billRepairs={orderRepairs}
       />
     </div>
@@ -2287,6 +2304,7 @@ function GrandTotalBox({
   openingBalance = 0,
   oldKharcha = 0,
   creditBalance = 0,
+  isLiveBill = false,
   billRepairs = [],
 }: {
   order: KaarigerOrder;
@@ -2294,6 +2312,7 @@ function GrandTotalBox({
   openingBalance?: number;
   oldKharcha?: number;
   creditBalance?: number;
+  isLiveBill?: boolean;
   billRepairs?: OrderRepair[];
 }) {
   const productsTotal = order.productsTotal ?? 0;
@@ -2313,16 +2332,25 @@ function GrandTotalBox({
     order.openingAtCreation != null
       ? order.openingAtCreation
       : (openingBalance || 0) - addBalance + weekKharcha;
-  const closingShown = opening + addBalance - weekKharcha;
+  const grossClosing = opening + addBalance - weekKharcha;
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   const box = orderKharchaBalance(order, paid);
-  /** Gross remaining after this bill (before profile credit). */
-  const beforeCredit = closingShown + old;
-  const credit = Math.max(0, creditBalance || 0);
-  const creditApplied = Math.min(credit, Math.max(0, beforeCredit));
-  /** Matches Hisaab header Total Remaining when this is the live bill. */
-  const totalRemainingHere = beforeCredit - creditApplied;
+
+  /** Credit settled on this bill at create — show only here, never on later bills. */
+  const bakedCredit = Math.max(0, order.creditApplied || 0);
+  const creditWasSettled = order.creditApplied != null;
+  /** Legacy: unsettled profile credit shown only on the live bill until next create settles it. */
+  const liveCreditFallback =
+    !creditWasSettled && isLiveBill
+      ? Math.min(Math.max(0, creditBalance || 0), Math.max(0, grossClosing + old))
+      : 0;
+  const creditShown = creditWasSettled ? bakedCredit : liveCreditFallback;
+  const totalRemainingHere = creditWasSettled
+    ? (order.closingAtCreation != null
+        ? order.closingAtCreation
+        : grossClosing - bakedCredit) + old
+    : grossClosing + old - liveCreditFallback;
   const transferLines = [...payments].sort((a, b) =>
     `${a.date} ${timeSortKey(a.time)}`.localeCompare(`${b.date} ${timeSortKey(b.time)}`)
   );
@@ -2363,14 +2391,14 @@ function GrandTotalBox({
         {weekKharcha > 0 && (
           <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
         )}
-        <Row label="Outstanding after create" value={money(closingShown)} bold accent="amber" />
-        {old > 0 && (
+        <Row label="Outstanding after create" value={money(grossClosing)} bold accent="amber" />
+        {old > 0 && !creditWasSettled && (
           <Row label="Old kharcha on profile" value={`+${money(old)}`} accent="amber" />
         )}
-        {creditApplied > 0 && (
+        {creditShown > 0 && (
           <Row
-            label="Credit applied"
-            value={`−${money(creditApplied)}`}
+            label={creditWasSettled ? "Credit settled on this bill" : "Credit applied"}
+            value={`−${money(creditShown)}`}
             accent="green"
           />
         )}

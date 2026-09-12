@@ -272,11 +272,21 @@ export function buildHisaabLedger(opts: {
     (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
     0
   );
+  // Credits settled into past bills are already baked into openingBalance (net).
+  // Add them back so startOpening reconstruction matches gross bill history.
+  const creditSettledOnBills = orders.reduce(
+    (s, o) => s + Math.max(0, o.creditApplied || 0),
+    0
+  );
   // Legacy folds that were written into openingBalance under the old model.
   const foldTotal = orders.reduce((s, o) => s + Math.max(0, o.kharchaCarriedForward || 0), 0);
 
   const startOpening =
-    (opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal;
+    (opts.openingBalance || 0) +
+    openingPaidTotal -
+    billNetTotal +
+    creditSettledOnBills -
+    foldTotal;
 
   const startAt =
     openingPays[0] != null
@@ -372,6 +382,20 @@ export function buildHisaabLedger(opts: {
         deltaRemaining: -kharcha,
         deltaKharcha: boxStart,
         at: t + 1,
+      });
+    }
+
+    const settledCredit = Math.max(0, order.creditApplied || 0);
+    if (settledCredit > 0) {
+      events.push({
+        id: `credit-${order.id}`,
+        kind: "credit",
+        title: `Credit on ${week.label}`,
+        subtitle: "Settled into this bill",
+        deltaRemaining: -settledCredit,
+        deltaKharcha: 0,
+        at: t + 1.5,
+        creditAdded: settledCredit,
       });
     }
 
@@ -498,9 +522,8 @@ export function buildHisaabLedger(opts: {
   }
 
   /**
-   * Apply stored creditBalance last — same as Total Remaining header and Android.
-   * Previously this line used deltaRemaining: 0 so the breakdown ended higher
-   * than the amber Total remaining card (e.g. ₹71,772 vs ₹51,649).
+   * Unsettled profile credit only (leftover after bills that already settled credit).
+   * Settled credit appears per-bill above as "Credit on {week}".
    */
   const creditBal = Math.max(0, opts.creditBalance || 0);
   const creditApplied = Math.min(creditBal, Math.max(0, remaining));
@@ -510,11 +533,11 @@ export function buildHisaabLedger(opts: {
     lines.push({
       id: "credit_balance",
       kind: "credit",
-      title: "Credit applied",
+      title: "Credit (not yet on a bill)",
       subtitle:
         creditBal > creditApplied
           ? `Of ₹${Math.round(creditBal).toLocaleString("en-IN")} · surplus ₹${Math.round(creditBal - creditApplied).toLocaleString("en-IN")}`
-          : "Subtracted from remaining",
+          : "Will settle on next bill create",
       deltaRemaining: -creditApplied,
       deltaKharcha: 0,
       at: lastAt + 1,
@@ -557,12 +580,20 @@ export function grossOpeningBeforePays(opts: {
     (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
     0
   );
+  const creditSettledOnBills = opts.orders.reduce(
+    (s, o) => s + Math.max(0, o.creditApplied || 0),
+    0
+  );
   const foldTotal = opts.orders.reduce(
     (s, o) => s + Math.max(0, o.kharchaCarriedForward || 0),
     0
   );
   return (
-    (opts.openingBalance || 0) + openingPaidTotal - billNetTotal - foldTotal
+    (opts.openingBalance || 0) +
+    openingPaidTotal -
+    billNetTotal +
+    creditSettledOnBills -
+    foldTotal
   );
 }
 
@@ -581,9 +612,15 @@ export function storedOpeningFromGross(opts: {
     (s, o) => s + orderAddBalance(o) - orderWeekKharcha(o),
     0
   );
+  const creditSettledOnBills = opts.orders.reduce(
+    (s, o) => s + Math.max(0, o.creditApplied || 0),
+    0
+  );
   const foldTotal = opts.orders.reduce(
     (s, o) => s + Math.max(0, o.kharchaCarriedForward || 0),
     0
   );
-  return opts.grossOpening - openingPaidTotal + billNetTotal + foldTotal;
+  return (
+    opts.grossOpening - openingPaidTotal + billNetTotal - creditSettledOnBills + foldTotal
+  );
 }

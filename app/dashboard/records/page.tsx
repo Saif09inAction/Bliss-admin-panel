@@ -429,6 +429,7 @@ export default function RecordsPage() {
               openingAtCreation: data.openingAtCreation as number | undefined,
               addBalance: data.addBalance as number | undefined,
               closingAtCreation: data.closingAtCreation as number | undefined,
+              creditApplied: data.creditApplied as number | undefined,
             };
           })
           .sort((a, b) => b.createdAt - a.createdAt)

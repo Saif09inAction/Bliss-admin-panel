@@ -202,8 +202,16 @@ export interface KaarigerOrder {
   openingAtCreation?: number;
   /** ADD BALANCE = MAAL − deductions − repair at creation (kharcha not included). */
   addBalance?: number;
-  /** Closing = openingAtCreation + addBalance at creation. */
+  /**
+   * Closing after this bill = opening + ADD − week kharcha − creditApplied.
+   * Stored as net Remaining fold into employees.openingBalance.
+   */
   closingAtCreation?: number;
+  /**
+   * Credit settled into this bill at create time (reduces closing / Remaining).
+   * Shown on this bill only; later bills do not repeat it.
+   */
+  creditApplied?: number;
 }
 
 export interface OrderApprovalRecord {
