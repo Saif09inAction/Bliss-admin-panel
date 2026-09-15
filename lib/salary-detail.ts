@@ -15,11 +15,28 @@ import {
   calendarMonthFromOffset,
   earnedAsOfDateForCalendarView,
   formatCalendarMonthLabel,
+  paymentOwnedCalendarMonth,
   paymentsInCalendarMonth,
   resolvePayPeriodForCalendarOffset,
   type PayPeriod,
 } from "@/lib/pay-period-utils";
 
+/** Ignore payments booked for periods entirely before the staff joining date. */
+export function paymentCountsTowardSalary(
+  payment: PaymentTransaction,
+  joinDate: string
+): boolean {
+  if (payment.type !== "SALARY_PAYMENT") return false;
+  const join = joinDate.trim();
+  if (!join) return true;
+  if (payment.periodEnd && payment.periodEnd < join) return false;
+  if (payment.periodStart && payment.periodStart < join) {
+    // Tagged before join with no end, or end also before join → ignore
+    if (!payment.periodEnd || payment.periodEnd < join) return false;
+  }
+  if (!payment.periodStart && payment.date && payment.date < join) return false;
+  return true;
+}
 export type CarryForwardLine = {
   label: string;
   periodStart: string;
@@ -63,7 +80,10 @@ export function allocateStaffSalaryByMonth(opts: {
   const join = employee.joiningDate?.trim() || today;
   const phone = employee.phone;
   const empPayments = payments.filter(
-    (p) => p.employeeId === phone && p.type === "SALARY_PAYMENT"
+    (p) =>
+      p.employeeId === phone &&
+      p.type === "SALARY_PAYMENT" &&
+      paymentCountsTowardSalary(p, join)
   );
   const empAtt = attendance.filter(
     (a) => a.employeeId === phone || a.employeeId === employee.id
@@ -175,6 +195,13 @@ export type SalaryStaffDetail = {
   periodDue: number;
   totalDue: number;
   payments: PaymentTransaction[];
+  /** When current month has leftover credit from a prior-month payment (no new txn booked). */
+  priorSettlementCredit: {
+    sourcePaymentAmount: number;
+    sourceMonthLabel: string;
+    priorSettledAmount: number;
+    creditApplied: number;
+  } | null;
 };
 
 function countAttendanceInPeriod(opts: {
@@ -434,6 +461,42 @@ export function buildSalaryStaffDetail(opts: {
     earlyAmount += day.earlyDeduction ?? 0;
   }
 
+  const monthPayments = paymentsInCalendarMonth(
+    empPayments.filter((p) => p.type === "SALARY_PAYMENT"),
+    join,
+    viewedMonth.year,
+    viewedMonth.month
+  );
+
+  let priorSettlementCredit: SalaryStaffDetail["priorSettlementCredit"] = null;
+  if (periodOffset === 0 && monthPayments.length === 0 && paid > 0) {
+    const priorPays = empPayments
+      .filter((p) => paymentCountsTowardSalary(p, join))
+      .filter((p) => {
+        const owned = paymentOwnedCalendarMonth(p);
+        if (!owned) return false;
+        if (owned.year < viewedMonth.year) return true;
+        if (owned.year > viewedMonth.year) return false;
+        return owned.month < viewedMonth.month;
+      })
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    const source = priorPays[0];
+    if (source) {
+      const owned = paymentOwnedCalendarMonth(source)!;
+      const priorRow = allocated.find(
+        (m) => m.year === owned.year && m.month === owned.month
+      );
+      priorSettlementCredit = {
+        sourcePaymentAmount: source.amount,
+        sourceMonthLabel:
+          priorRow?.label ||
+          formatCalendarMonthLabel(owned.year, owned.month),
+        priorSettledAmount: priorRow?.paid ?? 0,
+        creditApplied: paid,
+      };
+    }
+  }
+
   return {
     period: period ?? {
       index: -1,
@@ -472,12 +535,8 @@ export function buildSalaryStaffDetail(opts: {
     paid,
     periodDue,
     totalDue,
-    payments: paymentsInCalendarMonth(
-      empPayments.filter((p) => p.type === "SALARY_PAYMENT"),
-      join,
-      viewedMonth.year,
-      viewedMonth.month
-    ),
+    payments: monthPayments,
+    priorSettlementCredit,
   };
 }
 

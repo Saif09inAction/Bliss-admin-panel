@@ -59,7 +59,20 @@ export default function SalaryStaffDetailPanel({
       <div className="mt-3">
         {d.payments.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
-            {Math.round(d.paid) !== 0 ? (
+            {d.priorSettlementCredit ? (
+              <>
+                <p className="font-medium text-jade-deep">
+                  Credit applied this month: {money(d.priorSettlementCredit.creditApplied)}
+                </p>
+                <p className="mt-2 text-left text-xs leading-relaxed sm:text-sm">
+                  Payment of {money(d.priorSettlementCredit.sourcePaymentAmount)} settled{" "}
+                  {d.priorSettlementCredit.sourceMonthLabel} (
+                  {money(d.priorSettlementCredit.priorSettledAmount)}). Leftover credit{" "}
+                  {money(d.priorSettlementCredit.creditApplied)} applied here — no new
+                  payment was booked on this month.
+                </p>
+              </>
+            ) : Math.round(d.paid) !== 0 ? (
               <>
                 <p className="font-medium text-jade-deep">
                   Applied to this month: {money(d.paid)}
@@ -309,7 +322,14 @@ export default function SalaryStaffDetailPanel({
 
             <div className="rounded-xl bg-[var(--surface-mist)] p-4 text-sm">
               <Row label="Earned this period (net)" value={money(d.earned.earnedNet)} />
-              <Row label="Paid this period" value={money(d.paid)} />
+              <Row
+                label={
+                  d.priorSettlementCredit
+                    ? "Credit applied (from prior payment)"
+                    : "Paid this period"
+                }
+                value={money(d.paid)}
+              />
               <Row
                 label={
                   d.periodDue < 0
@@ -329,7 +349,7 @@ export default function SalaryStaffDetailPanel({
                 />
               )}
               <div className="mt-2 flex justify-between border-t border-[var(--border)] pt-2 font-bold">
-                <span>{d.totalDue < 0 ? "Total credit" : "Total due"}</span>
+                <span>{d.totalDue < 0 ? "Total credit" : "Total remaining"}</span>
                 <span className={d.totalDue < 0 ? "text-jade-deep" : "text-warning"}>
                   {money(d.totalDue)}
                 </span>
