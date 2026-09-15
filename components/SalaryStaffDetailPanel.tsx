@@ -157,31 +157,60 @@ export default function SalaryStaffDetailPanel({
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
             {transactionsBlock}
 
-            {d.carryForward.filter((line) => Math.round(line.balance) > 0).length > 0 && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
-                  Previous months balance
+            {d.carryForward.filter((line) => Math.round(line.balance) !== 0).length > 0 && (
+              <div
+                className={`rounded-xl border p-4 ${
+                  d.carryForwardTotal < 0
+                    ? "border-jade/30 bg-jade-soft/40"
+                    : "border-amber-200 bg-amber-50"
+                }`}
+              >
+                <p
+                  className={`text-xs font-bold uppercase tracking-wider ${
+                    d.carryForwardTotal < 0 ? "text-jade-deep" : "text-amber-800"
+                  }`}
+                >
+                  {d.carryForwardTotal < 0
+                    ? "Previous months credit"
+                    : "Previous months balance"}
                 </p>
                 <div className="mt-2 space-y-1.5">
                   {d.carryForward
-                    .filter((line) => Math.round(line.balance) > 0)
-                    .map((line) => (
-                    <div
-                      key={`${line.periodStart}-${line.periodEnd}`}
-                      className="flex justify-between text-sm"
-                    >
-                      <span className="text-amber-900">{line.label}</span>
-                      <span className="font-semibold text-amber-900">
-                        {money(line.balance)}
-                        <span className="ml-1 text-xs font-normal opacity-70">
-                          (earned {money(line.earned)} − paid {money(line.paid)})
-                        </span>
-                      </span>
-                    </div>
-                  ))}
+                    .filter((line) => Math.round(line.balance) !== 0)
+                    .map((line) => {
+                      const isCredit = Math.round(line.balance) < 0;
+                      return (
+                        <div
+                          key={`${line.periodStart}-${line.periodEnd}`}
+                          className="flex justify-between text-sm"
+                        >
+                          <span className={isCredit ? "text-jade-deep" : "text-amber-900"}>
+                            {line.label}
+                            {isCredit ? " (credit)" : ""}
+                          </span>
+                          <span
+                            className={`font-semibold ${
+                              isCredit ? "text-jade-deep" : "text-amber-900"
+                            }`}
+                          >
+                            {money(line.balance)}
+                            <span className="ml-1 text-xs font-normal opacity-70">
+                              (earned {money(line.earned)} − paid {money(line.paid)})
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })}
                 </div>
-                <p className="mt-2 border-t border-amber-200 pt-2 text-sm font-bold text-amber-900">
-                  Prior months total: {money(d.carryForwardTotal)}
+                <p
+                  className={`mt-2 border-t pt-2 text-sm font-bold ${
+                    d.carryForwardTotal < 0
+                      ? "border-jade/20 text-jade-deep"
+                      : "border-amber-200 text-amber-900"
+                  }`}
+                >
+                  {d.carryForwardTotal < 0 ? "Prior credit total" : "Prior months total"}:{" "}
+                  {money(d.carryForwardTotal)}
                 </p>
               </div>
             )}
@@ -246,12 +275,26 @@ export default function SalaryStaffDetailPanel({
             <div className="rounded-xl bg-[var(--surface-mist)] p-4 text-sm">
               <Row label="Earned this period (net)" value={money(d.earned.earnedNet)} />
               <Row label="Paid this period" value={money(d.paid)} />
-              <Row label="Due this period" value={money(d.periodDue)} />
+              <Row
+                label={
+                  d.periodDue < 0
+                    ? "Credit this period (overpaid)"
+                    : "Due this period"
+                }
+                value={money(d.periodDue)}
+              />
               {d.carryForwardTotal !== 0 && (
-                <Row label="Prior months" value={money(d.carryForwardTotal)} />
+                <Row
+                  label={
+                    d.carryForwardTotal < 0
+                      ? "Prior credit (carried forward)"
+                      : "Prior unpaid (carried forward)"
+                  }
+                  value={money(d.carryForwardTotal)}
+                />
               )}
               <div className="mt-2 flex justify-between border-t border-[var(--border)] pt-2 font-bold">
-                <span>Total due</span>
+                <span>{d.totalDue < 0 ? "Total credit" : "Total due"}</span>
                 <span className={d.totalDue < 0 ? "text-jade-deep" : "text-warning"}>
                   {money(d.totalDue)}
                 </span>

@@ -119,7 +119,7 @@ export default function HolidaysPage() {
               role: ((data.role as string) || "STAFF") as Employee["role"],
             };
           })
-          .filter((e) => e.role === "STAFF")
+          .filter((e) => e.role === "STAFF" || e.role === "SUPERVISOR")
           .sort((a, b) => a.name.localeCompare(b.name))
       );
     });

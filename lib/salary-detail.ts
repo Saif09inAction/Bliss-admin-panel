@@ -295,10 +295,11 @@ export function computeCarryForwardUnpaid(opts: {
       today,
       fullMonth: true,
     });
-    // Match salary UI money() which rounds to whole rupees: only show months
-    // with pending unpaid (after pay, rounded balance goes to 0 and the row disappears).
+    // Match salary UI money() which rounds to whole rupees: skip settled months
+    // (rounded balance 0). Keep unpaid (positive) and credit/overpay (negative)
+    // so prior credit carries into the next month's total due.
     const pending = Math.round(monthBalance.balance);
-    if (pending <= 0) continue;
+    if (pending === 0) continue;
     lines.push({
       label: monthBalance.label,
       periodStart: monthBalance.periodStart,

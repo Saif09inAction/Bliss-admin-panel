@@ -155,7 +155,12 @@ export function asOfDateForCalendarMonth(viewMonth: CalendarMonth, today: string
   return today <= monthEnd ? today : monthEnd;
 }
 
-/** Sum salary paid across all join-based periods overlapping a calendar month. */
+/**
+ * Sum salary paid in a calendar month by payment date.
+ * Join-period tags are intentionally ignored here: a period that spans two
+ * calendar months (e.g. 10 Aug–9 Sep) would otherwise count the same payment
+ * in both months and invent a fake "advance".
+ */
 export function salaryPaidInCalendarMonth(
   payments: PaymentTransaction[],
   joinDate: string,
@@ -165,14 +170,14 @@ export function salaryPaidInCalendarMonth(
   const join = joinDate?.trim();
   if (!join) return 0;
   const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
-  let total = 0;
-  for (let idx = 0; idx < 600; idx++) {
-    const p = payPeriodForIndex(join, idx);
-    if (p.start > monthEnd) break;
-    if (p.end < monthStart) continue;
-    total += salaryPaidInPeriod(payments, p.start, p.end);
-  }
-  return total;
+  if (monthEnd < join) return 0;
+  return payments
+    .filter((p) => {
+      if (p.type !== "SALARY_PAYMENT") return false;
+      if (!p.date || p.date < monthStart || p.date > monthEnd) return false;
+      return p.date >= join;
+    })
+    .reduce((sum, p) => sum + p.amount, 0);
 }
 
 /** Resolve each staff member's pay period for a calendar month (offset 0 = current month). */
@@ -234,6 +239,7 @@ export function formatPayPeriodMonthLabel(start: string, _end?: string): string 
   });
 }
 
+/** Payments whose payment date falls in the calendar month (see salaryPaidInCalendarMonth). */
 export function paymentsInCalendarMonth(
   payments: PaymentTransaction[],
   joinDate: string,
@@ -243,21 +249,12 @@ export function paymentsInCalendarMonth(
   const join = joinDate?.trim();
   if (!join) return [];
   const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
-  const seen = new Set<string>();
-  const result: PaymentTransaction[] = [];
-  for (let idx = 0; idx < 600; idx++) {
-    const p = payPeriodForIndex(join, idx);
-    if (p.start > monthEnd) break;
-    if (p.end < monthStart) continue;
-    for (const pay of payments) {
-      if (seen.has(pay.id)) continue;
-      if (paymentAppliesToPeriod(pay, p.start, p.end)) {
-        seen.add(pay.id);
-        result.push(pay);
-      }
-    }
-  }
-  return result;
+  if (monthEnd < join) return [];
+  return payments.filter((p) => {
+    if (p.type !== "SALARY_PAYMENT") return false;
+    if (!p.date || p.date < monthStart || p.date > monthEnd) return false;
+    return p.date >= join;
+  });
 }
 
 export function paymentAppliesToPeriod(
