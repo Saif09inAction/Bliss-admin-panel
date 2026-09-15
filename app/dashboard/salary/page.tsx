@@ -35,7 +35,6 @@ import {
   formatCalendarMonthLabel,
   formatPayPeriodLabel,
   resolvePayPeriodForCalendarOffset,
-  salaryPaidInCalendarMonth,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
 import {
@@ -50,7 +49,12 @@ import {
   type EarnedSalarySummary,
   type OverrideMap,
 } from "@/lib/deduction-utils";
-import { buildSalaryStaffDetail, computeCarryForwardUnpaid } from "@/lib/salary-detail";
+import {
+  allocateStaffSalaryByMonth,
+  buildSalaryStaffDetail,
+  computeCarryForwardUnpaid,
+  findAllocatedMonth,
+} from "@/lib/salary-detail";
 import SalaryStaffDetailPanel from "@/components/SalaryStaffDetailPanel";
 
 function newPaymentId() {
@@ -242,14 +246,17 @@ export default function SalaryPage() {
         const join = e.joiningDate?.trim() || today;
         const period = resolveStaffPeriod(e.joiningDate, periodOffset, today);
         const asOfDate = staffAsOfDate(periodOffset, today);
-        const empPayments = payments.filter((p) => p.employeeId === e.phone);
-        const paid = salaryPaidInCalendarMonth(
-          empPayments,
-          join,
-          viewedMonth.year,
-          viewedMonth.month
-        );
         const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
+        const allocated = allocateStaffSalaryByMonth({
+          employee: e,
+          payments,
+          attendance,
+          settings,
+          overrides,
+          today,
+        });
+        const monthRow = findAllocatedMonth(allocated, periodOffset);
+        const paid = monthRow?.paid ?? 0;
         const earned = computeEarnedSalaryForCalendarMonth({
           monthlySalary: e.monthlySalary,
           joinDate: join,
@@ -262,7 +269,8 @@ export default function SalaryPage() {
           employeePhone: e.phone,
           employeeShift: e,
         });
-        const calculatedDue = Math.round((earned.earnedNet - paid) * 100) / 100;
+        const earnedNet = monthRow?.earned ?? earned.earnedNet;
+        const calculatedDue = Math.round((earnedNet - paid) * 100) / 100;
         const { total: carryForward } = computeCarryForwardUnpaid({
           employee: e,
           payments,
@@ -276,8 +284,8 @@ export default function SalaryPage() {
         const totalCalculatedDue = Math.round((carryForward + periodDue) * 100) / 100;
         const earnedDue = resolveDisplayDue(e, totalCalculatedDue, periodOffset);
         const fullDue = Math.round((earned.fullMonthNet - paid + carryForward) * 100) / 100;
-        const effectivePaid = Math.max(0, earned.earnedNet + carryForward - earnedDue);
-        const status = salaryStatus(earned.earnedNet + carryForward, effectivePaid);
+        const effectivePaid = Math.max(0, earnedNet + carryForward - earnedDue);
+        const status = salaryStatus(earnedNet + carryForward, effectivePaid);
         const isManualDue = periodOffset === 0 && Boolean(e.salaryDueManual);
         return {
           employee: e,
@@ -327,30 +335,19 @@ export default function SalaryPage() {
     let totalDue = 0;
     let totalPaid = 0;
     let unpaidCount = 0;
-    const viewedMonth = calendarMonthFromOffset(today, periodOffset);
     for (const e of staff) {
-      const join = e.joiningDate?.trim() || today;
-      const asOfDate = staffAsOfDate(periodOffset, today);
-      const paid = salaryPaidInCalendarMonth(
-        payments.filter((p) => p.employeeId === e.phone),
-        join,
-        viewedMonth.year,
-        viewedMonth.month
-      );
-      const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
-      const earned = computeEarnedSalaryForCalendarMonth({
-        monthlySalary: e.monthlySalary,
-        joinDate: join,
-        year: viewedMonth.year,
-        month: viewedMonth.month,
-        asOfDate,
-        records: empAtt,
+      const allocated = allocateStaffSalaryByMonth({
+        employee: e,
+        payments,
+        attendance,
         settings,
         overrides,
-        employeePhone: e.phone,
-        employeeShift: e,
+        today,
       });
-      const calculatedDue = Math.round((earned.earnedNet - paid) * 100) / 100;
+      const monthRow = findAllocatedMonth(allocated, periodOffset);
+      const paid = monthRow?.paid ?? 0;
+      const earnedNet = monthRow?.earned ?? 0;
+      const calculatedDue = Math.round((earnedNet - paid) * 100) / 100;
       const { total: carryForward } = computeCarryForwardUnpaid({
         employee: e,
         payments,

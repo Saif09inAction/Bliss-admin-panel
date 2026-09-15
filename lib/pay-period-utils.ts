@@ -156,10 +156,9 @@ export function asOfDateForCalendarMonth(viewMonth: CalendarMonth, today: string
 }
 
 /**
- * Sum salary paid in a calendar month by payment date.
- * Join-period tags are intentionally ignored here: a period that spans two
- * calendar months (e.g. 10 Aug–9 Sep) would otherwise count the same payment
- * in both months and invent a fake "advance".
+ * @deprecated Prefer allocateStaffSalaryByMonth() waterfall in salary-detail —
+ * raw date sums mis-attribute period-tagged payments and break month carry.
+ * Kept only as a thin date-in-month helper.
  */
 export function salaryPaidInCalendarMonth(
   payments: PaymentTransaction[],
@@ -239,7 +238,10 @@ export function formatPayPeriodMonthLabel(start: string, _end?: string): string 
   });
 }
 
-/** Payments whose payment date falls in the calendar month (see salaryPaidInCalendarMonth). */
+/**
+ * Transactions list for a calendar month: payment dated in the month, and/or
+ * tagged to a join-period that overlaps the month (deduped).
+ */
 export function paymentsInCalendarMonth(
   payments: PaymentTransaction[],
   joinDate: string,
@@ -250,10 +252,35 @@ export function paymentsInCalendarMonth(
   if (!join) return [];
   const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
   if (monthEnd < join) return [];
-  return payments.filter((p) => {
-    if (p.type !== "SALARY_PAYMENT") return false;
-    if (!p.date || p.date < monthStart || p.date > monthEnd) return false;
-    return p.date >= join;
+  const seen = new Set<string>();
+  const result: PaymentTransaction[] = [];
+
+  const add = (pay: PaymentTransaction) => {
+    if (seen.has(pay.id)) return;
+    seen.add(pay.id);
+    result.push(pay);
+  };
+
+  for (const pay of payments) {
+    if (pay.type !== "SALARY_PAYMENT") continue;
+    if (pay.date && pay.date >= monthStart && pay.date <= monthEnd && pay.date >= join) {
+      add(pay);
+    }
+  }
+
+  for (let idx = 0; idx < 600; idx++) {
+    const p = payPeriodForIndex(join, idx);
+    if (p.start > monthEnd) break;
+    if (p.end < monthStart) continue;
+    for (const pay of payments) {
+      if (paymentAppliesToPeriod(pay, p.start, p.end)) add(pay);
+    }
+  }
+
+  return result.sort((a, b) => {
+    const byDate = (b.date || "").localeCompare(a.date || "");
+    if (byDate !== 0) return byDate;
+    return (b.time || "").localeCompare(a.time || "");
   });
 }
 

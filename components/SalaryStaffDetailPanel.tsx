@@ -112,11 +112,24 @@ export default function SalaryStaffDetailPanel({
                 </div>
               </div>
             ))}
-            <div className="flex items-center justify-between bg-jade-soft/40 px-3 py-2 text-sm font-semibold text-jade-deep">
-              <span>Total paid</span>
-              <span>{money(d.paid)}</span>
-            </div>
-          </div>
+            <div className="flex flex-col gap-1 bg-jade-soft/40 px-3 py-2 text-sm font-semibold text-jade-deep">
+              <div className="flex items-center justify-between">
+                <span>Applied to this month</span>
+                <span>{money(d.paid)}</span>
+              </div>
+              {(() => {
+                const listed = Math.round(
+                  d.payments.reduce((sum, p) => sum + (p.amount || 0), 0) * 100
+                ) / 100;
+                if (Math.round(listed) === Math.round(d.paid)) return null;
+                return (
+                  <p className="text-xs font-normal text-jade-deep/80">
+                    Listed payments {money(listed)}. Extra is settled against older unpaid
+                    months first; leftover credit stays on the current month.
+                  </p>
+                );
+              })()}
+            </div>          </div>
         )}
       </div>
     </div>

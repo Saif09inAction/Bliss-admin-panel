@@ -17,7 +17,6 @@ import {
   formatCalendarMonthLabel,
   paymentsInCalendarMonth,
   resolvePayPeriodForCalendarOffset,
-  salaryPaidInCalendarMonth,
   type PayPeriod,
 } from "@/lib/pay-period-utils";
 
@@ -32,6 +31,115 @@ export type CarryForwardLine = {
   /** @deprecated use balance */
   unpaid: number;
 };
+
+export type AllocatedMonthBalance = {
+  label: string;
+  year: number;
+  month: number;
+  monthOffset: number;
+  monthStart: string;
+  monthEnd: string;
+  periodStart: string;
+  periodEnd: string;
+  earned: number;
+  paid: number;
+  balance: number;
+};
+
+/**
+ * Oldest-month-first payment allocation through today's calendar month.
+ * Past months are covered up to earned (full paid when pool allows);
+ * leftover payment parks on the current month as credit/overpay.
+ */
+export function allocateStaffSalaryByMonth(opts: {
+  employee: Employee;
+  payments: PaymentTransaction[];
+  attendance: Attendance[];
+  settings: AttendanceSettings;
+  overrides: OverrideMap;
+  today: string;
+}): AllocatedMonthBalance[] {
+  const { employee, payments, attendance, settings, overrides, today } = opts;
+  const join = employee.joiningDate?.trim() || today;
+  const phone = employee.phone;
+  const empPayments = payments.filter(
+    (p) => p.employeeId === phone && p.type === "SALARY_PAYMENT"
+  );
+  const empAtt = attendance.filter(
+    (a) => a.employeeId === phone || a.employeeId === employee.id
+  );
+
+  const months: AllocatedMonthBalance[] = [];
+  for (let monthOffset = 0; monthOffset >= -120; monthOffset--) {
+    const viewedMonth = calendarMonthFromOffset(today, monthOffset);
+    const { start: monthStart, end: monthEnd } = calendarMonthBounds(
+      viewedMonth.year,
+      viewedMonth.month
+    );
+    if (monthEnd < join) break;
+
+    const payPeriod = resolvePayPeriodForCalendarOffset(join, monthOffset, today);
+    const asOfDate =
+      monthOffset === 0
+        ? earnedAsOfDateForCalendarView(
+            payPeriod ?? { index: -1, start: monthStart, end: monthEnd, daysInPeriod: 0 },
+            viewedMonth,
+            today
+          )
+        : monthEnd;
+
+    const earnedSummary = computeEarnedSalaryForCalendarMonth({
+      monthlySalary: employee.monthlySalary,
+      joinDate: join,
+      year: viewedMonth.year,
+      month: viewedMonth.month,
+      asOfDate,
+      records: empAtt,
+      settings,
+      overrides,
+      employeePhone: phone,
+      employeeShift: employee,
+    });
+
+    months.push({
+      label: formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month),
+      year: viewedMonth.year,
+      month: viewedMonth.month,
+      monthOffset,
+      monthStart,
+      monthEnd,
+      periodStart: payPeriod?.start ?? monthStart,
+      periodEnd: payPeriod?.end ?? monthEnd,
+      earned: earnedSummary.earnedNet,
+      paid: 0,
+      balance: earnedSummary.earnedNet,
+    });
+  }
+
+  months.reverse();
+
+  let pool = Math.round(empPayments.reduce((sum, p) => sum + (p.amount || 0), 0) * 100) / 100;
+  for (const row of months) {
+    if (row.monthOffset === 0) {
+      row.paid = Math.round(pool * 100) / 100;
+      pool = 0;
+    } else {
+      const cover = Math.min(row.earned, pool);
+      row.paid = Math.round(cover * 100) / 100;
+      pool = Math.round((pool - cover) * 100) / 100;
+    }
+    row.balance = Math.round((row.earned - row.paid) * 100) / 100;
+  }
+
+  return months;
+}
+
+export function findAllocatedMonth(
+  allocated: AllocatedMonthBalance[],
+  monthOffset: number
+): AllocatedMonthBalance | null {
+  return allocated.find((m) => m.monthOffset === monthOffset) ?? null;
+}
 
 export type SalaryStaffDetail = {
   period: PayPeriod;
@@ -178,83 +286,39 @@ export function computeCalendarMonthBalance(opts: {
   paid: number;
   balance: number;
 } {
-  const {
-    employee,
-    payments,
-    attendance,
-    settings,
-    overrides,
-    monthOffset,
-    today,
-    fullMonth = false,
-  } = opts;
-  const join = employee.joiningDate?.trim() || today;
-  const phone = employee.phone;
-  const viewedMonth = calendarMonthFromOffset(today, monthOffset);
+  const allocated = allocateStaffSalaryByMonth(opts);
+  const row = findAllocatedMonth(allocated, opts.monthOffset);
+  const viewedMonth = calendarMonthFromOffset(opts.today, opts.monthOffset);
   const { start: monthStart, end: monthEnd } = calendarMonthBounds(
     viewedMonth.year,
     viewedMonth.month
   );
   const label = formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month);
-  const empty = {
-    label,
-    year: viewedMonth.year,
-    month: viewedMonth.month,
-    monthStart,
-    monthEnd,
-    periodStart: monthStart,
-    periodEnd: monthEnd,
-    earned: 0,
-    paid: 0,
-    balance: 0,
-  };
-  if (monthEnd < join) return empty;
-
-  const payPeriod = resolvePayPeriodForCalendarOffset(join, monthOffset, today);
-  const asOfDate = fullMonth
-    ? monthEnd
-    : earnedAsOfDateForCalendarView(
-        payPeriod ?? { index: -1, start: monthStart, end: monthEnd, daysInPeriod: 0 },
-        viewedMonth,
-        today
-      );
-
-  const empPayments = payments.filter((p) => p.employeeId === phone);
-  const empAtt = attendance.filter(
-    (a) => a.employeeId === phone || a.employeeId === employee.id
-  );
-  const earnedSummary = computeEarnedSalaryForCalendarMonth({
-    monthlySalary: employee.monthlySalary,
-    joinDate: join,
-    year: viewedMonth.year,
-    month: viewedMonth.month,
-    asOfDate,
-    records: empAtt,
-    settings,
-    overrides,
-    employeePhone: phone,
-    employeeShift: employee,
-  });
-  const paid = salaryPaidInCalendarMonth(
-    empPayments,
-    join,
-    viewedMonth.year,
-    viewedMonth.month
-  );
-  const earned = earnedSummary.earnedNet;
-  const balance = Math.round((earned - paid) * 100) / 100;
-
+  if (!row) {
+    return {
+      label,
+      year: viewedMonth.year,
+      month: viewedMonth.month,
+      monthStart,
+      monthEnd,
+      periodStart: monthStart,
+      periodEnd: monthEnd,
+      earned: 0,
+      paid: 0,
+      balance: 0,
+    };
+  }
   return {
-    label,
-    year: viewedMonth.year,
-    month: viewedMonth.month,
-    monthStart,
-    monthEnd,
-    periodStart: payPeriod?.start ?? monthStart,
-    periodEnd: payPeriod?.end ?? monthEnd,
-    earned,
-    paid,
-    balance,
+    label: row.label,
+    year: row.year,
+    month: row.month,
+    monthStart: row.monthStart,
+    monthEnd: row.monthEnd,
+    periodStart: row.periodStart,
+    periodEnd: row.periodEnd,
+    earned: row.earned,
+    paid: row.paid,
+    balance: row.balance,
   };
 }
 
@@ -267,37 +331,14 @@ export function computeCarryForwardUnpaid(opts: {
   periodOffset: number;
   today: string;
 }): { lines: CarryForwardLine[]; total: number } {
-  const { employee, payments, attendance, settings, overrides, periodOffset, today } = opts;
-  const join = employee.joiningDate?.trim() || today;
-
-  const pastOffsets: number[] = [];
-  let offset = periodOffset - 1;
-  while (offset >= periodOffset - 120) {
-    const pastMonth = calendarMonthFromOffset(today, offset);
-    const { end: monthEnd } = calendarMonthBounds(pastMonth.year, pastMonth.month);
-    if (monthEnd < join) break;
-    pastOffsets.push(offset);
-    offset--;
-  }
-  pastOffsets.reverse();
-
+  const allocated = allocateStaffSalaryByMonth(opts);
   const lines: CarryForwardLine[] = [];
   let total = 0;
 
-  for (const pastOffset of pastOffsets) {
-    const monthBalance = computeCalendarMonthBalance({
-      employee,
-      payments,
-      attendance,
-      settings,
-      overrides,
-      monthOffset: pastOffset,
-      today,
-      fullMonth: true,
-    });
-    // Match salary UI money() which rounds to whole rupees: skip settled months
-    // (rounded balance 0). Keep unpaid (positive) and credit/overpay (negative)
-    // so prior credit carries into the next month's total due.
+  for (const monthBalance of allocated) {
+    if (monthBalance.monthOffset >= opts.periodOffset) continue;
+    // Waterfall parks excess on the current month, so past months are either
+    // unpaid (positive) or settled (0). Skip settled.
     const pending = Math.round(monthBalance.balance);
     if (pending === 0) continue;
     lines.push({
@@ -339,7 +380,6 @@ export function buildSalaryStaffDetail(opts: {
   );
   const phone = employee.phone;
   const empPayments = payments.filter((p) => p.employeeId === phone);
-  const paid = salaryPaidInCalendarMonth(empPayments, join, viewedMonth.year, viewedMonth.month);
   const empAtt = attendance.filter(
     (a) => a.employeeId === phone || a.employeeId === employee.id
   );
@@ -356,8 +396,11 @@ export function buildSalaryStaffDetail(opts: {
     employeeShift: employee,
   });
 
+  const allocated = allocateStaffSalaryByMonth(opts);
+  const monthRow = findAllocatedMonth(allocated, periodOffset);
+  const paid = monthRow?.paid ?? 0;
   const { lines: carryForward, total: carryForwardTotal } = computeCarryForwardUnpaid(opts);
-  const periodDue = Math.round((earned.earnedNet - paid) * 100) / 100;
+  const periodDue = Math.round(((monthRow?.earned ?? earned.earnedNet) - paid) * 100) / 100;
   const totalDue = Math.round((carryForwardTotal + periodDue) * 100) / 100;
 
   const attendanceStats = countAttendanceInPeriod({
