@@ -58,9 +58,21 @@ export default function SalaryStaffDetailPanel({
 
       <div className="mt-3">
         {d.payments.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
-            No payments for this period yet.
-          </p>
+          <div className="rounded-xl border border-dashed border-[var(--border)] px-3 py-6 text-center text-sm text-[var(--text-muted)]">
+            {Math.round(d.paid) !== 0 ? (
+              <>
+                <p className="font-medium text-jade-deep">
+                  Applied to this month: {money(d.paid)}
+                </p>
+                <p className="mt-1">
+                  No new payment was booked on this month. This amount is leftover
+                  after older months were settled first.
+                </p>
+              </>
+            ) : (
+              <p>No payments for this period yet.</p>
+            )}
+          </div>
         ) : (
           <div className="space-y-0 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
             {d.payments.map((p) => (
@@ -118,18 +130,28 @@ export default function SalaryStaffDetailPanel({
                 <span>{money(d.paid)}</span>
               </div>
               {(() => {
-                const listed = Math.round(
-                  d.payments.reduce((sum, p) => sum + (p.amount || 0), 0) * 100
-                ) / 100;
+                const listed =
+                  Math.round(d.payments.reduce((sum, p) => sum + (p.amount || 0), 0) * 100) /
+                  100;
                 if (Math.round(listed) === Math.round(d.paid)) return null;
+                if (listed > d.paid) {
+                  return (
+                    <p className="text-xs font-normal text-jade-deep/80">
+                      Payment listed {money(listed)}. Only {money(d.paid)} was needed
+                      for this month; leftover {money(listed - d.paid)} carried to the
+                      current month as credit.
+                    </p>
+                  );
+                }
                 return (
                   <p className="text-xs font-normal text-jade-deep/80">
-                    Listed payments {money(listed)}. Extra is settled against older unpaid
-                    months first; leftover credit stays on the current month.
+                    Includes {money(d.paid - listed)} leftover after older months were
+                    settled.
                   </p>
                 );
               })()}
-            </div>          </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

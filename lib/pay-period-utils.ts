@@ -239,8 +239,26 @@ export function formatPayPeriodMonthLabel(start: string, _end?: string): string 
 }
 
 /**
- * Transactions list for a calendar month: payment dated in the month, and/or
- * tagged to a join-period that overlaps the month (deduped).
+ * Which calendar month "owns" a payment for the transactions list.
+ * Prefer periodStart (what admin paid against); else payment date.
+ * Each payment appears in exactly one month — never both prior and current.
+ */
+export function paymentOwnedCalendarMonth(
+  payment: PaymentTransaction
+): { year: number; month: number } | null {
+  if (payment.type !== "SALARY_PAYMENT") return null;
+  const anchor = (payment.periodStart || payment.date || "").trim();
+  if (!anchor || anchor.length < 7) return null;
+  const { y, m } = parseIso(anchor.slice(0, 10));
+  if (!y || !m) return null;
+  return { year: y, month: m };
+}
+
+/**
+ * Transactions listed for a calendar month — each payment once, owned by
+ * periodStart month (or payment date). Due/paid totals still use waterfall
+ * allocation; leftover credit can apply to the current month without re-listing
+ * the prior-month payment here.
  */
 export function paymentsInCalendarMonth(
   payments: PaymentTransaction[],
@@ -250,38 +268,21 @@ export function paymentsInCalendarMonth(
 ): PaymentTransaction[] {
   const join = joinDate?.trim();
   if (!join) return [];
-  const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
+  const { end: monthEnd } = calendarMonthBounds(year, month);
   if (monthEnd < join) return [];
-  const seen = new Set<string>();
-  const result: PaymentTransaction[] = [];
 
-  const add = (pay: PaymentTransaction) => {
-    if (seen.has(pay.id)) return;
-    seen.add(pay.id);
-    result.push(pay);
-  };
-
-  for (const pay of payments) {
-    if (pay.type !== "SALARY_PAYMENT") continue;
-    if (pay.date && pay.date >= monthStart && pay.date <= monthEnd && pay.date >= join) {
-      add(pay);
-    }
-  }
-
-  for (let idx = 0; idx < 600; idx++) {
-    const p = payPeriodForIndex(join, idx);
-    if (p.start > monthEnd) break;
-    if (p.end < monthStart) continue;
-    for (const pay of payments) {
-      if (paymentAppliesToPeriod(pay, p.start, p.end)) add(pay);
-    }
-  }
-
-  return result.sort((a, b) => {
-    const byDate = (b.date || "").localeCompare(a.date || "");
-    if (byDate !== 0) return byDate;
-    return (b.time || "").localeCompare(a.time || "");
-  });
+  return payments
+    .filter((pay) => {
+      if (pay.type !== "SALARY_PAYMENT") return false;
+      const owned = paymentOwnedCalendarMonth(pay);
+      if (!owned) return false;
+      return owned.year === year && owned.month === month;
+    })
+    .sort((a, b) => {
+      const byDate = (b.date || "").localeCompare(a.date || "");
+      if (byDate !== 0) return byDate;
+      return (b.time || "").localeCompare(a.time || "");
+    });
 }
 
 export function paymentAppliesToPeriod(
