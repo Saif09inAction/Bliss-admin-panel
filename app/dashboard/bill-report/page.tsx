@@ -18,6 +18,7 @@ import {
   IndianRupee,
   Link2,
   Plus,
+  Pencil,
   Trash2,
   X,
 } from "lucide-react";
@@ -64,6 +65,7 @@ export default function BillReportPage() {
   const [savingCompany, setSavingCompany] = useState(false);
 
   const [entryModal, setEntryModal] = useState<BillEntryType | null>(null);
+  const [editingEntry, setEditingEntry] = useState<BillEntry | null>(null);
   const [entryForm, setEntryForm] = useState({
     amount: "",
     date: todayStr(),
@@ -242,7 +244,13 @@ export default function BillReportPage() {
     }
   }
 
+  function closeEntryModal() {
+    setEntryModal(null);
+    setEditingEntry(null);
+  }
+
   function openEntryModal(type: BillEntryType) {
+    setEditingEntry(null);
     setEntryForm({
       amount: "",
       date: todayStr(),
@@ -252,6 +260,20 @@ export default function BillReportPage() {
       transferDone: true,
     });
     setEntryModal(type);
+    setMessage("");
+  }
+
+  function openEditEntry(entry: BillEntry) {
+    setEditingEntry(entry);
+    setEntryForm({
+      amount: String(entry.amount),
+      date: entry.date || todayStr(),
+      time: entry.time || nowTimeStr(),
+      driveLink: entry.driveLink || "",
+      remarks: entry.remarks || "",
+      transferDone: entry.transferDone !== false,
+    });
+    setEntryModal(entry.type);
     setMessage("");
   }
 
@@ -271,9 +293,12 @@ export default function BillReportPage() {
     setSavingEntry(true);
     setMessage("");
     try {
-      const id = uuid();
       const driveLink = entryForm.driveLink.trim();
       const remarks = entryForm.remarks.trim();
+      const time = entryForm.time.trim() || nowTimeStr();
+      const isEdit = Boolean(editingEntry);
+      const id = editingEntry?.id || uuid();
+
       const entry: BillEntry = {
         id,
         companyId: selected.id,
@@ -281,15 +306,15 @@ export default function BillReportPage() {
         type: entryModal,
         amount,
         date: entryForm.date,
-        time: entryForm.time.trim() || nowTimeStr(),
-        createdAt: Date.now(),
-        createdBy: session?.name || "Admin",
+        time,
+        createdAt: editingEntry?.createdAt ?? Date.now(),
+        createdBy: editingEntry?.createdBy || session?.name || "Admin",
         ...(driveLink ? { driveLink } : {}),
         ...(remarks ? { remarks } : {}),
         ...(entryModal === "TRANSFER" ? { transferDone: entryForm.transferDone } : {}),
       };
-      // Firestore rejects undefined — build payload with only defined fields.
-      await setDoc(doc(getDb(), "bill_entries", id), {
+
+      const payload: Record<string, unknown> = {
         id: entry.id,
         companyId: entry.companyId,
         owner: entry.owner,
@@ -299,21 +324,35 @@ export default function BillReportPage() {
         time: entry.time,
         createdAt: entry.createdAt,
         createdBy: entry.createdBy,
-        ...(driveLink ? { driveLink } : {}),
-        ...(remarks ? { remarks } : {}),
-        ...(entryModal === "TRANSFER" ? { transferDone: entryForm.transferDone } : {}),
-      });
-      setEntries((cur) =>
-        [entry, ...cur].sort((a, b) => {
-          const dk = `${b.date} ${timeSortKey(b.time)}`.localeCompare(`${a.date} ${timeSortKey(a.time)}`);
+        driveLink: driveLink || "",
+        remarks: remarks || "",
+      };
+      if (entryModal === "TRANSFER") {
+        payload.transferDone = entryForm.transferDone;
+      } else if (isEdit) {
+        payload.transferDone = true;
+      }
+
+      await setDoc(doc(getDb(), "bill_entries", id), payload, { merge: isEdit });
+
+      setEntries((cur) => {
+        const next = isEdit
+          ? cur.map((row) => (row.id === id ? entry : row))
+          : [entry, ...cur];
+        return next.sort((a, b) => {
+          const dk = `${b.date} ${timeSortKey(b.time)}`.localeCompare(
+            `${a.date} ${timeSortKey(a.time)}`
+          );
           return dk !== 0 ? dk : b.createdAt - a.createdAt;
-        })
-      );
-      setEntryModal(null);
+        });
+      });
+      closeEntryModal();
       setMessage(
-        entryModal === "EXTRA_BILL"
-          ? `Extra bill ${formatRupee(amount)} added — remaining went up.`
-          : `Transfer ${formatRupee(amount)} recorded — remaining went down.`
+        isEdit
+          ? "Record updated."
+          : entryModal === "EXTRA_BILL"
+            ? `Extra bill ${formatRupee(amount)} added — remaining went up.`
+            : `Transfer ${formatRupee(amount)} recorded — remaining went down.`
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Could not save entry.");
@@ -476,6 +515,7 @@ export default function BillReportPage() {
           totals={ledgerTotals}
           onBack={() => setSelectedId(null)}
           onDeleteCompany={() => deleteCompany(selected)}
+          onEditEntry={openEditEntry}
           onDeleteEntry={deleteEntry}
           onToggleTransferDone={toggleTransferDone}
           onExport={exportCurrent}
@@ -601,8 +641,14 @@ export default function BillReportPage() {
       {/* Extra bill / Transfer modal */}
       {entryModal && selected && (
         <Modal
-          title={entryModal === "EXTRA_BILL" ? `Extra bill — ${selected.name}` : `Transfer — ${selected.name}`}
-          onClose={() => setEntryModal(null)}
+          title={
+            editingEntry
+              ? `Edit ${entryModal === "EXTRA_BILL" ? "extra bill" : "transfer"} — ${selected.name}`
+              : entryModal === "EXTRA_BILL"
+                ? `Extra bill — ${selected.name}`
+                : `Transfer — ${selected.name}`
+          }
+          onClose={closeEntryModal}
         >
           <form className="space-y-4" onSubmit={saveEntry}>
             <p
@@ -678,11 +724,11 @@ export default function BillReportPage() {
               </label>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="btn btn-secondary" onClick={() => setEntryModal(null)}>
+              <button type="button" className="btn btn-secondary" onClick={closeEntryModal}>
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={savingEntry}>
-                {savingEntry ? "Saving…" : "Save"}
+                {savingEntry ? "Saving…" : editingEntry ? "Update" : "Save"}
               </button>
             </div>
           </form>
@@ -764,6 +810,7 @@ function CompanyLedger({
   totals,
   onBack,
   onDeleteCompany,
+  onEditEntry,
   onDeleteEntry,
   onToggleTransferDone,
   onExport,
@@ -774,6 +821,7 @@ function CompanyLedger({
   totals: { extraBill: number; transfer: number; remaining: number };
   onBack: () => void;
   onDeleteCompany: () => void;
+  onEditEntry: (e: BillEntry) => void;
   onDeleteEntry: (e: BillEntry) => void;
   onToggleTransferDone: (e: BillEntry) => void;
   onExport: () => void;
@@ -933,14 +981,24 @@ function CompanyLedger({
                         {entry.remarks || "—"}
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => onDeleteEntry(entry)}
-                          aria-label="Delete"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => onEditEntry(entry)}
+                            aria-label="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => onDeleteEntry(entry)}
+                            aria-label="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -969,13 +1027,24 @@ function CompanyLedger({
                         {entry.time ? ` · ${formatDisplayTime(entry.time)}` : ""}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => onDeleteEntry(entry)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onEditEntry(entry)}
+                        aria-label="Edit"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onDeleteEntry(entry)}
+                        aria-label="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                   {entry.type === "TRANSFER" && (
                     <button
