@@ -39,8 +39,8 @@ export function monthlySalaryForDate(
 }
 
 /**
- * Save a salary change so it applies from `asOfDate` (default today).
- * Past dates keep the previous monthly salary via salaryHistory.
+ * Save a salary change so it applies from the next day.
+ * Today and earlier days keep the previous monthly salary.
  */
 export function buildEmployeeSalaryScheduleSave(
   currentSalary: number,
@@ -55,7 +55,7 @@ export function buildEmployeeSalaryScheduleSave(
 } {
   const roundedNext = Math.round(Math.max(0, nextSalary) * 100) / 100;
   const roundedCurrent = Math.round(Math.max(0, currentSalary) * 100) / 100;
-  const effectiveFrom = asOfDate;
+  const effectiveFrom = addDaysIso(asOfDate, 1);
 
   if (roundedNext === roundedCurrent) {
     return {
@@ -91,19 +91,4 @@ export function buildEmployeeSalaryScheduleSave(
     changed: true,
     history,
   };
-}
-
-/** @deprecated kept for callers that want next-day effective — prefer buildEmployeeSalaryScheduleSave */
-export function buildEmployeeSalaryScheduleSaveNextDay(
-  currentSalary: number,
-  currentHistory: SalaryScheduleEntry[] | undefined,
-  nextSalary: number,
-  asOfDate: string = todayStr()
-) {
-  return buildEmployeeSalaryScheduleSave(
-    currentSalary,
-    currentHistory,
-    nextSalary,
-    addDaysIso(asOfDate, 1)
-  );
 }

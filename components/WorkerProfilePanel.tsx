@@ -73,7 +73,6 @@ import {
   parseAttendanceSettingsDoc,
 } from "@/lib/shift-schedule";
 import { buildEmployeeSalaryScheduleSave } from "@/lib/salary-schedule";
-import { computeStaffSalarySnapshot } from "@/lib/salary-sync";
 import {
   SUPERVISOR_PERMISSION_LABELS,
   isPayrollRole,
@@ -385,57 +384,7 @@ export default function WorkerProfilePanel({
   );
   const netSalary = earned.earnedNet;
   const payStatus = salaryStatus(netSalary, paidThisMonth);
-  const salarySnapshot = useMemo(
-    () =>
-      computeStaffSalarySnapshot({
-        employee: localEmployee,
-        payments,
-        attendance: attendanceRecords,
-        settings,
-        overrides,
-        periodOffset: 0,
-        today,
-      }),
-    [localEmployee, payments, attendanceRecords, settings, overrides, today]
-  );
-  const salaryRemaining = Math.max(0, salarySnapshot.totalDue);
-
-  useEffect(() => {
-    if (!employee?.phone || employee.salaryDueManual || loading) return;
-    const snap = computeStaffSalarySnapshot({
-      employee: localEmployee,
-      payments,
-      attendance: attendanceRecords,
-      settings,
-      overrides,
-      periodOffset: 0,
-      today,
-    });
-    const rounded = Math.round(Math.max(0, snap.totalDue) * 100) / 100;
-    if (
-      employee.salaryRemaining === rounded &&
-      employee.salaryPaidThisPeriod === snap.paidThisPeriod
-    ) {
-      return;
-    }
-    updateDoc(doc(getDb(), "employees", employee.phone), {
-      salaryRemaining: rounded,
-      salaryPaidThisPeriod: snap.paidThisPeriod,
-      salaryDueManual: false,
-    }).catch(() => {});
-  }, [
-    employee?.phone,
-    employee?.salaryRemaining,
-    employee?.salaryPaidThisPeriod,
-    employee?.salaryDueManual,
-    localEmployee,
-    payments,
-    attendanceRecords,
-    settings,
-    overrides,
-    today,
-    loading,
-  ]);
+  const salaryRemaining = Math.max(0, localEmployee.salaryRemaining || 0);
 
   const recentPayments = useMemo(
     () =>
@@ -811,8 +760,8 @@ export default function WorkerProfilePanel({
                     Change salary
                   </h3>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    Increase or decrease monthly salary. New rate applies from today —
-                    earlier worked days keep the old per-day / per-hour rate.
+                    Increase or decrease monthly salary. New rate applies from the next day.
+                    Today and earlier days keep the old per-day / per-hour rate.
                   </p>
                   <form onSubmit={saveStaffSalary} className="mt-3 space-y-3">
                     <div>
