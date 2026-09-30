@@ -73,6 +73,7 @@ import {
   parseAttendanceSettingsDoc,
 } from "@/lib/shift-schedule";
 import { buildEmployeeSalaryScheduleSave } from "@/lib/salary-schedule";
+import { computeStaffSalarySnapshot } from "@/lib/salary-sync";
 import {
   SUPERVISOR_PERMISSION_LABELS,
   isPayrollRole,
@@ -384,16 +385,57 @@ export default function WorkerProfilePanel({
   );
   const netSalary = earned.earnedNet;
   const payStatus = salaryStatus(netSalary, paidThisMonth);
-  const salaryRemaining = Math.max(0, netSalary - paidThisMonth);
+  const salarySnapshot = useMemo(
+    () =>
+      computeStaffSalarySnapshot({
+        employee: localEmployee,
+        payments,
+        attendance: attendanceRecords,
+        settings,
+        overrides,
+        periodOffset: 0,
+        today,
+      }),
+    [localEmployee, payments, attendanceRecords, settings, overrides, today]
+  );
+  const salaryRemaining = Math.max(0, salarySnapshot.totalDue);
 
   useEffect(() => {
-    const roundedRemaining = Math.round(salaryRemaining * 100) / 100;
-    if (employee?.phone && Number.isFinite(roundedRemaining) && employee.salaryRemaining !== roundedRemaining) {
-      updateDoc(doc(getDb(), "employees", employee.phone), {
-        salaryRemaining: roundedRemaining
-      }).catch(() => {});
+    if (!employee?.phone || employee.salaryDueManual || loading) return;
+    const snap = computeStaffSalarySnapshot({
+      employee: localEmployee,
+      payments,
+      attendance: attendanceRecords,
+      settings,
+      overrides,
+      periodOffset: 0,
+      today,
+    });
+    const rounded = Math.round(Math.max(0, snap.totalDue) * 100) / 100;
+    if (
+      employee.salaryRemaining === rounded &&
+      employee.salaryPaidThisPeriod === snap.paidThisPeriod
+    ) {
+      return;
     }
-  }, [employee?.phone, employee?.salaryRemaining, salaryRemaining]);
+    updateDoc(doc(getDb(), "employees", employee.phone), {
+      salaryRemaining: rounded,
+      salaryPaidThisPeriod: snap.paidThisPeriod,
+      salaryDueManual: false,
+    }).catch(() => {});
+  }, [
+    employee?.phone,
+    employee?.salaryRemaining,
+    employee?.salaryPaidThisPeriod,
+    employee?.salaryDueManual,
+    localEmployee,
+    payments,
+    attendanceRecords,
+    settings,
+    overrides,
+    today,
+    loading,
+  ]);
 
   const recentPayments = useMemo(
     () =>

@@ -78,6 +78,8 @@ export interface Employee {
   /** Per-staff salary history — changes apply from the effective date (past days keep old rate). */
   salaryHistory?: SalaryScheduleEntry[];
   salaryRemaining?: number;
+  /** Amount of salary payments applied to the current calendar month (staff app). */
+  salaryPaidThisPeriod?: number;
   /** When true, salaryRemaining is set manually and auto-sync is skipped. */
   salaryDueManual?: boolean;
   /** Web supervisor — admin toggles which dashboard sections are visible. */

@@ -185,6 +185,7 @@ export default function SalaryPage() {
                 shiftHistory: parseShiftHistory(data.shiftHistory),
                 salaryHistory: parseSalaryHistory(data.salaryHistory),
                 salaryRemaining: (data.salaryRemaining as number) ?? undefined,
+                salaryPaidThisPeriod: (data.salaryPaidThisPeriod as number) ?? undefined,
                 salaryDueManual: Boolean(data.salaryDueManual),
               };
             })
@@ -392,16 +393,24 @@ export default function SalaryPage() {
     rows.forEach((r) => {
       if (!r.employee.phone || r.employee.salaryDueManual) return;
       const rounded = Math.round(r.calculatedDue * 100) / 100;
+      const paidRounded = Math.round(r.paid * 100) / 100;
       const stored = r.employee.salaryRemaining;
-      if (stored === rounded) return;
+      const storedPaid = r.employee.salaryPaidThisPeriod;
+      if (stored === rounded && storedPaid === paidRounded) return;
       updateDoc(doc(getDb(), "employees", r.employee.phone), {
         salaryRemaining: rounded,
+        salaryPaidThisPeriod: paidRounded,
       })
         .then(() => {
           setStaff((prev) =>
             prev.map((e) =>
               e.phone === r.employee.phone
-                ? { ...e, salaryRemaining: rounded, salaryDueManual: false }
+                ? {
+                    ...e,
+                    salaryRemaining: rounded,
+                    salaryPaidThisPeriod: paidRounded,
+                    salaryDueManual: false,
+                  }
                 : e
             )
           );
