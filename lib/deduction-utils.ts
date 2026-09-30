@@ -1,4 +1,10 @@
-import type { Attendance, AttendanceSettings, Employee, ShiftScheduleEntry } from "./types";
+import type {
+  Attendance,
+  AttendanceSettings,
+  Employee,
+  SalaryScheduleEntry,
+  ShiftScheduleEntry,
+} from "./types";
 import {
   computeEarlyLeaveMinutes,
   computeLateMinutes,
@@ -13,6 +19,7 @@ import {
   employeeShiftForDate,
   globalSettingsForDate,
 } from "./shift-schedule";
+import { monthlySalaryForDate } from "./salary-schedule";
 import { addDaysIso, daysInclusive, calendarMonthBounds, payPeriodContainingDate } from "./pay-period-utils";
 
 export type DayKind = "HOLIDAY" | "WORKING";
@@ -457,6 +464,8 @@ export function computeEarnedSalary(opts: {
   overrides: OverrideSource;
   employeePhone?: string;
   employeeShift?: ShiftSource;
+  /** When set, each day uses the salary in effect on that date. */
+  salaryHistory?: SalaryScheduleEntry[];
 }): EarnedSalarySummary {
   const {
     monthlySalary,
@@ -468,6 +477,7 @@ export function computeEarnedSalary(opts: {
     overrides,
     employeePhone,
     employeeShift,
+    salaryHistory,
   } = opts;
 
   const daysInPeriod = Math.max(daysInclusive(periodStart, periodEnd), 1);
@@ -478,10 +488,7 @@ export function computeEarnedSalary(opts: {
     employeePhone
   );
   const shiftMins = shiftMinutes(settings);
-  const perDayRate = monthlySalary > 0 ? monthlySalary / daysInPeriod : 0;
-  const perMinuteRate =
-    monthlySalary > 0 ? monthlySalary / (daysInPeriod * shiftMins) : 0;
-  const perHourRate = perMinuteRate * 60;
+  const fallbackPerDay = monthlySalary > 0 ? monthlySalary / daysInPeriod : 0;
 
   const until = asOfDate < periodEnd ? asOfDate : periodEnd;
 
@@ -491,13 +498,32 @@ export function computeEarnedSalary(opts: {
   let totalEarly = 0;
   let grossEarned = 0;
   let totalDeduction = 0;
+  let rateSum = 0;
+  let rateDays = 0;
 
-  if (until >= periodStart && monthlySalary > 0) {
+  const mayEarn =
+    monthlySalary > 0 || (salaryHistory?.some((h) => h.monthlySalary > 0) ?? false);
+
+  if (until >= periodStart && mayEarn) {
     let cursor = periodStart;
     while (cursor <= periodEnd) {
       const key = cursor;
       cursor = addDaysIso(cursor, 1);
       if (key < periodStart || key > until) continue;
+
+      const daySalary = monthlySalaryForDate(monthlySalary, salaryHistory, key);
+      if (daySalary <= 0) continue;
+
+      const perDayRate = daySalary / daysInPeriod;
+      const dayShift = resolveShiftSettings(
+        employeeShift,
+        settings,
+        key,
+        overrides,
+        employeePhone
+      );
+      const dayShiftMins = shiftMinutes(dayShift);
+      const perMinuteRate = daySalary / (daysInPeriod * dayShiftMins);
 
       const paidOff = isPaidOffDay(key, overrides, employeePhone);
       const rec = byDate.get(key);
@@ -508,13 +534,6 @@ export function computeEarnedSalary(opts: {
       if (!paidOff && !hasPunch && credit !== "FULL" && credit !== "HALF") continue;
 
       const dayFactor = !paidOff && credit === "HALF" ? 0.5 : 1;
-      const dayShift = resolveShiftSettings(
-        employeeShift,
-        settings,
-        key,
-        overrides,
-        employeePhone
-      );
       const late =
         paidOff || credit === "FULL" || credit === "HALF"
           ? 0
@@ -558,8 +577,12 @@ export function computeEarnedSalary(opts: {
       totalDeduction += deduction;
       totalLate += late;
       totalEarly += early;
+      rateSum += perDayRate;
+      rateDays++;
     }
   }
+
+  const avgPerDay = rateDays > 0 ? rateSum / rateDays : fallbackPerDay;
 
   const fullMonthDeductions = computePeriodDeductions(
     monthlySalary,
@@ -581,9 +604,9 @@ export function computeEarnedSalary(opts: {
     calendarDaysInMonth: daysInPeriod,
     workingDaysInMonth,
     shiftMinutes: shiftMins,
-    perDayRate: Math.round(perDayRate * 100) / 100,
-    perHourRate: Math.round(perHourRate * 100) / 100,
-    perMinuteRate,
+    perDayRate: Math.round(avgPerDay * 100) / 100,
+    perHourRate: Math.round((avgPerDay / Math.max(shiftMins, 1)) * 60 * 100) / 100,
+    perMinuteRate: avgPerDay / Math.max(shiftMins, 1),
     daysWorked: days.length,
     grossEarned: Math.round(grossEarned * 100) / 100,
     totalLateMinutes: totalLate,
@@ -612,6 +635,8 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
   overrides: OverrideSource;
   employeePhone?: string;
   employeeShift?: ShiftSource;
+  /** When set, each day uses the salary in effect on that date. */
+  salaryHistory?: SalaryScheduleEntry[];
 }): EarnedSalarySummary {
   const {
     monthlySalary,
@@ -624,6 +649,7 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
     overrides,
     employeePhone,
     employeeShift,
+    salaryHistory,
   } = opts;
 
   const { start: monthStart, end: monthEnd } = calendarMonthBounds(year, month);
@@ -646,7 +672,10 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
   let fullMonthGross = 0;
   let paidDaySlots = 0;
 
-  if (until >= monthStart && monthlySalary > 0) {
+  const mayEarn =
+    monthlySalary > 0 || (salaryHistory?.some((h) => h.monthlySalary > 0) ?? false);
+
+  if (until >= monthStart && mayEarn) {
     let cursor = monthStart;
     while (cursor <= monthEnd) {
       const key = cursor;
@@ -655,8 +684,11 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
       const dayPeriod = payPeriodContainingDate(joinDate, key);
       if (!dayPeriod) continue;
 
+      const daySalary = monthlySalaryForDate(monthlySalary, salaryHistory, key);
+      if (daySalary <= 0) continue;
+
       const periodDays = Math.max(daysInclusive(dayPeriod.start, dayPeriod.end), 1);
-      const perDayRate = monthlySalary / periodDays;
+      const perDayRate = daySalary / periodDays;
       const dayShift = resolveShiftSettings(
         employeeShift,
         settings,
@@ -665,7 +697,7 @@ export function computeEarnedSalaryForCalendarMonth(opts: {
         employeePhone
       );
       const dayShiftMins = shiftMinutes(dayShift);
-      const perMinuteRate = monthlySalary / (periodDays * dayShiftMins);
+      const perMinuteRate = daySalary / (periodDays * dayShiftMins);
 
       // Working + paid OFF days both contribute to a perfect-month total.
       fullMonthGross += perDayRate;

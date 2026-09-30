@@ -109,6 +109,7 @@ export default function MySalaryPage() {
         dailySignInTime: session.dailySignInTime,
         dailySignOutTime: session.dailySignOutTime,
       },
+      salaryHistory: session.salaryHistory,
     });
   }, [session, phone, period, attendance, settings, overrides, asOfDate]);
 

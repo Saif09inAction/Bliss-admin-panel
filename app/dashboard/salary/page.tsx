@@ -43,6 +43,7 @@ import {
 } from "@/lib/salary-sync";
 import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
 import { parseAttendanceSettingsDoc, parseShiftHistory } from "@/lib/shift-schedule";
+import { parseSalaryHistory } from "@/lib/salary-schedule";
 import {
   computeEarnedSalaryForCalendarMonth,
   parseCalendarOverride,
@@ -182,6 +183,7 @@ export default function SalaryPage() {
                 dailySignInTime: (data.dailySignInTime as string) || "",
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
                 shiftHistory: parseShiftHistory(data.shiftHistory),
+                salaryHistory: parseSalaryHistory(data.salaryHistory),
                 salaryRemaining: (data.salaryRemaining as number) ?? undefined,
                 salaryDueManual: Boolean(data.salaryDueManual),
               };
@@ -268,6 +270,7 @@ export default function SalaryPage() {
           overrides,
           employeePhone: e.phone,
           employeeShift: e,
+          salaryHistory: e.salaryHistory,
         });
         const earnedNet = monthRow?.earned ?? earned.earnedNet;
         const calculatedDue = Math.round((earnedNet - paid) * 100) / 100;

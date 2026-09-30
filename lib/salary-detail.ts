@@ -119,6 +119,7 @@ export function allocateStaffSalaryByMonth(opts: {
       overrides,
       employeePhone: phone,
       employeeShift: employee,
+      salaryHistory: employee.salaryHistory,
     });
 
     months.push({
@@ -421,6 +422,7 @@ export function buildSalaryStaffDetail(opts: {
     overrides,
     employeePhone: phone,
     employeeShift: employee,
+    salaryHistory: employee.salaryHistory,
   });
 
   const allocated = allocateStaffSalaryByMonth(opts);

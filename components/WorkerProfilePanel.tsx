@@ -72,6 +72,7 @@ import {
   buildEmployeeShiftScheduleSave,
   parseAttendanceSettingsDoc,
 } from "@/lib/shift-schedule";
+import { buildEmployeeSalaryScheduleSave } from "@/lib/salary-schedule";
 import {
   SUPERVISOR_PERMISSION_LABELS,
   isPayrollRole,
@@ -128,6 +129,9 @@ export default function WorkerProfilePanel({
   });
   const [shiftSaving, setShiftSaving] = useState(false);
   const [shiftMsg, setShiftMsg] = useState("");
+  const [salaryDraft, setSalaryDraft] = useState(String(employee.monthlySalary || ""));
+  const [salarySaving, setSalarySaving] = useState(false);
+  const [salaryMsg, setSalaryMsg] = useState("");
   const [supervisorAccessDraft, setSupervisorAccessDraft] = useState<SupervisorAccess>(
     normalizeSupervisorAccess(employee.supervisorAccess)
   );
@@ -167,6 +171,8 @@ export default function WorkerProfilePanel({
         ? normalizeTime(employee.dailySignOutTime)
         : "",
     });
+    setSalaryDraft(String(employee.monthlySalary || ""));
+    setSalaryMsg("");
     setSupervisorAccessDraft(normalizeSupervisorAccess(employee.supervisorAccess));
     setPeriodOffset(0);
   }, [employee]);
@@ -349,7 +355,7 @@ export default function WorkerProfilePanel({
   const earned = useMemo(() => {
     const asOf = earnedAsOfDate(payPeriod, today);
     return computeEarnedSalary({
-      monthlySalary: employee.monthlySalary,
+      monthlySalary: localEmployee.monthlySalary,
       periodStart: payPeriod.start,
       periodEnd: payPeriod.end,
       asOfDate: asOf,
@@ -358,9 +364,11 @@ export default function WorkerProfilePanel({
       overrides,
       employeePhone: employee.phone,
       employeeShift: localEmployee,
+      salaryHistory: localEmployee.salaryHistory,
     });
   }, [
-    employee.monthlySalary,
+    localEmployee.monthlySalary,
+    localEmployee.salaryHistory,
     employee.phone,
     payPeriod,
     today,
@@ -522,6 +530,45 @@ export default function WorkerProfilePanel({
     }
   }
 
+  async function saveStaffSalary(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isPayrollRole(localEmployee.role)) return;
+    const nextSalary = Number(String(salaryDraft).replace(/,/g, "").trim());
+    if (!Number.isFinite(nextSalary) || nextSalary < 0) {
+      setSalaryMsg("Enter a valid monthly salary.");
+      return;
+    }
+    setSalarySaving(true);
+    setSalaryMsg("");
+    try {
+      const { payload, effectiveFrom, changed } = buildEmployeeSalaryScheduleSave(
+        localEmployee.monthlySalary || 0,
+        localEmployee.salaryHistory,
+        nextSalary,
+        today
+      );
+      if (!changed) {
+        setSalaryMsg("No change to save.");
+        return;
+      }
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), payload);
+      const next: Employee = {
+        ...localEmployee,
+        monthlySalary: nextSalary,
+        salaryHistory: payload.salaryHistory as Employee["salaryHistory"],
+      };
+      setLocalEmployee(next);
+      onUpdated?.(next);
+      setSalaryMsg(
+        `Salary ₹${nextSalary.toLocaleString("en-IN")}/mo applies from ${formatDisplayDate(effectiveFrom)}. Earlier days keep the previous salary.`
+      );
+    } catch (err) {
+      setSalaryMsg(err instanceof Error ? err.message : "Failed to save salary.");
+    } finally {
+      setSalarySaving(false);
+    }
+  }
+
   async function submitKaarigerPay(e: React.FormEvent) {
     e.preventDefault();
     if (!session) return;
@@ -669,7 +716,7 @@ export default function WorkerProfilePanel({
                       <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
                       <InfoRow
                         label="Monthly Salary"
-                        value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
+                        value={`₹${localEmployee.monthlySalary.toLocaleString("en-IN")}`}
                       />
                       <InfoRow
                         label="Shift"
@@ -712,6 +759,53 @@ export default function WorkerProfilePanel({
                     )}
                   </div>
                   {accessMsg && <p className="mt-2 text-xs text-jade-deep">{accessMsg}</p>}
+                </section>
+              )}
+
+              {isPayrollRole(localEmployee.role) && (
+                <section>
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <IndianRupee size={16} className="text-jade-deep" />
+                    Change salary
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Increase or decrease monthly salary. New rate applies from today —
+                    earlier worked days keep the old per-day / per-hour rate.
+                  </p>
+                  <form onSubmit={saveStaffSalary} className="mt-3 space-y-3">
+                    <div>
+                      <label className="label">Monthly salary (₹)</label>
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={salaryDraft}
+                        onChange={(e) => setSalaryDraft(e.target.value)}
+                        placeholder="e.g. 15000"
+                        required
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-sm"
+                        disabled={salarySaving}
+                      >
+                        {salarySaving ? "…" : "Save salary"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={salarySaving}
+                        onClick={() => {
+                          setSalaryDraft(String(localEmployee.monthlySalary || ""));
+                          setSalaryMsg("");
+                        }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    {salaryMsg && <p className="text-xs text-jade-deep">{salaryMsg}</p>}
+                  </form>
                 </section>
               )}
 
@@ -880,7 +974,7 @@ export default function WorkerProfilePanel({
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <StatTile
                       label="Monthly"
-                      value={`₹${employee.monthlySalary.toLocaleString("en-IN")}`}
+                      value={`₹${localEmployee.monthlySalary.toLocaleString("en-IN")}`}
                     />
                     <StatTile
                       label="Late cut"

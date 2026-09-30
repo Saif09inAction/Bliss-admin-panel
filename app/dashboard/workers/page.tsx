@@ -30,6 +30,7 @@ import { todayStr, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
 import { markPresentDateRange } from "@/lib/attendance-credit";
 import { buildEmployeeShiftScheduleSave, parseShiftHistory } from "@/lib/shift-schedule";
+import { buildEmployeeSalaryScheduleSave, parseSalaryHistory } from "@/lib/salary-schedule";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
 import { useAuth } from "@/lib/auth-context";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
@@ -97,6 +98,7 @@ export default function WorkersPage() {
           dailySignInTime: (data.dailySignInTime as string) || "",
           dailySignOutTime: (data.dailySignOutTime as string) || "",
           shiftHistory: parseShiftHistory(data.shiftHistory),
+          salaryHistory: parseSalaryHistory(data.salaryHistory),
           password: (data.password as string) || "",
           supervisorAccess: normalizeSupervisorAccess(
             data.supervisorAccess as Partial<SupervisorAccess>
@@ -214,16 +216,32 @@ export default function WorkersPage() {
       const resolvedRole: Role =
         formMode === "edit" ? existingDoc?.role || "STAFF" : role;
 
+      const nextSalary =
+        resolvedRole === "KAARIGER" ? 0 : Number(form.monthlySalary) || 0;
       const data: Record<string, unknown> = {
         id: phone,
         name,
         phone,
         joiningDate: resolvedRole === "KAARIGER" ? "" : form.joiningDate,
-        monthlySalary: resolvedRole === "KAARIGER" ? 0 : Number(form.monthlySalary) || 0,
+        monthlySalary: nextSalary,
         profilePhotoUrl: "",
         attendancePercentage: existingDoc?.attendancePercentage ?? 0,
         role: resolvedRole,
       };
+
+      if (
+        (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR") &&
+        formMode === "edit" &&
+        existingDoc
+      ) {
+        const { payload: salaryPayload, changed: salaryChanged } =
+          buildEmployeeSalaryScheduleSave(
+            existingDoc.monthlySalary || 0,
+            existingDoc.salaryHistory,
+            nextSalary
+          );
+        if (salaryChanged) Object.assign(data, salaryPayload);
+      }
 
       if (resolvedRole === "KAARIGER") {
         data.openingBalance = Math.max(0, Number(form.openingBalance) || 0);

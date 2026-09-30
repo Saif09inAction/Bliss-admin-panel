@@ -5,6 +5,7 @@ import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { getDb } from "./firebase";
 import type { AppSession, AdminSession, SupervisorSession } from "./types";
 import { normalizeSupervisorAccess } from "./supervisor-access";
+import { parseSalaryHistory } from "./salary-schedule";
 
 const STORAGE_KEY = "laiza_admin_session";
 
@@ -20,6 +21,7 @@ function supervisorSessionFromDoc(
     monthlySalary: (data.monthlySalary as number) || 0,
     dailySignInTime: (data.dailySignInTime as string) || "",
     dailySignOutTime: (data.dailySignOutTime as string) || "",
+    salaryHistory: parseSalaryHistory(data.salaryHistory),
     access: normalizeSupervisorAccess(
       data.supervisorAccess as Partial<Record<string, boolean>>
     ),
@@ -34,6 +36,7 @@ function sessionsEqual(a: SupervisorSession, b: SupervisorSession): boolean {
     a.monthlySalary === b.monthlySalary &&
     a.dailySignInTime === b.dailySignInTime &&
     a.dailySignOutTime === b.dailySignOutTime &&
+    JSON.stringify(a.salaryHistory || []) === JSON.stringify(b.salaryHistory || []) &&
     JSON.stringify(a.access) === JSON.stringify(b.access)
   );
 }
@@ -51,6 +54,7 @@ function parseStoredSession(raw: string): AppSession | null {
         monthlySalary: Number(data.monthlySalary) || 0,
         dailySignInTime: (data.dailySignInTime as string) || "",
         dailySignOutTime: (data.dailySignOutTime as string) || "",
+        salaryHistory: parseSalaryHistory(data.salaryHistory),
         access: normalizeSupervisorAccess(data.access as Partial<Record<string, boolean>>),
       };
     }

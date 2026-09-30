@@ -8,6 +8,12 @@ export interface ShiftScheduleEntry {
   sundaySignOutTime?: string;
 }
 
+/** Monthly salary change that applies from effectiveFrom onward. */
+export interface SalaryScheduleEntry {
+  effectiveFrom: string;
+  monthlySalary: number;
+}
+
 export type Role = "STAFF" | "KAARIGER" | "SUPERVISOR";
 
 export interface AdminSession {
@@ -24,6 +30,7 @@ export interface SupervisorSession {
   monthlySalary: number;
   dailySignInTime?: string;
   dailySignOutTime?: string;
+  salaryHistory?: SalaryScheduleEntry[];
   access: SupervisorAccess;
 }
 
@@ -68,6 +75,8 @@ export interface Employee {
   dailySignOutTime?: string;
   /** Per-staff shift history — changes apply from the next day. */
   shiftHistory?: ShiftScheduleEntry[];
+  /** Per-staff salary history — changes apply from the effective date (past days keep old rate). */
+  salaryHistory?: SalaryScheduleEntry[];
   salaryRemaining?: number;
   /** When true, salaryRemaining is set manually and auto-sync is skipped. */
   salaryDueManual?: boolean;
