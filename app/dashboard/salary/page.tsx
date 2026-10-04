@@ -29,12 +29,9 @@ import {
 } from "@/lib/salary-utils";
 import {
   clampPayPeriodOffset,
-  calendarMonthBounds,
-  calendarMonthFromOffset,
-  earnedAsOfDateForCalendarView,
-  formatCalendarMonthLabel,
+  earnedAsOfDate,
   formatPayPeriodLabel,
-  resolvePayPeriodForCalendarOffset,
+  resolvePayPeriod,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
 import {
@@ -45,7 +42,7 @@ import { defaultSettings, parseAttendance } from "@/lib/attendance-utils";
 import { parseAttendanceSettingsDoc, parseShiftHistory } from "@/lib/shift-schedule";
 import { parseSalaryHistory } from "@/lib/salary-schedule";
 import {
-  computeEarnedSalaryForCalendarMonth,
+  computeEarnedSalary,
   parseCalendarOverride,
   type EarnedSalarySummary,
   type OverrideMap,
@@ -100,15 +97,11 @@ type SalaryRow = {
 };
 
 function resolveStaffPeriod(joinDate: string, monthOffset: number, asOfDate: string) {
-  return resolvePayPeriodForCalendarOffset(joinDate, monthOffset, asOfDate);
+  return resolvePayPeriod(joinDate, monthOffset, asOfDate);
 }
 
-function staffAsOfDate(monthOffset: number, asOfDate: string) {
-  return earnedAsOfDateForCalendarView(
-    { index: 0, start: "", end: "", daysInPeriod: 0 },
-    calendarMonthFromOffset(asOfDate, monthOffset),
-    asOfDate
-  );
+function staffAsOfDate(joinDate: string, monthOffset: number, asOfDate: string) {
+  return earnedAsOfDate(resolvePayPeriod(joinDate, monthOffset, asOfDate), asOfDate);
 }
 function resolveDisplayDue(
   employee: Employee,
@@ -227,28 +220,20 @@ export default function SalaryPage() {
   }
 
   const periodNavLabel = useMemo(() => {
-    const { year, month } = calendarMonthFromOffset(today, periodOffset);
-    const monthLabel = formatCalendarMonthLabel(year, month);
-    if (periodOffset === 0) return `${monthLabel} · current`;
-    return monthLabel;
-  }, [periodOffset, today]);
+    if (periodOffset === 0) return "Current pay cycle";
+    if (periodOffset === -1) return "Previous pay cycle";
+    return `${Math.abs(periodOffset)} cycles ago`;
+  }, [periodOffset]);
 
-  const periodNavRange = useMemo(() => {
-    const { year, month } = calendarMonthFromOffset(today, periodOffset);
-    const bounds = calendarMonthBounds(year, month);
-    return formatPayPeriodLabel(bounds.start, bounds.end);
-  }, [periodOffset, today]);
+  const periodNavRange = "Join date to the day before the next join date";
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const statusRank: Record<string, number> = { UNPAID: 0, PARTIAL: 1, NONE: 2, PAID: 3 };
-    const viewedMonth = calendarMonthFromOffset(today, periodOffset);
-    const viewedMonthLabel = formatCalendarMonthLabel(viewedMonth.year, viewedMonth.month).toLowerCase();
     return staff
       .map((e): SalaryRow => {
-        const join = e.joiningDate?.trim() || today;
         const period = resolveStaffPeriod(e.joiningDate, periodOffset, today);
-        const asOfDate = staffAsOfDate(periodOffset, today);
+        const asOfDate = staffAsOfDate(e.joiningDate, periodOffset, today);
         const empAtt = attendance.filter((a) => a.employeeId === e.phone || a.employeeId === e.id);
         const allocated = allocateStaffSalaryByMonth({
           employee: e,
@@ -258,13 +243,14 @@ export default function SalaryPage() {
           overrides,
           today,
         });
-        const monthRow = findAllocatedMonth(allocated, periodOffset);
+        const monthRow =
+          allocated.find((m) => m.periodStart === period.start) ??
+          findAllocatedMonth(allocated, periodOffset);
         const paid = monthRow?.paid ?? 0;
-        const earned = computeEarnedSalaryForCalendarMonth({
+        const earned = computeEarnedSalary({
           monthlySalary: e.monthlySalary,
-          joinDate: join,
-          year: viewedMonth.year,
-          month: viewedMonth.month,
+          periodStart: period.start,
+          periodEnd: period.end,
           asOfDate,
           records: empAtt,
           settings: settings,
@@ -306,9 +292,7 @@ export default function SalaryPage() {
       })
       .filter(({ employee, status }) => {
         const period = resolveStaffPeriod(employee.joiningDate, periodOffset, today);
-        const periodLabel = period
-          ? formatPayPeriodLabel(period.start, period.end).toLowerCase()
-          : viewedMonthLabel;
+        const periodLabel = formatPayPeriodLabel(period.start, period.end).toLowerCase();
         if (dateFrom || dateTo) {
           if (!dateInRange(employee.joiningDate, dateFrom, dateTo)) return false;
         }
@@ -317,9 +301,9 @@ export default function SalaryPage() {
           employee.name.toLowerCase().includes(q) ||
           employee.phone.includes(q) ||
           periodLabel.includes(q) ||
-          viewedMonthLabel.includes(q) ||
           dateMatchesSearch(employee.joiningDate, q) ||
-          (period ? dateMatchesSearch(period.start, q) || dateMatchesSearch(period.end, q) : false);
+          dateMatchesSearch(period.start, q) ||
+          dateMatchesSearch(period.end, q);
         const matchFilter =
           filter === "ALL" ||
           (filter === "PAID" && status === "PAID") ||
@@ -348,7 +332,10 @@ export default function SalaryPage() {
         overrides,
         today,
       });
-      const monthRow = findAllocatedMonth(allocated, periodOffset);
+      const period = resolveStaffPeriod(e.joiningDate, periodOffset, today);
+      const monthRow =
+        allocated.find((m) => m.periodStart === period.start) ??
+        findAllocatedMonth(allocated, periodOffset);
       const paid = monthRow?.paid ?? 0;
       const earnedNet = monthRow?.earned ?? 0;
       const calculatedDue = Math.round((earnedNet - paid) * 100) / 100;
@@ -683,10 +670,7 @@ export default function SalaryPage() {
             amount: remaining,
             remarks:
               baseRemarks ||
-              `${formatCalendarMonthLabel(
-                calendarMonthFromOffset(today, periodOffset).year,
-                calendarMonthFromOffset(today, periodOffset).month
-              )} · ${modeLabel}`,
+              `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
           });
         }
       } else {
@@ -696,10 +680,7 @@ export default function SalaryPage() {
           amount,
           remarks:
             baseRemarks ||
-            `${formatCalendarMonthLabel(
-              calendarMonthFromOffset(today, periodOffset).year,
-              calendarMonthFromOffset(today, periodOffset).month
-            )} · ${modeLabel}`,
+            `${formatPayPeriodLabel(period.start, period.end)} · ${modeLabel}`,
         });
       }
 
@@ -910,7 +891,13 @@ export default function SalaryPage() {
                             <p className="font-semibold capitalize">{employee.name}</p>
                             <p className="text-xs text-[var(--text-muted)]">
                               {employee.phone}
-                              {employee.joiningDate ? ` · joined ${employee.joiningDate}` : ""}
+                              {employee.joiningDate ? ` · joined ${formatDisplayDate(employee.joiningDate)}` : ""}
+                            </p>
+                            <p className="text-xs text-jade-deep">
+                              {formatPayPeriodLabel(
+                                resolveStaffPeriod(employee.joiningDate, periodOffset, today).start,
+                                resolveStaffPeriod(employee.joiningDate, periodOffset, today).end
+                              )}
                             </p>
                             <p className="text-[10px] text-jade-deep">Tap for salary breakdown</p>
                           </div>
@@ -938,7 +925,7 @@ export default function SalaryPage() {
                             ) : null}
                             {carryForward !== 0 ? (
                               <span className="mt-0.5 block text-[10px] font-normal text-amber-700">
-                                incl. {money(carryForward)} from prior months
+                                incl. {money(carryForward)} from earlier cycles
                               </span>
                             ) : null}
                           </span>
@@ -1004,6 +991,12 @@ export default function SalaryPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="truncate font-semibold capitalize">{employee.name}</p>
+                            <p className="text-xs text-jade-deep">
+                              {formatPayPeriodLabel(
+                                resolveStaffPeriod(employee.joiningDate, periodOffset, today).start,
+                                resolveStaffPeriod(employee.joiningDate, periodOffset, today).end
+                              )}
+                            </p>
                             <p className="text-xs text-[var(--text-muted)]">
                               {earned.daysWorked}d worked · {money(earned.perDayRate)}/day · {money(earned.perHourRate)}/hr
                               {earned.totalDeduction > 0
@@ -1078,9 +1071,9 @@ export default function SalaryPage() {
                   <h3 className="font-display text-xl font-bold">Pay Salary</h3>
                   <p className="mt-1 text-sm text-[var(--text-muted)]">
                     {payTarget.employee.name} ·{" "}
-                    {formatCalendarMonthLabel(
-                      calendarMonthFromOffset(today, periodOffset).year,
-                      calendarMonthFromOffset(today, periodOffset).month
+                    {formatPayPeriodLabel(
+                      resolveStaffPeriod(payTarget.employee.joiningDate, periodOffset, today).start,
+                      resolveStaffPeriod(payTarget.employee.joiningDate, periodOffset, today).end
                     )}
                   </p>
                 </div>

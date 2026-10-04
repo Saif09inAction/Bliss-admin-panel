@@ -257,7 +257,7 @@ export default function SalaryStaffDetailPanel({
                       : "border-amber-200 text-amber-900"
                   }`}
                 >
-                  {d.carryForwardTotal < 0 ? "Prior credit total" : "Prior months total"}:{" "}
+                  {d.carryForwardTotal < 0 ? "Prior credit total" : "Earlier cycles total"}:{" "}
                   {money(d.carryForwardTotal)}
                 </p>
               </div>
@@ -359,7 +359,7 @@ export default function SalaryStaffDetailPanel({
             {d.earned.days.length > 0 && (
               <div>
                 <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Day-by-day
+                  Day-by-day · {d.periodLabel}
                 </p>
                 <div className="overflow-hidden rounded-xl border border-[var(--border)]">
                   <table className="data-table text-sm">
@@ -376,7 +376,9 @@ export default function SalaryStaffDetailPanel({
                       </tr>
                     </thead>
                     <tbody>
-                      {d.earned.days.map((day) => (
+                      {[...d.earned.days]
+                        .sort((a, b) => a.date.localeCompare(b.date))
+                        .map((day) => (
                         <tr key={day.date}>
                           <td>{formatDisplayDate(day.date)}</td>
                           <td>{day.dayFactor < 1 ? "Half" : "Full"}</td>
