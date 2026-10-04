@@ -452,6 +452,8 @@ export type EarnedDay = {
   dayNet: number;
   /** Set when the day is a paid Sunday and/or an admin holiday. */
   offKind?: EarnedOffKind;
+  /** Admin marked this day present without using the clock. */
+  adminMark?: "FULL" | "HALF";
 };
 
 export type EarnedSalarySummary = {
@@ -599,6 +601,7 @@ export function computeEarnedSalary(opts: {
         deduction,
         dayNet,
         offKind: paidOff ? earnedOffKind(key, overrides, employeePhone) : undefined,
+        adminMark: credit === "FULL" || credit === "HALF" ? credit : undefined,
       });
 
       grossEarned += dayGross;

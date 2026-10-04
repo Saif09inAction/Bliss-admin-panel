@@ -37,6 +37,35 @@ function dayKindLabel(offKind: EarnedOffKind | undefined, dayFactor: number) {
   return dayFactor < 1 ? "Half" : "Full";
 }
 
+function hoursLabel(day: { workingHours: number; adminMark?: "FULL" | "HALF" }) {
+  if (day.workingHours > 0) return day.workingHours.toFixed(1);
+  if (day.adminMark === "HALF") return "Half day · marked by admin";
+  if (day.adminMark === "FULL") return "Full day · marked by admin";
+  return "—";
+}
+
+function cycleSearchText(cycle: PayCycleOption) {
+  const bits = [cycle.label.toLowerCase(), cycle.start, cycle.end];
+  for (const iso of [cycle.start, cycle.end]) {
+    const [y, m, d] = iso.split("-").map(Number);
+    if (!y || !m || !d) continue;
+    const dt = new Date(y, m - 1, d);
+    const short = dt.toLocaleDateString("en-GB", { month: "short" }).toLowerCase();
+    const long = dt.toLocaleDateString("en-GB", { month: "long" }).toLowerCase();
+    bits.push(
+      `${d} ${short}`,
+      `${d} ${long}`,
+      `${d}th ${short}`,
+      `${d}th ${long}`,
+      short,
+      long,
+      `${d}/${m}`,
+      `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}`
+    );
+  }
+  return bits.join(" ");
+}
+
 export default function SalaryStaffDetailPanel({
   staffName,
   detail,
@@ -65,13 +94,11 @@ export default function SalaryStaffDetailPanel({
     }
   }, [showTransactions]);
 
-  const visibleCycles = useMemo(() => {
-    const q = cycleQuery.trim().toLowerCase();
-    if (!q) return cycles;
-    return cycles.filter(
-      (cycle) => cycle.offset === cycleOffset || cycle.label.toLowerCase().includes(q)
-    );
-  }, [cycles, cycleQuery, cycleOffset]);
+  const q = cycleQuery.trim().toLowerCase();
+  const matchingCycles = useMemo(() => {
+    if (!q) return [];
+    return cycles.filter((cycle) => cycleSearchText(cycle).includes(q));
+  }, [cycles, q]);
 
   const transactionsBlock = showTransactions ? (
     <div className="rounded-xl border border-[var(--border)] p-4">
@@ -238,23 +265,47 @@ export default function SalaryStaffDetailPanel({
                 type="search"
                 value={cycleQuery}
                 onChange={(e) => setCycleQuery(e.target.value)}
-                placeholder="Search cycle, e.g. 10 Sep or Oct"
+                placeholder="Search cycle, e.g. 10 Aug or Oct"
                 className="input"
               />
-              <select
-                className="input"
-                value={String(cycleOffset)}
-                onChange={(e) => onCycleChange(Number(e.target.value))}
-              >
-                {visibleCycles.map((cycle) => (
-                  <option key={cycle.offset} value={cycle.offset}>
-                    {cycle.label}
-                    {cycle.offset === 0 ? " · current" : ""}
-                  </option>
-                ))}
-              </select>
-              {cycleQuery.trim() && visibleCycles.length === 0 && (
-                <p className="text-xs text-[var(--text-muted)]">No cycle matches that search.</p>
+              {q ? (
+                <div className="max-h-48 overflow-y-auto rounded-xl border border-[var(--border)] bg-white">
+                  {matchingCycles.length === 0 ? (
+                    <p className="px-3 py-3 text-sm text-[var(--text-muted)]">
+                      No cycle matches that search.
+                    </p>
+                  ) : (
+                    matchingCycles.map((cycle) => (
+                      <button
+                        key={cycle.offset}
+                        type="button"
+                        className={`block w-full px-3 py-2.5 text-left text-sm hover:bg-[var(--surface-mist)] ${
+                          cycle.offset === cycleOffset ? "font-semibold text-jade-deep" : ""
+                        }`}
+                        onClick={() => {
+                          onCycleChange(cycle.offset);
+                          setCycleQuery("");
+                        }}
+                      >
+                        {cycle.label}
+                        {cycle.offset === 0 ? " · current" : ""}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <select
+                  className="input"
+                  value={String(cycleOffset)}
+                  onChange={(e) => onCycleChange(Number(e.target.value))}
+                >
+                  {cycles.map((cycle) => (
+                    <option key={cycle.offset} value={cycle.offset}>
+                      {cycle.label}
+                      {cycle.offset === 0 ? " · current" : ""}
+                    </option>
+                  ))}
+                </select>
               )}
             </div>
 
@@ -448,7 +499,7 @@ export default function SalaryStaffDetailPanel({
                           <td style={off ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
                             {dayKindLabel(day.offKind, day.dayFactor)}
                           </td>
-                          <td>{day.workingHours > 0 ? day.workingHours.toFixed(1) : "—"}</td>
+                          <td className="text-xs">{hoursLabel(day)}</td>
                           <td style={off ? { color: "var(--danger)" } : undefined}>
                             {money(day.dayGross)}
                           </td>
