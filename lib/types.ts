@@ -77,6 +77,8 @@ export interface Employee {
   shiftHistory?: ShiftScheduleEntry[];
   /** Per-staff salary history — changes apply from the effective date (past days keep old rate). */
   salaryHistory?: SalaryScheduleEntry[];
+  /** Dates whose day pay is left out of the salary total. */
+  salaryExcludedDates?: string[];
   salaryRemaining?: number;
   /** Amount of salary payments applied to the current calendar month (staff app). */
   salaryPaidThisPeriod?: number;

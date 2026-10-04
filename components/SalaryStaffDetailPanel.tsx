@@ -22,6 +22,7 @@ type Props = {
   cycles: PayCycleOption[];
   cycleOffset: number;
   onCycleChange: (offset: number) => void;
+  onToggleDayPay?: (date: string, exclude: boolean) => void;
   onClose: () => void;
   onPay?: () => void;
   onDeletePayment?: (payment: PaymentTransaction) => void;
@@ -72,6 +73,7 @@ export default function SalaryStaffDetailPanel({
   cycles,
   cycleOffset,
   onCycleChange,
+  onToggleDayPay,
   onClose,
   onPay,
   onDeletePayment,
@@ -82,7 +84,21 @@ export default function SalaryStaffDetailPanel({
   const d = detail;
   const [showTransactions, setShowTransactions] = useState(false);
   const [cycleQuery, setCycleQuery] = useState("");
+  const [payMenuDate, setPayMenuDate] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const holdTimer = useRef<number | null>(null);
+
+  function clearHold() {
+    if (holdTimer.current != null) {
+      window.clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+  }
+
+  function startHold(date: string) {
+    clearHold();
+    holdTimer.current = window.setTimeout(() => setPayMenuDate(date), 550);
+  }
 
   useEffect(() => {
     setCycleQuery("");
@@ -485,23 +501,35 @@ export default function SalaryStaffDetailPanel({
                       {[...d.earned.days]
                         .sort((a, b) => a.date.localeCompare(b.date))
                         .map((day) => {
-                          const off = Boolean(day.offKind);
+                          const dropped = Boolean(day.payExcluded);
+                          const marked = Boolean(day.offKind) || dropped;
                           return (
                         <tr
                           key={day.date}
-                          style={
-                            off ? { background: "rgba(232, 93, 76, 0.12)" } : undefined
-                          }
+                          style={{
+                            background: marked ? "rgba(232, 93, 76, 0.12)" : undefined,
+                            WebkitTouchCallout: "none",
+                            userSelect: "none",
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            clearHold();
+                            setPayMenuDate(day.date);
+                          }}
+                          onPointerDown={() => startHold(day.date)}
+                          onPointerUp={clearHold}
+                          onPointerLeave={clearHold}
+                          onPointerCancel={clearHold}
                         >
-                          <td style={off ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
+                          <td style={marked ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
                             {formatDisplayDate(day.date)}
                           </td>
-                          <td style={off ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
+                          <td style={marked ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
                             {dayKindLabel(day.offKind, day.dayFactor)}
                           </td>
                           <td className="text-xs">{hoursLabel(day)}</td>
-                          <td style={off ? { color: "var(--danger)" } : undefined}>
-                            {money(day.dayGross)}
+                          <td style={marked ? { color: "var(--danger)", fontWeight: dropped ? 600 : undefined } : undefined}>
+                            {dropped ? "Pay not included" : money(day.dayGross)}
                           </td>
                           <td className="text-danger">
                             {day.lateMinutes > 0 ? formatDurationMinutes(day.lateMinutes) : "—"}
@@ -514,9 +542,9 @@ export default function SalaryStaffDetailPanel({
                           </td>
                           <td
                             className="font-medium"
-                            style={off ? { color: "var(--danger)" } : undefined}
+                            style={marked ? { color: "var(--danger)" } : undefined}
                           >
-                            {money(day.dayNet)}
+                            {dropped ? "—" : money(day.dayNet)}
                           </td>
                         </tr>
                           );
@@ -541,6 +569,46 @@ export default function SalaryStaffDetailPanel({
           </div>
         </div>
       </div>
+      {payMenuDate && (
+        <>
+          <div
+            className="fixed inset-0 z-[70] bg-black/30"
+            onClick={() => setPayMenuDate(null)}
+          />
+          <div className="fixed left-1/2 top-1/2 z-[71] w-[min(22rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-xl">
+            <p className="font-display text-lg font-bold">{formatDisplayDate(payMenuDate)}</p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              {d.earned.days.find((day) => day.date === payMenuDate)?.payExcluded
+                ? "This day's pay is currently left out of the total."
+                : "Leave this day's pay out of the salary total."}
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                className="btn btn-primary w-full justify-center"
+                onClick={() => {
+                  const excluded = Boolean(
+                    d.earned.days.find((day) => day.date === payMenuDate)?.payExcluded
+                  );
+                  onToggleDayPay?.(payMenuDate, !excluded);
+                  setPayMenuDate(null);
+                }}
+              >
+                {d.earned.days.find((day) => day.date === payMenuDate)?.payExcluded
+                  ? "Count this day's pay"
+                  : "Don't count payment"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary w-full justify-center"
+                onClick={() => setPayMenuDate(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

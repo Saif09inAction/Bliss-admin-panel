@@ -99,6 +99,11 @@ export default function WorkersPage() {
           dailySignOutTime: (data.dailySignOutTime as string) || "",
           shiftHistory: parseShiftHistory(data.shiftHistory),
           salaryHistory: parseSalaryHistory(data.salaryHistory),
+          salaryExcludedDates: Array.isArray(data.salaryExcludedDates)
+            ? (data.salaryExcludedDates as unknown[]).filter(
+                (d): d is string => typeof d === "string"
+              )
+            : [],
           password: (data.password as string) || "",
           supervisorAccess: normalizeSupervisorAccess(
             data.supervisorAccess as Partial<SupervisorAccess>

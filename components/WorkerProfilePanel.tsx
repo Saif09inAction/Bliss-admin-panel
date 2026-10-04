@@ -365,10 +365,12 @@ export default function WorkerProfilePanel({
       employeePhone: employee.phone,
       employeeShift: localEmployee,
       salaryHistory: localEmployee.salaryHistory,
+      excludedDates: localEmployee.salaryExcludedDates,
     });
   }, [
     localEmployee.monthlySalary,
     localEmployee.salaryHistory,
+    localEmployee.salaryExcludedDates,
     employee.phone,
     payPeriod,
     today,

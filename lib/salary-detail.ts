@@ -130,6 +130,7 @@ export function allocateStaffSalaryByMonth(opts: {
       employeePhone: phone,
       employeeShift: employee,
       salaryHistory: employee.salaryHistory,
+      excludedDates: employee.salaryExcludedDates,
     });
     const [yearStr, monthStr] = period.start.split("-");
 
@@ -421,6 +422,7 @@ export function buildSalaryStaffDetail(opts: {
     employeePhone: phone,
     employeeShift: employee,
     salaryHistory: employee.salaryHistory,
+    excludedDates: employee.salaryExcludedDates,
   });
 
   const allocated = allocateStaffSalaryByMonth(opts);
@@ -451,6 +453,7 @@ export function buildSalaryStaffDetail(opts: {
   let earlyAmount = 0;
 
   for (const day of earned.days) {
+    if (day.payExcluded) continue;
     const factor = day.dayFactor ?? 1;
     if (factor < 1) {
       halfDayCount++;

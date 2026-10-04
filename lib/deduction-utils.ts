@@ -454,6 +454,8 @@ export type EarnedDay = {
   offKind?: EarnedOffKind;
   /** Admin marked this day present without using the clock. */
   adminMark?: "FULL" | "HALF";
+  /** Admin chose not to count this day's pay in the salary total. */
+  payExcluded?: boolean;
 };
 
 export type EarnedSalarySummary = {
@@ -495,6 +497,8 @@ export function computeEarnedSalary(opts: {
   employeeShift?: ShiftSource;
   /** When set, each day uses the salary in effect on that date. */
   salaryHistory?: SalaryScheduleEntry[];
+  /** ISO dates whose pay is left out of this total. */
+  excludedDates?: string[];
 }): EarnedSalarySummary {
   const {
     monthlySalary,
@@ -507,9 +511,11 @@ export function computeEarnedSalary(opts: {
     employeePhone,
     employeeShift,
     salaryHistory,
+    excludedDates,
   } = opts;
 
   const daysInPeriod = Math.max(daysInclusive(periodStart, periodEnd), 1);
+  const excluded = new Set(excludedDates || []);
   const workingDaysInMonth = countWorkingDaysInRange(
     periodStart,
     periodEnd,
@@ -529,6 +535,8 @@ export function computeEarnedSalary(opts: {
   let totalDeduction = 0;
   let rateSum = 0;
   let rateDays = 0;
+  let excludedGross = 0;
+  let excludedDeduction = 0;
 
   const mayEarn =
     monthlySalary > 0 || (salaryHistory?.some((h) => h.monthlySalary > 0) ?? false);
@@ -602,7 +610,14 @@ export function computeEarnedSalary(opts: {
         dayNet,
         offKind: paidOff ? earnedOffKind(key, overrides, employeePhone) : undefined,
         adminMark: credit === "FULL" || credit === "HALF" ? credit : undefined,
+        payExcluded: excluded.has(key),
       });
+
+      if (excluded.has(key)) {
+        excludedGross += dayGross;
+        excludedDeduction += deduction;
+        continue;
+      }
 
       grossEarned += dayGross;
       totalDeduction += deduction;
@@ -638,14 +653,17 @@ export function computeEarnedSalary(opts: {
     perDayRate: Math.round(avgPerDay * 100) / 100,
     perHourRate: Math.round((avgPerDay / Math.max(shiftMins, 1)) * 60 * 100) / 100,
     perMinuteRate: avgPerDay / Math.max(shiftMins, 1),
-    daysWorked: days.length,
+    daysWorked: days.filter((d) => !d.payExcluded).length,
     grossEarned: Math.round(grossEarned * 100) / 100,
     totalLateMinutes: totalLate,
     totalEarlyMinutes: totalEarly,
     totalLostMinutes: totalLate + totalEarly,
     totalDeduction: Math.round(totalDeduction * 100) / 100,
     earnedNet,
-    fullMonthNet: fullMonthDeductions.netSalary,
+    fullMonthNet: Math.max(
+      0,
+      Math.round((fullMonthDeductions.netSalary - excludedGross + excludedDeduction) * 100) / 100
+    ),
     days: days.sort((a, b) => b.date.localeCompare(a.date)),
   };
 }

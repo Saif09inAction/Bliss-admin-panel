@@ -179,6 +179,11 @@ export default function SalaryPage() {
                 dailySignOutTime: (data.dailySignOutTime as string) || "",
                 shiftHistory: parseShiftHistory(data.shiftHistory),
                 salaryHistory: parseSalaryHistory(data.salaryHistory),
+                salaryExcludedDates: Array.isArray(data.salaryExcludedDates)
+                  ? (data.salaryExcludedDates as unknown[]).filter(
+                      (d): d is string => typeof d === "string"
+                    )
+                  : [],
                 salaryRemaining: (data.salaryRemaining as number) ?? undefined,
                 salaryPaidThisPeriod: (data.salaryPaidThisPeriod as number) ?? undefined,
                 salaryDueManual: Boolean(data.salaryDueManual),
@@ -260,6 +265,7 @@ export default function SalaryPage() {
           employeePhone: e.phone,
           employeeShift: e,
           salaryHistory: e.salaryHistory,
+          excludedDates: e.salaryExcludedDates,
         });
         const earnedNet = monthRow?.earned ?? earned.earnedNet;
         const calculatedDue = Math.round((earnedNet - paid) * 100) / 100;
@@ -435,6 +441,31 @@ export default function SalaryPage() {
     setPayAmount(String(mode === "EARNED" ? row.earnedDue : row.fullDue));
     setPayRemarks("");
     setMsg("");
+  }
+
+  async function toggleDayPay(employee: Employee, date: string, exclude: boolean) {
+    const current = employee.salaryExcludedDates || [];
+    const next = exclude
+      ? Array.from(new Set([...current, date]))
+      : current.filter((d) => d !== date);
+    const apply = (dates: string[]) => {
+      setStaff((prev) =>
+        prev.map((e) => (e.phone === employee.phone ? { ...e, salaryExcludedDates: dates } : e))
+      );
+      setDetailTarget((prev) =>
+        prev && prev.employee.phone === employee.phone
+          ? { ...prev, employee: { ...prev.employee, salaryExcludedDates: dates } }
+          : prev
+      );
+    };
+    apply(next);
+    try {
+      await updateDoc(doc(getDb(), "employees", employee.phone), {
+        salaryExcludedDates: next,
+      });
+    } catch {
+      apply(current);
+    }
   }
 
   function switchPayMode(mode: PayMode) {
@@ -1213,6 +1244,9 @@ export default function SalaryPage() {
           cycles={listPayCycles(detailTarget.employee.joiningDate, today)}
           cycleOffset={detailPeriodOffset}
           onCycleChange={setDetailPeriodOffset}
+          onToggleDayPay={(date, exclude) => {
+            void toggleDayPay(detailTarget.employee, date, exclude);
+          }}
           onClose={() => setDetailTarget(null)}
           onPay={() => {
             const row = {
