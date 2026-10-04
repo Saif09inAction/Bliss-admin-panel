@@ -142,6 +142,31 @@ export function isWorkingDay(
   return resolveDayKind(dateStr, overrides, employeePhone) === "WORKING";
 }
 
+export type EarnedOffKind = "sunday" | "holiday" | "sunday-holiday";
+
+/** Paid Sunday, admin holiday, or both — used to mark the day in the breakdown. */
+export function earnedOffKind(
+  dateStr: string,
+  overrides: OverrideSource,
+  employeePhone?: string
+): EarnedOffKind | undefined {
+  if (resolveDayKind(dateStr, overrides, employeePhone) !== "HOLIDAY") return undefined;
+  const sunday = isSundayDate(dateStr);
+  const override = lookupCalendarOverride(dateStr, overrides);
+  let adminHoliday = false;
+  if (override?.kind === "HOLIDAY") {
+    if (override.appliesTo === "ALL" || !employeePhone) adminHoliday = true;
+    else {
+      adminHoliday = override.employeeIds.some(
+        (id) => id === employeePhone || id.toLowerCase() === employeePhone.toLowerCase()
+      );
+    }
+  }
+  if (sunday && adminHoliday) return "sunday-holiday";
+  if (sunday) return "sunday";
+  return "holiday";
+}
+
 /** Sunday / admin holiday — paid as a full present day (no punch needed). */
 export function isPaidOffDay(
   dateStr: string,
@@ -425,6 +450,8 @@ export type EarnedDay = {
   earlyDeduction: number;
   deduction: number;
   dayNet: number;
+  /** Set when the day is a paid Sunday and/or an admin holiday. */
+  offKind?: EarnedOffKind;
 };
 
 export type EarnedSalarySummary = {
@@ -571,6 +598,7 @@ export function computeEarnedSalary(opts: {
         earlyDeduction,
         deduction,
         dayNet,
+        offKind: paidOff ? earnedOffKind(key, overrides, employeePhone) : undefined,
       });
 
       grossEarned += dayGross;

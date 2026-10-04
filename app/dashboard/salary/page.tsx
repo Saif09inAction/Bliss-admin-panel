@@ -31,6 +31,7 @@ import {
   clampPayPeriodOffset,
   earnedAsOfDate,
   formatPayPeriodLabel,
+  listPayCycles,
   resolvePayPeriod,
 } from "@/lib/pay-period-utils";
 import { deleteSalaryPayment, updateSalaryPaymentAmount } from "@/lib/payment-delete";
@@ -145,6 +146,7 @@ export default function SalaryPage() {
   const [editPaymentTarget, setEditPaymentTarget] = useState<PaymentTransaction | null>(null);
   const [editPaymentAmount, setEditPaymentAmount] = useState("");
   const [detailTarget, setDetailTarget] = useState<SalaryRow | null>(null);
+  const [detailPeriodOffset, setDetailPeriodOffset] = useState(0);
 
   useEffect(() => {
     const db = getDb();
@@ -369,10 +371,10 @@ export default function SalaryPage() {
       attendance,
       settings,
       overrides,
-      periodOffset,
+      periodOffset: detailPeriodOffset,
       today,
     });
-  }, [detailTarget, payments, attendance, settings, overrides, periodOffset, today]);
+  }, [detailTarget, payments, attendance, settings, overrides, detailPeriodOffset, today]);
 
   // Sync computed remaining salary to Firestore so mobile app can read it directly
   useEffect(() => {
@@ -882,7 +884,10 @@ export default function SalaryPage() {
                     <tr
                       key={employee.phone}
                       className="cursor-pointer hover:bg-[var(--surface-mist)]"
-                      onClick={() => setDetailTarget(row)}
+                      onClick={() => {
+                        setDetailPeriodOffset(periodOffset);
+                        setDetailTarget(row);
+                      }}
                     >
                       <td>
                         <div className="flex items-center gap-3">
@@ -983,7 +988,10 @@ export default function SalaryPage() {
                   <div
                     key={employee.phone}
                     className={`cursor-pointer p-3.5 hover:bg-[var(--surface-mist)] ${idx < rows.length - 1 ? "border-b border-[var(--border)]" : ""}`}
-                    onClick={() => setDetailTarget(row)}
+                    onClick={() => {
+                      setDetailPeriodOffset(periodOffset);
+                      setDetailTarget(row);
+                    }}
                   >
                     <div className="flex items-start gap-3">
                       <WorkerAvatar name={employee.name} />
@@ -1202,9 +1210,16 @@ export default function SalaryPage() {
         <SalaryStaffDetailPanel
           staffName={detailTarget.employee.name}
           detail={staffDetail}
+          cycles={listPayCycles(detailTarget.employee.joiningDate, today)}
+          cycleOffset={detailPeriodOffset}
+          onCycleChange={setDetailPeriodOffset}
           onClose={() => setDetailTarget(null)}
           onPay={() => {
-            const row = detailTarget;
+            const row = {
+              ...detailTarget,
+              earnedDue: Math.max(0, staffDetail.totalDue),
+            };
+            setPeriodOffset(detailPeriodOffset);
             setDetailTarget(null);
             openPay(row, "EARNED");
           }}

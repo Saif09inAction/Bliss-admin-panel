@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Receipt, Trash2, Pencil, X } from "lucide-react";
 import type { PaymentTransaction } from "@/lib/types";
 import type { SalaryStaffDetail } from "@/lib/salary-detail";
 import { formatDurationMinutes } from "@/lib/salary-detail";
 import { formatDisplayDate, formatDisplayTime } from "@/lib/csv";
-import { formatPayPeriodMonthLabel } from "@/lib/pay-period-utils";
+import { formatPayPeriodMonthLabel, type PayCycleOption } from "@/lib/pay-period-utils";
+import type { EarnedOffKind } from "@/lib/deduction-utils";
 
 function money(n: number) {
   const rounded = Math.round(n);
@@ -18,6 +19,9 @@ function money(n: number) {
 type Props = {
   staffName: string;
   detail: SalaryStaffDetail;
+  cycles: PayCycleOption[];
+  cycleOffset: number;
+  onCycleChange: (offset: number) => void;
   onClose: () => void;
   onPay?: () => void;
   onDeletePayment?: (payment: PaymentTransaction) => void;
@@ -26,9 +30,19 @@ type Props = {
   editingPaymentId?: string | null;
 };
 
+function dayKindLabel(offKind: EarnedOffKind | undefined, dayFactor: number) {
+  if (offKind === "sunday-holiday") return "Sunday · Holiday";
+  if (offKind === "sunday") return "Sunday";
+  if (offKind === "holiday") return "Holiday";
+  return dayFactor < 1 ? "Half" : "Full";
+}
+
 export default function SalaryStaffDetailPanel({
   staffName,
   detail,
+  cycles,
+  cycleOffset,
+  onCycleChange,
   onClose,
   onPay,
   onDeletePayment,
@@ -38,13 +52,26 @@ export default function SalaryStaffDetailPanel({
 }: Props) {
   const d = detail;
   const [showTransactions, setShowTransactions] = useState(false);
+  const [cycleQuery, setCycleQuery] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setCycleQuery("");
+  }, [staffName]);
 
   useEffect(() => {
     if (showTransactions) {
       scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [showTransactions]);
+
+  const visibleCycles = useMemo(() => {
+    const q = cycleQuery.trim().toLowerCase();
+    if (!q) return cycles;
+    return cycles.filter(
+      (cycle) => cycle.offset === cycleOffset || cycle.label.toLowerCase().includes(q)
+    );
+  }, [cycles, cycleQuery, cycleOffset]);
 
   const transactionsBlock = showTransactions ? (
     <div className="rounded-xl border border-[var(--border)] p-4">
@@ -203,6 +230,34 @@ export default function SalaryStaffDetailPanel({
           </div>
 
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+            <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)] p-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-jade-deep">
+                Pay cycle
+              </p>
+              <input
+                type="search"
+                value={cycleQuery}
+                onChange={(e) => setCycleQuery(e.target.value)}
+                placeholder="Search cycle, e.g. 10 Sep or Oct"
+                className="input"
+              />
+              <select
+                className="input"
+                value={String(cycleOffset)}
+                onChange={(e) => onCycleChange(Number(e.target.value))}
+              >
+                {visibleCycles.map((cycle) => (
+                  <option key={cycle.offset} value={cycle.offset}>
+                    {cycle.label}
+                    {cycle.offset === 0 ? " · current" : ""}
+                  </option>
+                ))}
+              </select>
+              {cycleQuery.trim() && visibleCycles.length === 0 && (
+                <p className="text-xs text-[var(--text-muted)]">No cycle matches that search.</p>
+              )}
+            </div>
+
             {transactionsBlock}
 
             {d.carryForward.filter((line) => Math.round(line.balance) !== 0).length > 0 && (
@@ -378,12 +433,25 @@ export default function SalaryStaffDetailPanel({
                     <tbody>
                       {[...d.earned.days]
                         .sort((a, b) => a.date.localeCompare(b.date))
-                        .map((day) => (
-                        <tr key={day.date}>
-                          <td>{formatDisplayDate(day.date)}</td>
-                          <td>{day.dayFactor < 1 ? "Half" : "Full"}</td>
+                        .map((day) => {
+                          const off = Boolean(day.offKind);
+                          return (
+                        <tr
+                          key={day.date}
+                          style={
+                            off ? { background: "rgba(232, 93, 76, 0.12)" } : undefined
+                          }
+                        >
+                          <td style={off ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
+                            {formatDisplayDate(day.date)}
+                          </td>
+                          <td style={off ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
+                            {dayKindLabel(day.offKind, day.dayFactor)}
+                          </td>
                           <td>{day.workingHours > 0 ? day.workingHours.toFixed(1) : "—"}</td>
-                          <td>{money(day.dayGross)}</td>
+                          <td style={off ? { color: "var(--danger)" } : undefined}>
+                            {money(day.dayGross)}
+                          </td>
                           <td className="text-danger">
                             {day.lateMinutes > 0 ? formatDurationMinutes(day.lateMinutes) : "—"}
                           </td>
@@ -393,9 +461,15 @@ export default function SalaryStaffDetailPanel({
                           <td className="text-danger">
                             {day.deduction > 0 ? `−${money(day.deduction)}` : "—"}
                           </td>
-                          <td className="font-medium">{money(day.dayNet)}</td>
+                          <td
+                            className="font-medium"
+                            style={off ? { color: "var(--danger)" } : undefined}
+                          >
+                            {money(day.dayNet)}
+                          </td>
                         </tr>
-                      ))}
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

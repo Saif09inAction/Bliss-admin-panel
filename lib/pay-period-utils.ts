@@ -229,6 +229,30 @@ export function formatPayPeriodLabel(start: string, end: string): string {
   return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
 }
 
+export type PayCycleOption = {
+  offset: number;
+  label: string;
+  start: string;
+  end: string;
+};
+
+/** Join cycles from the current one back to the joining date. Offset 0 is current. */
+export function listPayCycles(joinDate: string, asOfDate: string): PayCycleOption[] {
+  const join = joinDate?.trim() || asOfDate;
+  const current = currentPayPeriodIndex(join, asOfDate);
+  const cycles: PayCycleOption[] = [];
+  for (let index = current; index >= 0; index--) {
+    const period = payPeriodForIndex(join, index);
+    cycles.push({
+      offset: index - current,
+      label: formatPayPeriodLabel(period.start, period.end),
+      start: period.start,
+      end: period.end,
+    });
+  }
+  return cycles;
+}
+
 /** Primary month for a pay period (start month) — e.g. July, August, September. */
 export function formatPayPeriodMonthLabel(start: string, _end?: string): string {
   const { y, m } = parseIso(start);
