@@ -1,7 +1,7 @@
 import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
-import { orderKharchaBalance } from "@/lib/kaariger-hisaab";
+import { orderKharchaBalance, orderKharchaCarryOut } from "@/lib/kaariger-hisaab";
 import { pickLiveKaarigerBill } from "@/lib/kaariger-repair";
 import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
 
@@ -247,6 +247,21 @@ export async function payKaarigerKharcha(opts: {
 
   if (!payRemaining && weekOrder) {
     const alreadyPaid = paidByOrder.get(weekOrder.id) || 0;
+    const previous = [...orders]
+      .filter(
+        (o) =>
+          o.id !== weekOrder.id &&
+          o.status !== "CANCELLED" &&
+          o.status !== "REJECTED"
+      )
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    const carryIn = previous
+      ? orderKharchaCarryOut(previous, paidByOrder.get(previous.id) || 0)
+      : weekOrder.kharchaCarryIn || 0;
+    if (Math.round((weekOrder.kharchaCarryIn || 0) * 100) !== Math.round(carryIn * 100)) {
+      await updateDoc(doc(db, "kaariger_orders", weekOrder.id), { kharchaCarryIn: carryIn });
+    }
+    const weekForBox = { ...weekOrder, kharchaCarryIn: carryIn };
     const paymentId = uuid();
     await setDoc(
       doc(db, "kaariger_payments", paymentId),
@@ -258,7 +273,7 @@ export async function payKaarigerKharcha(opts: {
       })
     );
 
-    const kharchaBoxAfter = orderKharchaBalance(weekOrder, alreadyPaid + amount);
+    const kharchaBoxAfter = orderKharchaBalance(weekForBox, alreadyPaid + amount);
     const boxLabel = Math.round(kharchaBoxAfter).toLocaleString("en-IN");
     const message = `Paid ₹${Math.round(amount).toLocaleString("en-IN")} · Kharcha box now ₹${boxLabel}${
       kharchaBoxAfter < 0 ? " (extra)" : ""

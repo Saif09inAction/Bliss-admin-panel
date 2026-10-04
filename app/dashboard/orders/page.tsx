@@ -30,6 +30,7 @@ import type {
 import { isPendingBillRepair, isStandaloneRepair } from "@/lib/types";
 import { formatRupee, uuid } from "@/lib/csv";
 import {
+  liveKharchaCarryIn,
   orderAddBalance,
   orderKharchaCarryOut,
   totalRemainingAmount,
@@ -774,12 +775,9 @@ export default function OrdersPage() {
       // Legacy profile oldKharcha folds into Remaining once (not week unpaid).
       openingBase += liveOldKharcha;
 
-      let carryIn = 0;
-      for (const d of orderSnap.docs) {
+      const priorOrders: KaarigerOrder[] = orderSnap.docs.map((d) => {
         const data = d.data();
-        const status = (data.status as string) || "ASSIGNED";
-        if (status === "COMPLETED" || status === "CANCELLED" || status === "REJECTED") continue;
-        const prev: KaarigerOrder = {
+        return {
           id: (data.id as string) || d.id,
           kaarigerId: kaariger.phone,
           kaarigerName: kaariger.name,
@@ -789,7 +787,7 @@ export default function OrdersPage() {
           rawMaterials: [],
           totalDealAmount: (data.totalDealAmount as number) || 0,
           pricingType: "PER_PIECE",
-          status,
+          status: (data.status as string) || "ASSIGNED",
           approvedQuantity: 0,
           createdBy: "",
           createdAt: (data.createdAt as number) || 0,
@@ -797,10 +795,27 @@ export default function OrdersPage() {
           kharchaCarriedForward: (data.kharchaCarriedForward as number) || 0,
           kharchaCarryIn: (data.kharchaCarryIn as number) || 0,
         };
+      });
+      const previousCompleted = [...priorOrders]
+        .filter((o) => o.status === "COMPLETED")
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+
+      let carryIn = 0;
+      for (const prev of priorOrders) {
+        if (prev.status === "COMPLETED" || prev.status === "CANCELLED" || prev.status === "REJECTED") {
+          continue;
+        }
+        const refreshedCarry = liveKharchaCarryIn(
+          prev,
+          previousCompleted,
+          paidByOrder.get(previousCompleted?.id || "") || 0
+        );
+        const closing = { ...prev, kharchaCarryIn: refreshedCarry };
         const paid = paidByOrder.get(prev.id) || 0;
-        carryIn += orderKharchaCarryOut(prev, paid);
+        carryIn += orderKharchaCarryOut(closing, paid);
         await updateDoc(doc(db, "kaariger_orders", prev.id), {
           status: "COMPLETED",
+          kharchaCarryIn: refreshedCarry,
         });
       }
 

@@ -63,6 +63,20 @@ export function orderKharchaCarryOut(order: KaarigerOrder, paidOnOrder: number):
 }
 
 /**
+ * Carry the live bill should use right now: the previous bill’s current leftover,
+ * not the amount frozen when this bill was created. Deleting or adding a payment
+ * on the previous week changes this immediately.
+ */
+export function liveKharchaCarryIn(
+  live: KaarigerOrder,
+  previous: KaarigerOrder | null | undefined,
+  paidOnPrevious: number
+): number {
+  if (!previous) return live.kharchaCarryIn || 0;
+  return orderKharchaCarryOut(previous, paidOnPrevious);
+}
+
+/**
  * ADD to running balance (before kharcha cash given).
  * Week kharcha is subtracted separately at bill create.
  */

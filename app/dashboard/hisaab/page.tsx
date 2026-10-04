@@ -40,6 +40,7 @@ import {
 import {
   buildHisaabLedger,
   grossOpeningBeforePays,
+  liveKharchaCarryIn,
   orderKharchaBalance,
   orderWeekMeta,
   totalRemainingAmount,
@@ -618,8 +619,40 @@ export default function HisaabPage() {
   // Newest bill stays on the main hisaab. Older bills move to
   // "See previous hisaab" only after a newer bill is created.
   const liveOrder = useMemo(() => pickLiveKaarigerBill(orders), [orders]);
-  const activeOrders = useMemo(() => (liveOrder ? [liveOrder] : []), [liveOrder]);
   const completedOrders = useMemo(() => previousKaarigerBills(orders), [orders]);
+
+  const liveCarryIn = useMemo(() => {
+    if (!liveOrder) return 0;
+    return liveKharchaCarryIn(
+      liveOrder,
+      completedOrders[0],
+      orderPaidMap.get(completedOrders[0]?.id || "") || 0
+    );
+  }, [liveOrder, completedOrders, orderPaidMap]);
+
+  useEffect(() => {
+    if (!liveOrder) return;
+    const stored = Math.round((liveOrder.kharchaCarryIn || 0) * 100) / 100;
+    const next = Math.round(liveCarryIn * 100) / 100;
+    if (stored === next) return;
+    let cancelled = false;
+    updateDoc(doc(getDb(), "kaariger_orders", liveOrder.id), { kharchaCarryIn: next })
+      .then(() => {
+        if (cancelled) return;
+        setOrders((list) =>
+          list.map((o) => (o.id === liveOrder.id ? { ...o, kharchaCarryIn: next } : o))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [liveOrder, liveCarryIn]);
+
+  const activeOrders = useMemo(() => {
+    if (!liveOrder) return [];
+    return [{ ...liveOrder, kharchaCarryIn: liveCarryIn }];
+  }, [liveOrder, liveCarryIn]);
 
   useEffect(() => {
     if (!liveOrder || liveOrder.status !== "COMPLETED") return;
@@ -1395,14 +1428,14 @@ export default function HisaabPage() {
                       </div>
                     </div>
                     <p className="border-t border-jade/15 px-3 py-2 text-center text-[11px] text-[var(--text-muted)]">
-                      {money(weekKharchaBudget)} − {money(weekKharchaPaid)} paid ={" "}
-                      {money(kharchaRemaining)} left
+                      {money(weekKharchaBudget)}
+                      {priorLeftAdded > 0 ? ` + ${money(priorLeftAdded)} prior left` : ""}
                       {priorOverpayApplied > 0
-                        ? ` · includes prior overpay ${money(priorOverpayApplied)}`
+                        ? ` − ${money(priorOverpayApplied)} prior overpay`
                         : ""}
-                      {priorLeftAdded > 0
-                        ? ` · prior left +${money(priorLeftAdded)} in box`
-                        : ""}
+                      {" − "}
+                      {money(weekKharchaPaidCash)} paid = {money(kharchaRemaining)}{" "}
+                      {kharchaRemaining < 0 ? "extra" : "left"}
                     </p>
                   </div>
 
@@ -1945,7 +1978,7 @@ function PreviousHisaabCard({
           </div>
           {carryIn !== 0 && (
             <p className="text-[11px] text-[var(--text-muted)]">
-              Carry: {carryIn > 0 ? `−${money(carryIn)}` : `+${money(-carryIn)}`}
+              Brought into this week: {carryIn > 0 ? `−${money(carryIn)}` : `+${money(-carryIn)}`}
             </p>
           )}
           {orderPayments.length === 0 && priorOverpay <= 0 ? (
