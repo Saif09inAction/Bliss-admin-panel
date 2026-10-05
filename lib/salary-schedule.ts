@@ -1,5 +1,4 @@
 import type { SalaryScheduleEntry } from "./types";
-import { addDaysIso } from "./pay-period-utils";
 import { todayStr } from "./csv";
 
 const HISTORY_START = "1970-01-01";
@@ -39,14 +38,14 @@ export function monthlySalaryForDate(
 }
 
 /**
- * Save a salary change so it applies from the next day.
- * Today and earlier days keep the previous monthly salary.
+ * Save a salary change that starts on the date the admin picks.
+ * Days before that date keep the previous monthly salary.
  */
 export function buildEmployeeSalaryScheduleSave(
   currentSalary: number,
   currentHistory: SalaryScheduleEntry[] | undefined,
   nextSalary: number,
-  asOfDate: string = todayStr()
+  effectiveFrom: string
 ): {
   payload: Record<string, unknown>;
   effectiveFrom: string;
@@ -55,18 +54,9 @@ export function buildEmployeeSalaryScheduleSave(
 } {
   const roundedNext = Math.round(Math.max(0, nextSalary) * 100) / 100;
   const roundedCurrent = Math.round(Math.max(0, currentSalary) * 100) / 100;
-  const effectiveFrom = addDaysIso(asOfDate, 1);
+  const start = effectiveFrom.trim();
 
-  if (roundedNext === roundedCurrent) {
-    return {
-      payload: {},
-      effectiveFrom,
-      changed: false,
-      history: currentHistory || [],
-    };
-  }
-
-  let history = [...(currentHistory || [])];
+  let history = parseSalaryHistory(currentHistory);
   if (history.length === 0) {
     history.push({
       effectiveFrom: HISTORY_START,
@@ -74,20 +64,46 @@ export function buildEmployeeSalaryScheduleSave(
     });
   }
 
-  // Replace any same-day entry so re-saving today updates cleanly.
-  history = history.filter((e) => e.effectiveFrom < effectiveFrom);
-  history.push({
-    effectiveFrom,
-    monthlySalary: roundedNext,
-  });
+  history = history.filter((e) => e.effectiveFrom < start);
+  const rateBefore = history.length ? history[history.length - 1].monthlySalary : roundedCurrent;
+  if (rateBefore !== roundedNext) {
+    history.push({
+      effectiveFrom: start,
+      monthlySalary: roundedNext,
+    });
+  }
   history.sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+
+  const baseline = parseSalaryHistory(currentHistory);
+  const normalizedBaseline =
+    baseline.length > 0
+      ? baseline
+      : [{ effectiveFrom: HISTORY_START, monthlySalary: roundedCurrent }];
+  const changed =
+    history.length !== normalizedBaseline.length ||
+    history.some(
+      (entry, i) =>
+        entry.effectiveFrom !== normalizedBaseline[i]?.effectiveFrom ||
+        entry.monthlySalary !== normalizedBaseline[i]?.monthlySalary
+    );
+
+  if (!changed) {
+    return {
+      payload: {},
+      effectiveFrom: start,
+      changed: false,
+      history: baseline,
+    };
+  }
+
+  const inEffectToday = monthlySalaryForDate(roundedNext, history, todayStr());
 
   return {
     payload: {
-      monthlySalary: roundedNext,
+      monthlySalary: inEffectToday,
       salaryHistory: history,
     },
-    effectiveFrom,
+    effectiveFrom: start,
     changed: true,
     history,
   };

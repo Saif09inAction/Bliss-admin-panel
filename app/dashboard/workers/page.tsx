@@ -30,7 +30,7 @@ import { todayStr, dateInRange, dateMatchesSearch } from "@/lib/csv";
 import { formatDisplayTime, normalizeTime } from "@/lib/attendance-utils";
 import { markPresentDateRange } from "@/lib/attendance-credit";
 import { buildEmployeeShiftScheduleSave, parseShiftHistory } from "@/lib/shift-schedule";
-import { buildEmployeeSalaryScheduleSave, parseSalaryHistory } from "@/lib/salary-schedule";
+import { parseSalaryHistory } from "@/lib/salary-schedule";
 import { deleteWorkerAndPersonalData } from "@/lib/delete-worker";
 import { useAuth } from "@/lib/auth-context";
 import AdminSearchWithDateFilter from "@/components/admin/AdminSearchWithDateFilter";
@@ -235,17 +235,10 @@ export default function WorkersPage() {
       };
 
       if (
-        (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR") &&
         formMode === "edit" &&
-        existingDoc
+        (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR")
       ) {
-        const { payload: salaryPayload, changed: salaryChanged } =
-          buildEmployeeSalaryScheduleSave(
-            existingDoc.monthlySalary || 0,
-            existingDoc.salaryHistory,
-            nextSalary
-          );
-        if (salaryChanged) Object.assign(data, salaryPayload);
+        delete data.monthlySalary;
       }
 
       if (resolvedRole === "KAARIGER") {
@@ -692,7 +685,13 @@ export default function WorkersPage() {
                       value={form.monthlySalary}
                       onChange={(e) => setForm({ ...form, monthlySalary: e.target.value })}
                       placeholder="Optional"
+                      readOnly={formMode === "edit"}
                     />
+                    {formMode === "edit" && (
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        Open the profile and use Update salary to set the new amount and the date it starts.
+                      </p>
+                    )}
                   </div>
                 )}
                 {showPayrollFields && (
