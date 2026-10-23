@@ -41,6 +41,8 @@ import {
   isOldKharchaPayment,
   isOpeningPayment,
 } from "@/lib/kaariger-pay";
+import { syncOrderRepairAndRemaining } from "@/lib/kaariger-repair";
+import { settleUnsettledCreditIntoLiveBill } from "@/lib/settle-credit";
 import PageToolbar from "@/components/admin/PageToolbar";
 import SearchSelect from "@/components/admin/SearchSelect";
 
@@ -796,27 +798,24 @@ export default function OrdersPage() {
           kharchaCarryIn: (data.kharchaCarryIn as number) || 0,
         };
       });
-      const previousCompleted = [...priorOrders]
-        .filter((o) => o.status === "COMPLETED")
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+      const validPriorOrders = [...priorOrders]
+        .filter((o) => o.status !== "CANCELLED" && o.status !== "REJECTED")
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      const latestPrior = validPriorOrders[0];
+      const carryIn = latestPrior
+        ? liveKharchaCarryIn(
+            { id, kharchaCarryIn: 0 } as KaarigerOrder,
+            latestPrior,
+            paidByOrder.get(latestPrior.id) || 0
+          )
+        : 0;
 
-      let carryIn = 0;
-      for (const prev of priorOrders) {
-        if (prev.status === "COMPLETED" || prev.status === "CANCELLED" || prev.status === "REJECTED") {
-          continue;
+      for (const prev of validPriorOrders) {
+        if (prev.status !== "COMPLETED") {
+          await updateDoc(doc(db, "kaariger_orders", prev.id), {
+            status: "COMPLETED",
+          });
         }
-        const refreshedCarry = liveKharchaCarryIn(
-          prev,
-          previousCompleted,
-          paidByOrder.get(previousCompleted?.id || "") || 0
-        );
-        const closing = { ...prev, kharchaCarryIn: refreshedCarry };
-        const paid = paidByOrder.get(prev.id) || 0;
-        carryIn += orderKharchaCarryOut(closing, paid);
-        await updateDoc(doc(db, "kaariger_orders", prev.id), {
-          status: "COMPLETED",
-          kharchaCarryIn: refreshedCarry,
-        });
       }
 
       const createdAt = Date.now();
@@ -837,6 +836,14 @@ export default function OrdersPage() {
 
       const standaloneRepairsCost = selectedRepairsTotal;
 
+      // Remaining += ADD − week kharcha − settled credit. Carry only adjusts Kharcha box.
+      const openingAtCreation = openingBase;
+      const addBalance = calc.addBalance;
+      const grossClosing = openingAtCreation + addBalance - calc.kharchaAmount;
+      const creditApplied = Math.min(liveCredit, Math.max(0, grossClosing));
+      const closingAtCreation = grossClosing - creditApplied;
+      const creditLeft = Math.max(0, liveCredit - creditApplied);
+
       const order: KaarigerOrder = {
         id,
         kaarigerId: kaariger.phone,
@@ -846,6 +853,7 @@ export default function OrdersPage() {
         color: "",
         rawMaterials: [],
         totalDealAmount: calc.afterDeductions,
+        originalDealAmount: calc.afterDeductions,
         pricePerPiece: targetQuantity > 0 ? calc.productsTotal / targetQuantity : 0,
         pricingType: "PER_PIECE",
         status: "ASSIGNED",
@@ -865,19 +873,11 @@ export default function OrdersPage() {
         kharchaCarriedForward: 0,
         weekLabel: weekMeta.label,
         weekKey: weekMeta.key,
+        openingAtCreation,
+        addBalance,
+        closingAtCreation,
+        creditApplied,
       };
-
-      // Remaining += ADD − week kharcha − settled credit. Carry only adjusts Kharcha box.
-      const openingAtCreation = openingBase;
-      const addBalance = orderAddBalance(order);
-      const grossClosing = openingAtCreation + addBalance - calc.kharchaAmount;
-      const creditApplied = Math.min(liveCredit, Math.max(0, grossClosing));
-      const closingAtCreation = grossClosing - creditApplied;
-      const creditLeft = Math.max(0, liveCredit - creditApplied);
-      order.openingAtCreation = openingAtCreation;
-      order.addBalance = addBalance;
-      order.closingAtCreation = closingAtCreation;
-      order.creditApplied = creditApplied;
 
       await setDoc(doc(db, "kaariger_orders", id), order);
 
@@ -923,6 +923,15 @@ export default function OrdersPage() {
           })
         );
       }
+
+      await syncOrderRepairAndRemaining(id);
+      if (creditLeft > 0) {
+        await settleUnsettledCreditIntoLiveBill({
+          kaarigerId: kaariger.phone,
+          orders: [{ ...order, id }],
+        });
+      }
+
       await updateDoc(doc(db, "employees", kaariger.phone), {
         openingBalance: closingAtCreation,
         oldKharcha: 0,
