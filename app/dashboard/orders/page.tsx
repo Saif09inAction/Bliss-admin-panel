@@ -1450,49 +1450,76 @@ export default function OrdersPage() {
             <Calculator size={16} />
             <p className="text-xs font-bold uppercase tracking-wider">Week total</p>
           </div>
-          <div className="space-y-1 text-sm">
-            <Row label="Opening (current remaining)" value={money(calc.grossOpening)} />
+          <div className="space-y-1.5 text-sm">
+            {/* 1. Pichhla Baaki */}
+            <Row label="Pichhla Baaki (Opening Balance)" value={money(calc.grossOpening)} accent="amber" bold />
             {currentCredit > 0 && (
-              <Row label="Credit applied" value={`−${money(currentCredit)}`} />
+              <Row label="− Purana credit chukaya" value={`−${money(currentCredit)}`} accent="red" />
             )}
-            {currentCredit > 0 && (
-              <Row label="Net opening (Total Remaining now)" value={money(calc.netOpening)} bold />
+
+            {/* 2. + MAAL */}
+            <Row label="+ MAAL (Products / Kaam)" value={`+${money(calc.productsTotal)}`} accent="green" bold />
+
+            {/* 3. Subtotal */}
+            <div className="my-1 rounded-lg border border-jade/30 bg-jade/10 px-2.5 py-1">
+              <Row
+                label="Kul Rakam (Pichhla + Maal)"
+                value={money((currentCredit > 0 ? calc.netOpening : calc.grossOpening) + calc.productsTotal)}
+                bold
+                accent="green"
+              />
+            </div>
+
+            {/* 4. Katauti */}
+            {calc.deductionsTotal > 0 && (
+              <Row label="− Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} accent="red" />
             )}
-            <Row label="MAAL (products)" value={money(calc.productsTotal)} />
-            <Row label="Less: Material / Runner / Fitting / Astar" value={`−${money(calc.deductionsTotal)}`} />
             {rmDeductionTotal > 0 && (
-              <Row label="Less: Raw Material deductions" value={`−${money(rmDeductionTotal)}`} />
+              <Row label="− Raw Material deductions" value={`−${money(rmDeductionTotal)}`} accent="red" />
             )}
             {selectedRepairs.map((r, i) => (
               <Row
                 key={`preview-standalone-${r.id}-${i}`}
-                label={`Less: Repairing - ${r.productName}`}
+                label={`− Repairing: ${r.productName}`}
                 value={`−${money(r.totalRepairCost)}`}
+                accent="red"
               />
             ))}
-            <div className="my-2 border-t border-jade/20" />
-            <Row label="ADD BALANCE" value={money(calc.addBalance)} bold />
-            <Row label="Running balance after ADD" value={money(calc.runningAfterAdd)} bold />
-            <Row label="Kharcha budget (this week)" value={money(calc.kharchaAmount)} accent />
-            {calc.pendingKharchaCarry !== 0 && (
-              <Row
-                label={
-                  calc.pendingKharchaCarry > 0
-                    ? "Prior overpay (into box)"
-                    : "Prior left unpaid (into box)"
-                }
-                value={
-                  calc.pendingKharchaCarry > 0
-                    ? `−${money(calc.pendingKharchaCarry)}`
-                    : `+${money(-calc.pendingKharchaCarry)}`
-                }
-              />
-            )}
             {calc.kharchaAmount > 0 && (
-              <Row label="Kharcha box after send" value={money(calc.kharchaBoxStart)} bold accent />
+              <Row label="− Hafte ka kharcha (Budget)" value={`−${money(calc.kharchaAmount)}`} accent="red" />
             )}
-            <div className="my-2 border-t border-jade/20" />
-            <Row label="Total remaining after send" value={money(calc.totalRemainingPreview)} bold accent />
+
+            {/* 5. Total Remaining */}
+            <div className="my-1.5 rounded-xl border border-amber-300 bg-amber-50/80 px-2.5 py-1.5 shadow-sm">
+              <Row label="Kul Baaki Hisaab (Total remaining after send)" value={money(calc.totalRemainingPreview)} bold accent="amber" />
+            </div>
+
+            {/* 6. Kharcha Box preview */}
+            <div className="pt-1">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
+                Hafte ka Kharcha
+              </p>
+              <div className="mt-1 space-y-1 rounded-lg border border-jade/20 bg-white/70 p-2">
+                <Row label="Budget (this week)" value={money(calc.kharchaAmount)} />
+                {calc.pendingKharchaCarry !== 0 && (
+                  <Row
+                    label={
+                      calc.pendingKharchaCarry > 0
+                        ? "Prior overpay (into box)"
+                        : "Prior left unpaid (into box)"
+                    }
+                    value={
+                      calc.pendingKharchaCarry > 0
+                        ? `−${money(calc.pendingKharchaCarry)}`
+                        : `+${money(-calc.pendingKharchaCarry)}`
+                    }
+                  />
+                )}
+                {calc.kharchaAmount > 0 && (
+                  <Row label="Kharcha box start" value={money(calc.kharchaBoxStart)} bold accent="green" />
+                )}
+              </div>
+            </div>
           </div>
  
         </div>
@@ -1524,12 +1551,20 @@ function Row({
   label: string;
   value: string;
   bold?: boolean;
-  accent?: boolean;
+  accent?: boolean | "green" | "amber" | "red";
 }) {
+  const accentClass =
+    accent === true || accent === "green"
+      ? "text-jade-deep"
+      : accent === "amber"
+      ? "text-amber-700"
+      : accent === "red"
+      ? "text-danger"
+      : "";
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-[var(--text-muted)]">{label}</span>
-      <span className={`${bold ? "font-bold" : "font-medium"} ${accent ? "text-jade-deep" : ""}`}>
+      <span className={bold ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]"}>{label}</span>
+      <span className={`${bold ? "font-bold" : "font-medium"} ${accentClass}`}>
         {value}
       </span>
     </div>

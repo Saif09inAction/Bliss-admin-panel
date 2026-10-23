@@ -1899,24 +1899,36 @@ function PreviousHisaabCard({
             Week bill
           </p>
           <div className="space-y-1 text-sm">
-            <Row label="Outstanding before" value={money(opening)} accent="amber" />
+            <Row label="Pichhla Baaki (Opening)" value={money(opening)} accent="amber" bold />
             {order.products && order.products.length > 0 && (
               <>
                 {order.products.map((p, i) => (
                   <Row
                     key={i}
-                    label={`${p.productName} (${p.quantity}×₹${p.pricePerPiece})`}
-                    value={money(p.lineTotal)}
+                    label={`+ MAAL: ${p.productName} (${p.quantity}×₹${p.pricePerPiece})`}
+                    value={`+${money(p.lineTotal)}`}
+                    accent="green"
                   />
                 ))}
-                <Row label="MAAL" value={money(productsTotal)} bold />
+                {order.products.length > 1 && (
+                  <Row label="+ MAAL (Kul Kaam)" value={`+${money(productsTotal)}`} bold accent="green" />
+                )}
               </>
             )}
+            <div className="my-1 rounded-lg border border-jade/30 bg-jade/10 px-2.5 py-1">
+              <Row
+                label="Kul Rakam (Pichhla + Maal)"
+                value={money(opening + productsTotal)}
+                bold
+                accent="green"
+              />
+            </div>
             {deductionLines.map((it, i) => (
               <Row
                 key={`${it.type}-${i}`}
-                label={`Less: ${it.label || it.type}`}
+                label={`− ${it.label || it.type}`}
                 value={`−${money(it.lineTotal)}`}
+                accent="red"
               />
             ))}
             {orderRepairs.length > 0
@@ -1925,29 +1937,29 @@ function PreviousHisaabCard({
                     key={r.id}
                     label={
                       r.faultyQuantity > 0
-                        ? `Less: Repairing - ${r.productName || "Repairing"} (${r.faultyQuantity}×₹${r.faultyPricePerPiece})`
-                        : `Less: Repairing - ${r.productName || "Repairing"}`
+                        ? `− Repairing: ${r.productName || "Repairing"} (${r.faultyQuantity}×₹${r.faultyPricePerPiece})`
+                        : `− Repairing: ${r.productName || "Repairing"}`
                     }
                     value={`−${money(r.totalRepairCost)}`}
+                    accent="red"
                   />
                 ))
               : repairTotal > 0 && (
-                  <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
+                  <Row label="− Repairing" value={`−${money(repairTotal)}`} accent="red" />
                 )}
-            <div className="my-1 border-t border-[var(--border)]" />
-            <Row label="ADD" value={money(addBalance)} bold />
             {weekKharcha > 0 && (
-              <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
+              <Row label="− Hafte ka kharcha (Bill par)" value={`−${money(weekKharcha)}`} accent="red" />
             )}
-            <Row label="Outstanding after create" value={money(grossClosing)} bold accent="amber" />
             {creditSettled > 0 && (
               <Row
-                label="Credit settled on this bill"
+                label="− Purana credit chukaya"
                 value={`−${money(creditSettled)}`}
-                accent="green"
+                accent="red"
               />
             )}
-            <Row label="Total remaining after bill" value={money(closing)} bold accent="amber" />
+            <div className="my-1.5 rounded-xl border border-amber-300 bg-amber-50/80 px-2.5 py-1.5 shadow-sm">
+              <Row label="Kul Baaki Hisaab (Total Remaining)" value={money(closing)} bold accent="amber" />
+            </div>
           </div>
  
         </div>
@@ -2414,6 +2426,7 @@ function GrandTotalBox({
   isLiveBill?: boolean;
   billRepairs?: OrderRepair[];
 }) {
+  const [showTimeline, setShowTimeline] = useState(false);
   const productsTotal = order.productsTotal ?? 0;
   const deductionLines = order.materialDeductions || [];
   const deductionsTotal =
@@ -2431,6 +2444,7 @@ function GrandTotalBox({
     order.openingAtCreation != null
       ? order.openingAtCreation
       : (openingBalance || 0) - addBalance + weekKharcha;
+  const subtotal = opening + productsTotal;
   const grossClosing = opening + addBalance - weekKharcha;
   const old = Math.max(0, oldKharcha || 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
@@ -2456,108 +2470,161 @@ function GrandTotalBox({
 
   return (
     <div className="rounded-2xl border border-jade/20 bg-jade-soft/30 p-4">
-      <p className="mb-2 text-xs font-bold uppercase tracking-wider text-jade-deep">Grand Total</p>
-      <div className="space-y-1 text-sm">
-        <Row label="Balance before this bill" value={money(opening)} accent="amber" />
-        <Row label="MAAL (product cost)" value={money(productsTotal)} />
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-bold uppercase tracking-wider text-jade-deep">Aapka Hisaab (Grand Total)</p>
+        <span className="rounded-full bg-jade/10 px-2.5 py-0.5 text-[11px] font-semibold text-jade-deep">
+          Linear Calculation
+        </span>
+      </div>
+      <div className="space-y-1.5 text-sm">
+        {/* 1. Pichhla Baaki */}
+        <Row label="Pichhla Baaki (Opening Balance)" value={money(opening)} accent="amber" bold />
+
+        {/* 2. + MAAL */}
+        {order.products && order.products.length > 0 ? (
+          order.products.map((p, i) => (
+            <Row
+              key={`grand-prod-${i}`}
+              label={`+ MAAL: ${p.productName} (${p.quantity} × ₹${p.pricePerPiece})`}
+              value={`+${money(p.lineTotal)}`}
+              accent="green"
+            />
+          ))
+        ) : (
+          <Row label="+ MAAL (Product cost)" value={`+${money(productsTotal)}`} accent="green" />
+        )}
+        {order.products && order.products.length > 1 && (
+          <Row label="+ MAAL (Kul Kaam)" value={`+${money(productsTotal)}`} accent="green" bold />
+        )}
+
+        {/* 3. Subtotal */}
+        <div className="my-1.5 rounded-lg border border-jade/30 bg-jade/10 px-3 py-1.5">
+          <Row
+            label="Kul Rakam (Pichhla + Maal)"
+            value={money(subtotal)}
+            bold
+            accent="green"
+          />
+        </div>
+
+        {/* 4. Katauti */}
+        <p className="pt-1 text-[11px] font-bold uppercase tracking-wider text-danger">
+          Katauti (Deductions)
+        </p>
         {deductionLines.length > 0
           ? deductionLines.map((it, i) => (
               <Row
                 key={`${it.type}-${it.label}-${i}`}
-                label={`Less: ${it.label || it.type}`}
+                label={`− ${it.label || it.type} (${it.quantity ? `${it.quantity} × ₹${it.pricePerPiece}` : ""})`}
                 value={`−${money(it.lineTotal)}`}
+                accent="red"
               />
             ))
           : deductionsTotal > 0 && (
               <Row
-                label="Less: Runner / Fitting / Astar / Material"
+                label="− Runner / Fitting / Astar / Material"
                 value={`−${money(deductionsTotal)}`}
+                accent="red"
               />
             )}
         {billRepairs.map((r, i) => (
           <Row
             key={`grand-repair-${r.id}-${i}`}
-            label={`Less: Repairing - ${r.productName || "Repairing"}`}
+            label={`− Repairing: ${r.productName || "Repairing"}`}
             value={`−${money(r.totalRepairCost)}`}
+            accent="red"
           />
         ))}
         {billRepairs.length === 0 && repairTotal > 0 && (
-          <Row label="Less: Repairing" value={`−${money(repairTotal)}`} />
+          <Row label="− Repairing" value={`−${money(repairTotal)}`} accent="red" />
         )}
-        <div className="my-1.5 border-t border-jade/20" />
-        <Row label="ADD BALANCE" value={money(addBalance)} bold />
-        <Row label="After ADD" value={money(opening + addBalance)} bold />
         {weekKharcha > 0 && (
-          <Row label="Kharcha on bill" value={`−${money(weekKharcha)}`} accent="green" />
-        )}
-        <Row label="Outstanding after create" value={money(grossClosing)} bold accent="amber" />
-        {old > 0 && !creditWasSettled && (
-          <Row label="Old kharcha on profile" value={`+${money(old)}`} accent="amber" />
+          <Row label="− Hafte ka kharcha (Bill par)" value={`−${money(weekKharcha)}`} accent="red" />
         )}
         {creditShown > 0 && (
           <Row
-            label={creditWasSettled ? "Credit settled on this bill" : "Credit applied"}
+            label={creditWasSettled ? "− Purana credit chukaya" : "− Credit applied"}
             value={`−${money(creditShown)}`}
-            accent="green"
+            accent="red"
           />
         )}
+        {old > 0 && !creditWasSettled && (
+          <Row label="+ Old kharcha on profile" value={`+${money(old)}`} accent="amber" />
+        )}
 
-        <div className="my-1.5 border-t border-jade/20" />
-        <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
-          Kharcha box
-        </p>
-        <div className="mt-1 overflow-hidden rounded-xl border border-jade/20 bg-white/70">
-          <div className="grid grid-cols-3 gap-px bg-jade/10 text-center text-sm">
-            <div className="bg-white px-2 py-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                Budget
-              </p>
-              <p className="font-bold text-jade-deep">{money(weekKharcha)}</p>
-            </div>
-            <div className="bg-white px-2 py-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                Paid
-              </p>
-              <p className="font-bold text-jade-deep">{money(paid)}</p>
-            </div>
-            <div className="bg-white px-2 py-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                {box < 0 ? "Extra" : "Left"}
-              </p>
-              <p className="font-bold text-amber-900">{money(box)}</p>
+        {/* 5. Total Remaining */}
+        <div className="my-2 rounded-xl border border-amber-300 bg-amber-50/80 px-3 py-2.5 shadow-sm">
+          <Row
+            label="Kul Baaki Hisaab (Total Remaining)"
+            value={money(totalRemainingHere)}
+            bold
+            accent="amber"
+          />
+        </div>
+
+        {/* 6. Kharcha Box Summary */}
+        <div className="pt-1">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-jade-deep">
+            Hafte ka Kharcha
+          </p>
+          <div className="mt-1 overflow-hidden rounded-xl border border-jade/20 bg-white/70">
+            <div className="grid grid-cols-3 gap-px bg-jade/10 text-center text-sm">
+              <div className="bg-white px-2 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Budget
+                </p>
+                <p className="font-bold text-jade-deep">{money(weekKharcha)}</p>
+              </div>
+              <div className="bg-white px-2 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  Paise Mile
+                </p>
+                <p className="font-bold text-jade-deep">{money(paid)}</p>
+              </div>
+              <div className="bg-white px-2 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                  {box < 0 ? "Extra" : "Left"}
+                </p>
+                <p className="font-bold text-amber-900">{money(box)}</p>
+              </div>
             </div>
           </div>
-          {transferLines.length > 0 ? (
-            <div className="border-t border-jade/10">
-              {transferLines.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between gap-3 border-b border-jade/10 px-3 py-2 text-sm last:border-b-0"
-                >
-                  <div className="min-w-0">
-                    <p className="font-medium text-[var(--text)]">
-                      {formatDisplayDate(p.date)}
-                      {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
-                    </p>
-                  </div>
-                  <span className="shrink-0 font-bold text-jade-deep">Paid {money(p.amount)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="border-t border-jade/10 px-3 py-2 text-[11px] text-[var(--text-muted)]">
-              No payments yet.
-            </p>
-          )}
         </div>
-        <div className="my-1.5 border-t border-jade/20" />
-        <Row
-          label="Total remaining"
-          value={money(totalRemainingHere)}
-          bold
-          accent={totalRemainingHere > 0 ? "amber" : "green"}
-        />
- 
+
+        {/* 7. Collapsible Payment Timeline */}
+        {transferLines.length > 0 && (
+          <div className="mt-2 overflow-hidden rounded-xl border border-jade/20 bg-white/60">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold text-jade-deep hover:bg-jade/5"
+              onClick={() => setShowTimeline(!showTimeline)}
+            >
+              <span>Paise mile ({transferLines.length} payments · {money(paid)} total)</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                {showTimeline ? "Hide ▲" : "Show ▼"}
+              </span>
+            </button>
+            {showTimeline && (
+              <div className="border-t border-jade/10 divide-y divide-jade/10">
+                {transferLines.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-[var(--text)]">
+                        {formatDisplayDate(p.date)}
+                        {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
+                        {p.remarks ? ` · ${p.remarks}` : ""}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-bold text-danger">−{money(p.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2572,12 +2639,19 @@ function Row({
   label: string;
   value: string;
   bold?: boolean;
-  accent?: "green" | "amber";
+  accent?: "green" | "amber" | "red";
 }) {
-  const accentClass = accent === "green" ? "text-jade-deep" : accent === "amber" ? "text-amber-700" : "";
+  const accentClass =
+    accent === "green"
+      ? "text-jade-deep"
+      : accent === "amber"
+      ? "text-amber-700"
+      : accent === "red"
+      ? "text-danger"
+      : "";
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-[var(--text-muted)]">{label}</span>
+      <span className={bold ? "font-semibold text-[var(--text)]" : "text-[var(--text-muted)]"}>{label}</span>
       <span className={`${bold ? "font-bold" : "font-medium"} ${accentClass}`}>{value}</span>
     </div>
   );
