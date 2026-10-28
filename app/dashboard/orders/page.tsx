@@ -5,6 +5,8 @@ import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } fro
 import {
   Calculator,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   Eraser,
   Package,
@@ -186,9 +188,12 @@ export default function OrdersPage() {
     totalQuantity: number;
     ratePerPiece: number;
     totalAmount: number;
+    date?: string;
+    createdAt?: number;
   };
   const [rmEntries, setRmEntries] = useState<RmEntry[]>([]);
   const [rmLoading, setRmLoading] = useState(false);
+  const [showAllRm, setShowAllRm] = useState(false);
   /** Entry IDs the admin has toggled on for deduction in this bill. */
   const [rmSelected, setRmSelected] = useState<Set<string>>(new Set());
 
@@ -239,6 +244,7 @@ export default function OrdersPage() {
     setPendingKharchaCarry(0);
     setRmEntries([]);
     setRmSelected(new Set());
+    setShowAllRm(false);
     setActiveStandaloneRepairs([]);
     setRepairSelected(new Set());
     clearBillDraft();
@@ -357,6 +363,7 @@ export default function OrdersPage() {
     if (!kaarigerId) {
       setRmEntries([]);
       setRmSelected(new Set());
+      setShowAllRm(false);
       return;
     }
     let cancelled = false;
@@ -380,12 +387,20 @@ export default function OrdersPage() {
               totalQuantity: k.totalQuantity,
               ratePerPiece: k.ratePerPiece,
               totalAmount: k.totalAmount,
+              date: bill.date,
+              createdAt: bill.createdAt || 0,
             });
           });
+        });
+        entries.sort((a, b) => {
+          const tA = (a.createdAt && a.createdAt > 0) ? a.createdAt : (a.date ? new Date(a.date).getTime() : 0);
+          const tB = (b.createdAt && b.createdAt > 0) ? b.createdAt : (b.date ? new Date(b.date).getTime() : 0);
+          return tB - tA;
         });
         if (!cancelled) {
           setRmEntries(entries);
           setRmSelected(new Set());
+          setShowAllRm(false);
         }
       } catch {
         if (!cancelled) setRmEntries([]);
@@ -1305,7 +1320,7 @@ export default function OrdersPage() {
               </p>
             ) : (
               <div className="space-y-2">
-                {rmEntries.map((e) => {
+                {(showAllRm ? rmEntries : rmEntries.slice(0, 3)).map((e) => {
                   const added = rmSelected.has(e.entryId);
                   return (
                     <div
@@ -1346,6 +1361,28 @@ export default function OrdersPage() {
                     </div>
                   );
                 })}
+
+                {rmEntries.length > 3 && (
+                  <div className="pt-1 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllRm((v) => !v)}
+                      className="btn btn-secondary btn-sm flex items-center gap-1.5 !text-xs !py-1.5 !px-3 font-semibold text-[var(--text-muted)] hover:text-[var(--text)]"
+                    >
+                      {showAllRm ? (
+                        <>
+                          <ChevronUp className="h-3.5 w-3.5" />
+                          View less
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-3.5 w-3.5" />
+                          View all ({rmEntries.length})
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {rmDeductionTotal > 0 && (
