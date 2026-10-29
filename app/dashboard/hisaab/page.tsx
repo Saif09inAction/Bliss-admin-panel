@@ -249,6 +249,8 @@ export default function HisaabPage() {
             productsTotal: data.productsTotal as number | undefined,
             materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
             materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+            rawMaterialDeductions: (data.rawMaterialDeductions as KaarigerOrder["rawMaterialDeductions"]) || [],
+            rawMaterialDeductionsTotal: data.rawMaterialDeductionsTotal as number | undefined,
             kharchaGiven: data.kharchaGiven as number | undefined,
             kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
             kharchaCarryIn: data.kharchaCarryIn as number | undefined,
@@ -357,6 +359,8 @@ export default function HisaabPage() {
               productsTotal: data.productsTotal as number | undefined,
               materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
               materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+              rawMaterialDeductions: (data.rawMaterialDeductions as KaarigerOrder["rawMaterialDeductions"]) || [],
+              rawMaterialDeductionsTotal: data.rawMaterialDeductionsTotal as number | undefined,
               kharchaGiven: data.kharchaGiven as number | undefined,
               kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
               kharchaCarryIn: data.kharchaCarryIn as number | undefined,
@@ -441,6 +445,8 @@ export default function HisaabPage() {
             productsTotal: data.productsTotal as number | undefined,
             materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
             materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+            rawMaterialDeductions: (data.rawMaterialDeductions as KaarigerOrder["rawMaterialDeductions"]) || [],
+            rawMaterialDeductionsTotal: data.rawMaterialDeductionsTotal as number | undefined,
             kharchaGiven: data.kharchaGiven as number | undefined,
             kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
             kharchaCarryIn: data.kharchaCarryIn as number | undefined,
@@ -513,6 +519,8 @@ export default function HisaabPage() {
               productsTotal: data.productsTotal as number | undefined,
               materialDeductions: (data.materialDeductions as RepairLineItem[]) || [],
               materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+              rawMaterialDeductions: (data.rawMaterialDeductions as KaarigerOrder["rawMaterialDeductions"]) || [],
+              rawMaterialDeductionsTotal: data.rawMaterialDeductionsTotal as number | undefined,
               kharchaGiven: data.kharchaGiven as number | undefined,
               kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
               kharchaCarryIn: data.kharchaCarryIn as number | undefined,
@@ -1864,12 +1872,18 @@ function PreviousHisaabCard({
   const deductionsTotal =
     order.materialDeductionsTotal ??
     deductionLines.reduce((s, it) => s + (it.lineTotal || 0), 0);
+  const rawMaterialDeductionLines = order.rawMaterialDeductions || [];
+  const rawMaterialDeductionsTotal =
+    order.rawMaterialDeductionsTotal ??
+    rawMaterialDeductionLines.reduce((s, it) => s + (it.totalAmount || 0), 0);
   const repairTotal =
     order.repairDeductionTotal || orderRepairs.reduce((s, r) => s + r.totalRepairCost, 0);
   const weekKharcha = Math.max(0, order.kharchaGiven || 0);
   const carryIn = order.kharchaCarryIn || 0;
   const addBalance =
-    order.addBalance != null ? order.addBalance : productsTotal - deductionsTotal - repairTotal;
+    order.addBalance != null
+      ? order.addBalance
+      : productsTotal - deductionsTotal - rawMaterialDeductionsTotal - repairTotal;
   const opening =
     order.openingAtCreation != null ? order.openingAtCreation : 0;
   const creditSettled = Math.max(0, order.creditApplied || 0);

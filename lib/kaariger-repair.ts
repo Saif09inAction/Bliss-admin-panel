@@ -28,6 +28,8 @@ function parseOrder(id: string, data: Record<string, unknown>): KaarigerOrder {
     productsTotal: (data.productsTotal as number) || 0,
     materialDeductions: (data.materialDeductions as KaarigerOrder["materialDeductions"]) || [],
     materialDeductionsTotal: (data.materialDeductionsTotal as number) || 0,
+    rawMaterialDeductions: (data.rawMaterialDeductions as KaarigerOrder["rawMaterialDeductions"]) || [],
+    rawMaterialDeductionsTotal: (data.rawMaterialDeductionsTotal as number) || 0,
     addBalance: data.addBalance as number | undefined,
     openingAtCreation: data.openingAtCreation as number | undefined,
     closingAtCreation: data.closingAtCreation as number | undefined,
@@ -55,11 +57,12 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
 
   const maal = orderMaal(order);
   const materials = orderMaterialDeductions(order);
+  const rawMaterials = Math.max(0, order.rawMaterialDeductionsTotal || 0);
   const oldAdd =
     order.addBalance != null && Number.isFinite(order.addBalance)
       ? order.addBalance
-      : maal - materials - Math.max(0, order.repairDeductionTotal || 0);
-  const newAdd = maal - materials - newRepairTotal;
+      : maal - materials - rawMaterials - Math.max(0, order.repairDeductionTotal || 0);
+  const newAdd = maal - materials - rawMaterials - newRepairTotal;
   const weekKharcha = orderWeekKharcha(order);
   const openingAtCreation = order.openingAtCreation ?? 0;
   const creditApplied = Math.max(0, order.creditApplied || 0);

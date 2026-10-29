@@ -27,6 +27,8 @@ function parseOrderLite(id: string, data: Record<string, unknown>): KaarigerOrde
     productsTotal: data.productsTotal as number | undefined,
     materialDeductions: (data.materialDeductions as KaarigerOrder["materialDeductions"]) || [],
     materialDeductionsTotal: data.materialDeductionsTotal as number | undefined,
+    rawMaterialDeductions: (data.rawMaterialDeductions as KaarigerOrder["rawMaterialDeductions"]) || [],
+    rawMaterialDeductionsTotal: data.rawMaterialDeductionsTotal as number | undefined,
     kharchaGiven: data.kharchaGiven as number | undefined,
     kharchaCarriedForward: data.kharchaCarriedForward as number | undefined,
     kharchaCarryIn: data.kharchaCarryIn as number | undefined,

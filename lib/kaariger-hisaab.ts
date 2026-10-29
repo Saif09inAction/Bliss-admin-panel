@@ -76,6 +76,11 @@ export function liveKharchaCarryIn(
   return orderKharchaCarryOut(previous, paidOnPrevious);
 }
 
+export function orderRawMaterialDeductions(order: KaarigerOrder): number {
+  if (order.rawMaterialDeductionsTotal != null) return Math.max(0, order.rawMaterialDeductionsTotal);
+  return (order.rawMaterialDeductions || []).reduce((s, it) => s + (it.totalAmount || 0), 0);
+}
+
 /**
  * ADD to running balance (before kharcha cash given).
  * Week kharcha is subtracted separately at bill create.
@@ -84,7 +89,12 @@ export function orderAddBalance(order: KaarigerOrder): number {
   if (order.addBalance != null && Number.isFinite(order.addBalance)) {
     return order.addBalance;
   }
-  return orderMaal(order) - orderMaterialDeductions(order) - orderRepairDeductions(order);
+  return (
+    orderMaal(order) -
+    orderMaterialDeductions(order) -
+    orderRawMaterialDeductions(order) -
+    orderRepairDeductions(order)
+  );
 }
 
 /** Closing snapshot before storing: opening + ADD − week kharcha given. */

@@ -940,12 +940,6 @@ export default function OrdersPage() {
       }
 
       await syncOrderRepairAndRemaining(id);
-      if (creditLeft > 0) {
-        await settleUnsettledCreditIntoLiveBill({
-          kaarigerId: kaariger.phone,
-          orders: [{ ...order, id }],
-        });
-      }
 
       await updateDoc(doc(db, "employees", kaariger.phone), {
         openingBalance: closingAtCreation,
