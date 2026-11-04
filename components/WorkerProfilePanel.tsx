@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -12,6 +13,8 @@ import {
   where,
 } from "firebase/firestore";
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
   Banknote,
   Calendar,
   ChevronRight,
@@ -74,6 +77,7 @@ import {
 } from "@/lib/shift-schedule";
 import { buildEmployeeSalaryScheduleSave, monthlySalaryForDate } from "@/lib/salary-schedule";
 import {
+  DEFAULT_SUPERVISOR_ACCESS,
   SUPERVISOR_PERMISSION_LABELS,
   isPayrollRole,
   normalizeSupervisorAccess,
@@ -96,8 +100,10 @@ export default function WorkerProfilePanel({
   onPaySalary,
   onUpdated,
 }: Props) {
-  const { session } = useAuth();
+  const { session, isAdmin } = useAuth();
   const [periodOffset, setPeriodOffset] = useState(0);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleMsg, setRoleMsg] = useState("");
   const today = todayDateStr();
   const payPeriod = useMemo(
     () => resolvePayPeriod(employee.joiningDate, periodOffset, today),
@@ -182,6 +188,7 @@ export default function WorkerProfilePanel({
     setSalaryDraft("");
     setSalaryApplyDate(today);
     setSalaryMsg("");
+    setRoleMsg("");
   }, [employee.phone, today]);
 
   useEffect(() => {
@@ -491,6 +498,75 @@ export default function WorkerProfilePanel({
     await saveSupervisorAccess(next);
   }
 
+  async function promoteToSupervisor() {
+    if (!isAdmin || localEmployee.role !== "STAFF") return;
+    if (
+      !confirm(
+        `Promote ${localEmployee.name} to Supervisor?\n\nSalary, attendance, and other records stay the same. They can sign in on the web with the same mobile and password.`
+      )
+    ) {
+      return;
+    }
+    setRoleSaving(true);
+    setRoleMsg("");
+    try {
+      const access = normalizeSupervisorAccess(
+        localEmployee.supervisorAccess || DEFAULT_SUPERVISOR_ACCESS
+      );
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), {
+        role: "SUPERVISOR",
+        supervisorAccess: access,
+      });
+      const next: Employee = {
+        ...localEmployee,
+        role: "SUPERVISOR",
+        supervisorAccess: access,
+      };
+      setLocalEmployee(next);
+      setSupervisorAccessDraft(access);
+      onUpdated?.(next);
+      setRoleMsg(
+        "Promoted to Supervisor. Same password works on the web panel — set web access below if needed."
+      );
+    } catch (err) {
+      setRoleMsg(err instanceof Error ? err.message : "Failed to promote.");
+    } finally {
+      setRoleSaving(false);
+    }
+  }
+
+  async function demoteToStaff() {
+    if (!isAdmin || localEmployee.role !== "SUPERVISOR") return;
+    if (
+      !confirm(
+        `Demote ${localEmployee.name} to Staff?\n\nSalary and attendance stay the same. Web panel login stops; they use the mobile app as staff.`
+      )
+    ) {
+      return;
+    }
+    setRoleSaving(true);
+    setRoleMsg("");
+    try {
+      await updateDoc(doc(getDb(), "employees", localEmployee.phone), {
+        role: "STAFF",
+        supervisorAccess: deleteField(),
+      });
+      const next: Employee = {
+        ...localEmployee,
+        role: "STAFF",
+        supervisorAccess: undefined,
+      };
+      setLocalEmployee(next);
+      setSupervisorAccessDraft(DEFAULT_SUPERVISOR_ACCESS);
+      onUpdated?.(next);
+      setRoleMsg("Demoted to Staff. Attendance and salary history are unchanged.");
+    } catch (err) {
+      setRoleMsg(err instanceof Error ? err.message : "Failed to demote.");
+    } finally {
+      setRoleSaving(false);
+    }
+  }
+
   async function saveStaffShift(e: React.FormEvent) {
     e.preventDefault();
     const inTime = shiftDraft.dailySignInTime.trim();
@@ -683,16 +759,16 @@ export default function WorkerProfilePanel({
                   </p>
                   <span
                     className={`mt-2 inline-block badge ${
-                      employee.role === "KAARIGER"
+                      localEmployee.role === "KAARIGER"
                         ? "badge-gold"
-                        : employee.role === "SUPERVISOR"
+                        : localEmployee.role === "SUPERVISOR"
                           ? "badge-warn"
                           : "badge-success"
                     }`}
                   >
-                    {employee.role === "KAARIGER"
+                    {localEmployee.role === "KAARIGER"
                       ? "Kaariger"
-                      : employee.role === "SUPERVISOR"
+                      : localEmployee.role === "SUPERVISOR"
                         ? "Supervisor"
                         : "Staff"}
                   </span>
@@ -726,7 +802,7 @@ export default function WorkerProfilePanel({
                 <div className="mt-3 space-y-0 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40">
                   <InfoRow label="Mobile" value={employee.phone} />
                   <InfoRow label="Password" value={localEmployee.password || "—"} />
-                  {isPayrollRole(employee.role) && (
+                  {isPayrollRole(localEmployee.role) && (
                     <>
                       <InfoRow label="Joining Date" value={employee.joiningDate || "—"} />
                       <InfoRow
@@ -739,8 +815,11 @@ export default function WorkerProfilePanel({
                           hasCustomShift(localEmployee) ? " (custom)" : " (default)"
                         }`}
                       />
-                      {employee.role === "SUPERVISOR" && (
-                        <InfoRow label="Login" value="Web panel" />
+                      {localEmployee.role === "SUPERVISOR" && (
+                        <InfoRow label="Login" value="Web panel · same password" />
+                      )}
+                      {localEmployee.role === "STAFF" && (
+                        <InfoRow label="Login" value="Mobile app" />
                       )}
                     </>
                   )}
@@ -749,6 +828,44 @@ export default function WorkerProfilePanel({
                   )}
                 </div>
               </section>
+
+              {isAdmin && (localEmployee.role === "STAFF" || localEmployee.role === "SUPERVISOR") && (
+                <section>
+                  <h3 className="section-title flex items-center gap-2 text-base">
+                    <User size={16} className="text-jade-deep" />
+                    Role
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Salary, attendance, and payments stay on this profile. Only the role and web
+                    login change.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {localEmployee.role === "STAFF" && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={roleSaving}
+                        onClick={() => void promoteToSupervisor()}
+                      >
+                        <ArrowUpToLine size={14} />
+                        {roleSaving ? "…" : "Promote to Supervisor"}
+                      </button>
+                    )}
+                    {localEmployee.role === "SUPERVISOR" && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={roleSaving}
+                        onClick={() => void demoteToStaff()}
+                      >
+                        <ArrowDownToLine size={14} />
+                        {roleSaving ? "…" : "Demote to Staff"}
+                      </button>
+                    )}
+                  </div>
+                  {roleMsg && <p className="mt-2 text-xs text-jade-deep">{roleMsg}</p>}
+                </section>
+              )}
 
               {localEmployee.role === "SUPERVISOR" && (
                 <section>
