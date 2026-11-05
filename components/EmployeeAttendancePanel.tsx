@@ -235,16 +235,8 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
   const selectedShift = selectedDate ? shiftForDate(selectedDate) : resolveShiftSettings(employee, settings);
   const selectedLate = computeLateMinutes(selected?.signInTime, selectedShift.dailySignInTime);
   const selectedEarly = computeEarlyLeaveMinutes(selected?.signOutTime, selectedShift.dailySignOutTime);
-  const showCreditActions =
-    selectedDate &&
-    selectedStatus !== "FUTURE" &&
-    (selectedStatus === "LATE" ||
-      selectedStatus === "LEFT_EARLY" ||
-      selectedStatus === "ABSENT" ||
-      selected?.dayCredit === "FULL" ||
-      selected?.dayCredit === "HALF" ||
-      selectedLate > 0 ||
-      selectedEarly > 0);
+  /** Available on every past/today day for staff and supervisors — not only late/absent days. */
+  const showCreditActions = Boolean(selectedDate && selectedStatus !== "FUTURE");
 
   async function setDayCredit(credit: "FULL" | "HALF" | null) {
     if (!selectedDate) return;
@@ -602,7 +594,7 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     Admin override
                   </p>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Forgive late / early leave (or credit an absent day) so salary is not cut.
+                    Mark full day, half day, or clear so salary follows the admin choice for this date.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -625,16 +617,16 @@ export default function EmployeeAttendancePanel({ employee, settings, onClose }:
                     >
                       Half day
                     </button>
-                    {(selected?.dayCredit === "FULL" || selected?.dayCredit === "HALF") && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={creditSaving}
-                        onClick={() => setDayCredit(null)}
-                      >
-                        Clear override
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${
+                        !selected?.dayCredit ? "btn-primary" : "btn-ghost"
+                      }`}
+                      disabled={creditSaving || !selected?.dayCredit}
+                      onClick={() => setDayCredit(null)}
+                    >
+                      No override
+                    </button>
                   </div>
                   {selected?.dayCredit && selected.dayCreditBy && (
                     <p className="text-xs text-jade-deep">
