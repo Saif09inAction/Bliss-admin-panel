@@ -76,6 +76,38 @@ export function liveKharchaCarryIn(
   return orderKharchaCarryOut(previous, paidOnPrevious);
 }
 
+function isUsableKharchaBill(status?: string): boolean {
+  return status !== "CANCELLED" && status !== "REJECTED";
+}
+
+/**
+ * Rebuild carry for every bill from oldest → newest using each prior week’s
+ * leftover AFTER its payments. Fixes bad snapshots like Nov getting Oct’s
+ * full start box (₹75,750) instead of Oct’s left (₹11,445).
+ */
+export function resolveKharchaCarryInMap(
+  orders: KaarigerOrder[],
+  payments: { orderId: string; amount?: number; remarks?: string }[]
+): Map<string, number> {
+  const paidMap = paidByOrderMap(payments);
+  const chron = [...orders]
+    .filter((o) => isUsableKharchaBill(o.status))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const carry = new Map<string, number>();
+  for (let i = 0; i < chron.length; i++) {
+    const order = chron[i];
+    if (i === 0) {
+      carry.set(order.id, order.kharchaCarryIn || 0);
+      continue;
+    }
+    const prev = chron[i - 1];
+    const prevWithCarry = { ...prev, kharchaCarryIn: carry.get(prev.id) || 0 };
+    const prevLeft = orderKharchaBalance(prevWithCarry, paidMap.get(prev.id) || 0);
+    carry.set(order.id, Math.round(-prevLeft * 100) / 100);
+  }
+  return carry;
+}
+
 /** Bill payments that count against a week’s kharcha box (not opening/credit/old). */
 export function isWeekKharchaPayment(p: { orderId: string; remarks?: string }): boolean {
   const remarks = (p.remarks || "").toLowerCase();

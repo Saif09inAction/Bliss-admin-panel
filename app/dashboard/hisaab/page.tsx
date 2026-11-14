@@ -40,9 +40,9 @@ import {
 import {
   buildHisaabLedger,
   grossOpeningBeforePays,
-  liveKharchaCarryIn,
   orderKharchaBalance,
   orderWeekMeta,
+  resolveKharchaCarryInMap,
   totalRemainingAmount,
 } from "@/lib/kaariger-hisaab";
 import { deleteKaarigerPayments } from "@/lib/payment-delete";
@@ -631,18 +631,18 @@ export default function HisaabPage() {
   const liveOrder = useMemo(() => pickLiveKaarigerBill(orders), [orders]);
   const completedOrders = useMemo(() => previousKaarigerBills(orders), [orders]);
 
+  /** Correct carry for every week from prior leftover after payments (fixes bad snapshots). */
+  const resolvedCarryByOrder = useMemo(
+    () => resolveKharchaCarryInMap(orders, payments),
+    [orders, payments]
+  );
+
   const liveCarryIn = useMemo(() => {
     if (!liveOrder) return 0;
-    // Show previous week’s current leftover without writing on every keystroke/render.
-    return liveKharchaCarryIn(
-      liveOrder,
-      completedOrders[0],
-      orderPaidMap.get(completedOrders[0]?.id || "") || 0
-    );
-  }, [liveOrder, completedOrders, orderPaidMap]);
+    return resolvedCarryByOrder.get(liveOrder.id) ?? liveOrder.kharchaCarryIn ?? 0;
+  }, [liveOrder, resolvedCarryByOrder]);
 
-  // Once per finished load: persist the correct carry so the phone app matches.
-  // Do not depend on liveCarryIn itself — that was rewriting the box on every open.
+  // Once per finished load: persist the whole carry chain so previous weeks and the phone match.
   useEffect(() => {
     if (loading || !liveOrder || !kaarigerId) return;
     let cancelled = false;
@@ -650,7 +650,14 @@ export default function HisaabPage() {
       .then((next) => {
         if (cancelled || next == null) return;
         setOrders((list) =>
-          list.map((o) => (o.id === liveOrder.id ? { ...o, kharchaCarryIn: next } : o))
+          list.map((o) => {
+            const resolved = resolvedCarryByOrder.get(o.id);
+            if (resolved == null) return o;
+            if (Math.round((o.kharchaCarryIn || 0) * 100) === Math.round(resolved * 100)) {
+              return o;
+            }
+            return { ...o, kharchaCarryIn: resolved };
+          })
         );
       })
       .catch(() => {});
@@ -1725,7 +1732,15 @@ export default function HisaabPage() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <PreviousHisaabCard order={historyOrder} payments={payments} repairs={repairs} />
+              <PreviousHisaabCard
+                order={{
+                  ...historyOrder,
+                  kharchaCarryIn:
+                    resolvedCarryByOrder.get(historyOrder.id) ?? historyOrder.kharchaCarryIn,
+                }}
+                payments={payments}
+                repairs={repairs}
+              />
             </div>
           </div>
         </>

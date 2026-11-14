@@ -3,11 +3,10 @@ import { getDb } from "@/lib/firebase";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
 import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
 import {
-  liveKharchaCarryIn,
   orderMaal,
   orderMaterialDeductions,
   orderWeekKharcha,
-  paidByOrderMap,
+  resolveKharchaCarryInMap,
 } from "@/lib/kaariger-hisaab";
 
 function isApprovedRepair(r: { status?: string }) {
@@ -127,9 +126,8 @@ export function previousKaarigerBills(orders: KaarigerOrder[]): KaarigerOrder[] 
 }
 
 /**
- * Persist the live bill’s kharchaCarryIn from the previous week’s current leftover.
- * Call after pay/delete — not on every Hisaab page view (that was rewriting carry
- * and making the box jump for kaarigers).
+ * Persist corrected kharchaCarryIn for every bill in the chain (oldest → newest)
+ * from each prior week’s leftover after payments. Returns the live bill’s carry.
  */
 export async function syncLiveKharchaCarryIn(
   orders: KaarigerOrder[],
@@ -137,15 +135,19 @@ export async function syncLiveKharchaCarryIn(
 ): Promise<number | null> {
   const live = pickLiveKaarigerBill(orders);
   if (!live) return null;
-  const previous = previousKaarigerBills(orders)[0];
-  const paidMap = paidByOrderMap(payments);
-  const next = Math.round(
-    liveKharchaCarryIn(live, previous, paidMap.get(previous?.id || "") || 0) * 100
-  ) / 100;
-  const stored = Math.round((live.kharchaCarryIn || 0) * 100) / 100;
-  if (stored === next) return next;
-  await updateDoc(doc(getDb(), "kaariger_orders", live.id), { kharchaCarryIn: next });
-  return next;
+  const resolved = resolveKharchaCarryInMap(orders, payments);
+  const writes: Promise<void>[] = [];
+  for (const order of orders) {
+    if (!resolved.has(order.id)) continue;
+    const next = resolved.get(order.id) || 0;
+    const stored = Math.round((order.kharchaCarryIn || 0) * 100) / 100;
+    if (stored === next) continue;
+    writes.push(
+      updateDoc(doc(getDb(), "kaariger_orders", order.id), { kharchaCarryIn: next })
+    );
+  }
+  if (writes.length) await Promise.all(writes);
+  return resolved.get(live.id) ?? null;
 }
 
 /** Live bill for this kaariger — always the latest bill, if any. */
