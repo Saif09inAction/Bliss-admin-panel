@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import {
+  ChevronLeft,
+  ChevronRight,
   Download,
   History,
   IndianRupee,
@@ -92,6 +94,12 @@ function orderStatusBadge(status: string) {
 
 function formatDate(ts: number) {
   return ts ? new Date(ts).toLocaleDateString("en-IN") : "—";
+}
+
+/** Short chip label for bill switcher — e.g. "5 Sep", "31 Oct". */
+function shortBillDate(ts: number) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 function formatTime(ts: number) {
@@ -818,6 +826,20 @@ export default function HisaabPage() {
   });
 
   const historyOrder = completedOrders.find((o) => o.id === historyOrderId) || null;
+  /** Oldest → newest for date chips / arrow switcher inside previous-bill modal. */
+  const historyBillsChron = useMemo(
+    () => [...completedOrders].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
+    [completedOrders]
+  );
+  const historyChronIndex = historyOrder
+    ? historyBillsChron.findIndex((o) => o.id === historyOrder.id)
+    : -1;
+  const historyOlderId =
+    historyChronIndex > 0 ? historyBillsChron[historyChronIndex - 1]?.id || "" : "";
+  const historyNewerId =
+    historyChronIndex >= 0 && historyChronIndex < historyBillsChron.length - 1
+      ? historyBillsChron[historyChronIndex + 1]?.id || ""
+      : "";
 
   const ledgerLines = useMemo(
     () =>
@@ -1717,7 +1739,49 @@ export default function HisaabPage() {
               className="max-h-[88vh] w-full max-w-4xl overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="mb-2 flex justify-end">
+              <div className="mb-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-icon !bg-white disabled:opacity-40"
+                  disabled={!historyOlderId}
+                  onClick={() => historyOlderId && setHistoryOrderId(historyOlderId)}
+                  aria-label="Older bill"
+                  title="Older bill"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="min-w-0 flex-1 overflow-x-auto">
+                  <div className="flex w-max items-center gap-1.5 px-0.5 py-0.5">
+                    {historyBillsChron.map((o) => {
+                      const active = o.id === historyOrder.id;
+                      return (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => setHistoryOrderId(o.id)}
+                          title={orderWeekMeta(o).label}
+                          className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                            active
+                              ? "bg-jade text-white shadow-sm"
+                              : "bg-white text-[var(--text-muted)] ring-1 ring-[var(--border)] hover:bg-jade-soft/40 hover:text-jade-deep"
+                          }`}
+                        >
+                          {shortBillDate(o.createdAt)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-icon !bg-white disabled:opacity-40"
+                  disabled={!historyNewerId}
+                  onClick={() => historyNewerId && setHistoryOrderId(historyNewerId)}
+                  aria-label="Newer bill"
+                  title="Newer bill"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
                 <button
                   type="button"
                   className="btn-icon !bg-white"
