@@ -42,6 +42,7 @@ import {
   grossOpeningBeforePays,
   orderKharchaBalance,
   orderWeekMeta,
+  paidByOrderMap,
   resolveKharchaCarryInMap,
   totalRemainingAmount,
 } from "@/lib/kaariger-hisaab";
@@ -617,14 +618,8 @@ export default function HisaabPage() {
   const kaarigerOptions = kaarigers.map((k) => ({ id: k.phone, label: k.name, sublabel: k.phone }));
   const selectedKaariger = kaarigers.find((k) => k.phone === kaarigerId);
 
-  const orderPaidMap = useMemo(() => {
-    const map = new Map<string, number>();
-    payments.forEach((p) => {
-      if (isCreditPayment(p) || isOpeningPayment(p) || isOldKharchaPayment(p)) return;
-      map.set(p.orderId, (map.get(p.orderId) || 0) + p.amount);
-    });
-    return map;
-  }, [payments]);
+  /** Same filter as resolveKharchaCarryInMap — week box pays only, never opening/credit/old. */
+  const orderPaidMap = useMemo(() => paidByOrderMap(payments), [payments]);
 
   // Newest bill stays on the main hisaab. Older bills move to
   // "See previous hisaab" only after a newer bill is created.
