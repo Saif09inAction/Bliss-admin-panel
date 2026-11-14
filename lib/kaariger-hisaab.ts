@@ -76,6 +76,36 @@ export function liveKharchaCarryIn(
   return orderKharchaCarryOut(previous, paidOnPrevious);
 }
 
+/** Bill payments that count against a week’s kharcha box (not opening/credit/old). */
+export function isWeekKharchaPayment(p: { orderId: string; remarks?: string }): boolean {
+  const remarks = (p.remarks || "").toLowerCase();
+  if (
+    p.orderId === "__opening__" ||
+    p.orderId === "__old_kharcha__" ||
+    remarks.includes("carried as credit") ||
+    remarks.includes("credit carried") ||
+    remarks.includes("opening balance") ||
+    remarks.includes("old remaining") ||
+    remarks.includes("old kharcha") ||
+    remarks.includes("carried kharcha")
+  ) {
+    return false;
+  }
+  return Boolean(p.orderId);
+}
+
+/** Paid cash per order id for week-kharcha payments only. */
+export function paidByOrderMap(
+  payments: { orderId: string; amount?: number; remarks?: string }[]
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const p of payments) {
+    if (!isWeekKharchaPayment(p)) continue;
+    map.set(p.orderId, (map.get(p.orderId) || 0) + Math.max(0, p.amount || 0));
+  }
+  return map;
+}
+
 export function orderRawMaterialDeductions(order: KaarigerOrder): number {
   if (order.rawMaterialDeductionsTotal != null) return Math.max(0, order.rawMaterialDeductionsTotal);
   return (order.rawMaterialDeductions || []).reduce((s, it) => s + (it.totalAmount || 0), 0);

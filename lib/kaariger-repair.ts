@@ -1,8 +1,14 @@
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import { isStandaloneRepair, STANDALONE_REPAIR_ORDER_ID } from "@/lib/types";
-import type { KaarigerOrder, OrderRepair } from "@/lib/types";
-import { orderMaal, orderMaterialDeductions, orderWeekKharcha } from "@/lib/kaariger-hisaab";
+import type { KaarigerOrder, KaarigerPayment, OrderRepair } from "@/lib/types";
+import {
+  liveKharchaCarryIn,
+  orderMaal,
+  orderMaterialDeductions,
+  orderWeekKharcha,
+  paidByOrderMap,
+} from "@/lib/kaariger-hisaab";
 
 function isApprovedRepair(r: { status?: string }) {
   return !r.status || r.status === "APPROVED";
@@ -118,6 +124,28 @@ export function previousKaarigerBills(orders: KaarigerOrder[]): KaarigerOrder[] 
   return [...orders]
     .filter((o) => o.id !== live?.id && !isArchivedBillStatus(o.status))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+/**
+ * Persist the live bill’s kharchaCarryIn from the previous week’s current leftover.
+ * Call after pay/delete — not on every Hisaab page view (that was rewriting carry
+ * and making the box jump for kaarigers).
+ */
+export async function syncLiveKharchaCarryIn(
+  orders: KaarigerOrder[],
+  payments: KaarigerPayment[]
+): Promise<number | null> {
+  const live = pickLiveKaarigerBill(orders);
+  if (!live) return null;
+  const previous = previousKaarigerBills(orders)[0];
+  const paidMap = paidByOrderMap(payments);
+  const next = Math.round(
+    liveKharchaCarryIn(live, previous, paidMap.get(previous?.id || "") || 0) * 100
+  ) / 100;
+  const stored = Math.round((live.kharchaCarryIn || 0) * 100) / 100;
+  if (stored === next) return next;
+  await updateDoc(doc(getDb(), "kaariger_orders", live.id), { kharchaCarryIn: next });
+  return next;
 }
 
 /** Live bill for this kaariger — always the latest bill, if any. */

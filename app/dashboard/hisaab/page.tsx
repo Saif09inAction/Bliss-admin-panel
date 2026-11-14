@@ -52,6 +52,7 @@ import {
   foldStandaloneRepairsIntoLiveBill,
   pickLiveKaarigerBill,
   previousKaarigerBills,
+  syncLiveKharchaCarryIn,
   syncOrderRepairAndRemaining,
 } from "@/lib/kaariger-repair";
 import { settleUnsettledCreditForAllKaarigers, settleUnsettledCreditIntoLiveBill } from "@/lib/settle-credit";
@@ -562,6 +563,7 @@ export default function HisaabPage() {
     setPayMsg("");
     try {
       await deleteKaarigerPayments(kaarigerId, items);
+      await syncLiveKharchaCarryIn(orders, payments.filter((p) => !items.some((d) => d.id === p.id)));
       await Promise.all([loadKaarigerData(kaarigerId), loadKaarigers()]);
       setPayMsg(`Deleted payment of ${money(total)}.`);
     } catch (err) {
@@ -631,6 +633,7 @@ export default function HisaabPage() {
 
   const liveCarryIn = useMemo(() => {
     if (!liveOrder) return 0;
+    // Show previous week’s current leftover without writing on every keystroke/render.
     return liveKharchaCarryIn(
       liveOrder,
       completedOrders[0],
@@ -638,15 +641,14 @@ export default function HisaabPage() {
     );
   }, [liveOrder, completedOrders, orderPaidMap]);
 
+  // Once per finished load: persist the correct carry so the phone app matches.
+  // Do not depend on liveCarryIn itself — that was rewriting the box on every open.
   useEffect(() => {
-    if (!liveOrder) return;
-    const stored = Math.round((liveOrder.kharchaCarryIn || 0) * 100) / 100;
-    const next = Math.round(liveCarryIn * 100) / 100;
-    if (stored === next) return;
+    if (loading || !liveOrder || !kaarigerId) return;
     let cancelled = false;
-    updateDoc(doc(getDb(), "kaariger_orders", liveOrder.id), { kharchaCarryIn: next })
-      .then(() => {
-        if (cancelled) return;
+    void syncLiveKharchaCarryIn(orders, payments)
+      .then((next) => {
+        if (cancelled || next == null) return;
         setOrders((list) =>
           list.map((o) => (o.id === liveOrder.id ? { ...o, kharchaCarryIn: next } : o))
         );
@@ -655,7 +657,8 @@ export default function HisaabPage() {
     return () => {
       cancelled = true;
     };
-  }, [liveOrder, liveCarryIn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only after load for this kaariger
+  }, [loading, kaarigerId, liveOrder?.id]);
 
   const activeOrders = useMemo(() => {
     if (!liveOrder) return [];
