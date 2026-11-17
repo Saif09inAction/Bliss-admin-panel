@@ -57,9 +57,16 @@ export function orderKharchaUnpaid(order: KaarigerOrder, paidOnOrder: number): n
   return Math.max(0, orderKharchaBalance(order, paidOnOrder));
 }
 
-/** Carry to fold into next week: −box at close (= paid − effective start). */
+/**
+ * Carry into next week from this bill’s leftover AFTER payments.
+ * Only unpaid LEFT carries (negative carryIn next week).
+ * Overpay / Extra stays on this week — it must NOT shrink the next bill’s box
+ * (that was putting live weeks into minus after big settlement pays).
+ */
 export function orderKharchaCarryOut(order: KaarigerOrder, paidOnOrder: number): number {
-  return -orderKharchaBalance(order, paidOnOrder);
+  const left = orderKharchaBalance(order, paidOnOrder);
+  if (left > 0) return Math.round(-left * 100) / 100;
+  return 0;
 }
 
 /**
@@ -102,8 +109,7 @@ export function resolveKharchaCarryInMap(
     }
     const prev = chron[i - 1];
     const prevWithCarry = { ...prev, kharchaCarryIn: carry.get(prev.id) || 0 };
-    const prevLeft = orderKharchaBalance(prevWithCarry, paidMap.get(prev.id) || 0);
-    carry.set(order.id, Math.round(-prevLeft * 100) / 100);
+    carry.set(order.id, orderKharchaCarryOut(prevWithCarry, paidMap.get(prev.id) || 0));
   }
   return carry;
 }
