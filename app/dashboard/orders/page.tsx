@@ -34,7 +34,6 @@ import { formatRupee, uuid } from "@/lib/csv";
 import {
   orderAddBalance,
   orderKharchaCarryOut,
-  resolveKharchaCarryInMap,
   totalRemainingAmount,
   weekLabelFromDate,
 } from "@/lib/kaariger-hisaab";
@@ -777,13 +776,15 @@ export default function OrdersPage() {
         getDocs(query(collection(db, "kaariger_payments"), where("kaarigerId", "==", kaariger.phone))),
       ]);
 
-      const priorPayments = paySnap.docs.map((d) => {
+      const paidByOrder = new Map<string, number>();
+      paySnap.docs.forEach((d) => {
         const data = d.data();
-        return {
+        const p = {
           orderId: (data.orderId as string) || "",
-          amount: (data.amount as number) || 0,
           remarks: data.remarks as string | undefined,
         };
+        if (isCreditPayment(p) || isOpeningPayment(p) || isOldKharchaPayment(p)) return;
+        paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + ((data.amount as number) || 0));
       });
 
       let openingBase = liveOpening;
@@ -814,12 +815,11 @@ export default function OrdersPage() {
       const validPriorOrders = [...priorOrders]
         .filter((o) => o.status !== "CANCELLED" && o.status !== "REJECTED")
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      // Full chain: new bill's carry = −(prior week's leftover after its payments).
-      const carryByOrder = resolveKharchaCarryInMap(
-        [...validPriorOrders, { id, kharchaCarryIn: 0, createdAt: Date.now() } as KaarigerOrder],
-        priorPayments
-      );
-      const carryIn = carryByOrder.get(id) ?? 0;
+      // New bill carry = −(latest prior week LEFT after its payments).
+      const latestPrior = validPriorOrders[0];
+      const carryIn = latestPrior
+        ? orderKharchaCarryOut(latestPrior, paidByOrder.get(latestPrior.id) || 0)
+        : 0;
 
       for (const prev of validPriorOrders) {
         if (prev.status !== "COMPLETED") {

@@ -42,10 +42,10 @@ import {
 import {
   buildHisaabLedger,
   grossOpeningBeforePays,
+  liveKharchaCarryIn,
   orderKharchaBalance,
   orderWeekMeta,
   paidByOrderMap,
-  resolveKharchaCarryInMap,
   totalRemainingAmount,
 } from "@/lib/kaariger-hisaab";
 import { deleteKaarigerPayments } from "@/lib/payment-delete";
@@ -634,18 +634,18 @@ export default function HisaabPage() {
   const liveOrder = useMemo(() => pickLiveKaarigerBill(orders), [orders]);
   const completedOrders = useMemo(() => previousKaarigerBills(orders), [orders]);
 
-  /** Correct carry for every week from prior leftover after payments (fixes bad snapshots). */
-  const resolvedCarryByOrder = useMemo(
-    () => resolveKharchaCarryInMap(orders, payments),
-    [orders, payments]
-  );
-
+  /** Live box carry = previous bill LEFT after its payments (not a full-history rewrite). */
   const liveCarryIn = useMemo(() => {
     if (!liveOrder) return 0;
-    return resolvedCarryByOrder.get(liveOrder.id) ?? liveOrder.kharchaCarryIn ?? 0;
-  }, [liveOrder, resolvedCarryByOrder]);
+    const previous = completedOrders[0];
+    return liveKharchaCarryIn(
+      liveOrder,
+      previous,
+      orderPaidMap.get(previous?.id || "") || 0
+    );
+  }, [liveOrder, completedOrders, orderPaidMap]);
 
-  // Once per finished load: persist the whole carry chain so previous weeks and the phone match.
+  // Persist live carry only — leave older settled weeks untouched.
   useEffect(() => {
     if (loading || !liveOrder || !kaarigerId) return;
     let cancelled = false;
@@ -653,14 +653,12 @@ export default function HisaabPage() {
       .then((next) => {
         if (cancelled || next == null) return;
         setOrders((list) =>
-          list.map((o) => {
-            const resolved = resolvedCarryByOrder.get(o.id);
-            if (resolved == null) return o;
-            if (Math.round((o.kharchaCarryIn || 0) * 100) === Math.round(resolved * 100)) {
-              return o;
-            }
-            return { ...o, kharchaCarryIn: resolved };
-          })
+          list.map((o) =>
+            o.id === liveOrder.id &&
+            Math.round((o.kharchaCarryIn || 0) * 100) !== Math.round(next * 100)
+              ? { ...o, kharchaCarryIn: next }
+              : o
+          )
         );
       })
       .catch(() => {});
@@ -1792,11 +1790,7 @@ export default function HisaabPage() {
                 </button>
               </div>
               <PreviousHisaabCard
-                order={{
-                  ...historyOrder,
-                  kharchaCarryIn:
-                    resolvedCarryByOrder.get(historyOrder.id) ?? historyOrder.kharchaCarryIn,
-                }}
+                order={historyOrder}
                 payments={payments}
                 repairs={repairs}
               />

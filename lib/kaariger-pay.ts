@@ -1,7 +1,7 @@
 import { collection, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import { nowTimeStr, todayStr, uuid } from "@/lib/csv";
-import { orderKharchaBalance, resolveKharchaCarryInMap } from "@/lib/kaariger-hisaab";
+import { orderKharchaBalance, orderKharchaCarryOut } from "@/lib/kaariger-hisaab";
 import { pickLiveKaarigerBill, syncLiveKharchaCarryIn } from "@/lib/kaariger-repair";
 import type { KaarigerOrder, KaarigerPayment } from "@/lib/types";
 
@@ -247,9 +247,18 @@ export async function payKaarigerKharcha(opts: {
 
   if (!payRemaining && weekOrder) {
     const alreadyPaid = paidByOrder.get(weekOrder.id) || 0;
-    // Carry = −(previous bill LEFT after its payments), never the prior week’s full start box.
-    const carryByOrder = resolveKharchaCarryInMap(orders, payments);
-    const carryIn = carryByOrder.get(weekOrder.id) ?? weekOrder.kharchaCarryIn ?? 0;
+    // Live carry = −(previous bill LEFT after its payments). Do not rebuild older weeks.
+    const previous = [...orders]
+      .filter(
+        (o) =>
+          o.id !== weekOrder.id &&
+          o.status !== "CANCELLED" &&
+          o.status !== "REJECTED"
+      )
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    const carryIn = previous
+      ? orderKharchaCarryOut(previous, paidByOrder.get(previous.id) || 0)
+      : weekOrder.kharchaCarryIn || 0;
     if (Math.round((weekOrder.kharchaCarryIn || 0) * 100) !== Math.round(carryIn * 100)) {
       await updateDoc(doc(db, "kaariger_orders", weekOrder.id), { kharchaCarryIn: carryIn });
     }
@@ -264,7 +273,6 @@ export async function payKaarigerKharcha(opts: {
         remarks: note || "Week kharcha payment",
       })
     );
-    // Keep later bills’ carry in sync if this pay changes a prior leftover chain.
     await syncLiveKharchaCarryIn(orders, [
       ...payments,
       {
