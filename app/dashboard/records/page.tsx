@@ -255,6 +255,9 @@ const money = formatRupee;
 
 export default function RecordsPage() {
   const { session } = useAuth();
+  /** Admins always; supervisors need Web access → Edit & delete. */
+  const canEditDelete =
+    !isSupervisorSession(session) || Boolean(session.access.editDelete);
   const canSeeKaarigerTab =
     !session ||
     !isSupervisorSession(session) ||
@@ -632,6 +635,7 @@ export default function RecordsPage() {
   }
 
   function openPickupEdit(p: PickupRecord) {
+    if (!canEditDelete) return;
     setPickupModal(p);
     setPickupForm({
       clarisQuantity: String(p.clarisQuantity ?? p.quantity ?? ""),
@@ -665,6 +669,10 @@ export default function RecordsPage() {
   async function savePickup(e: React.FormEvent) {
     e.preventDefault();
     if (!pickupModal) return;
+    if (pickupModal !== "add" && !canEditDelete) {
+      alert("Edit access is off for this supervisor. Ask an admin to enable Edit & delete.");
+      return;
+    }
     const claris = Number(pickupForm.clarisQuantity) || 0;
     const bliss = Number(pickupForm.blissQuantity) || 0;
     if (claris + bliss <= 0) {
@@ -707,6 +715,7 @@ export default function RecordsPage() {
   }
 
   function openReturnEdit(r: ReturnRecord) {
+    if (!canEditDelete) return;
     setReturnModal(r);
     setReturnForm({
       clarisQuantity: String(r.clarisQuantity ?? r.quantity ?? ""),
@@ -724,6 +733,10 @@ export default function RecordsPage() {
   async function saveReturn(e: React.FormEvent) {
     e.preventDefault();
     if (!returnModal) return;
+    if (returnModal !== "add" && !canEditDelete) {
+      alert("Edit access is off for this supervisor. Ask an admin to enable Edit & delete.");
+      return;
+    }
     const claris = Number(returnForm.clarisQuantity) || 0;
     const bliss = Number(returnForm.blissQuantity) || 0;
     if (claris + bliss <= 0) {
@@ -764,6 +777,7 @@ export default function RecordsPage() {
   }
 
   function openOrderEdit(o: KaarigerOrder) {
+    if (!canEditDelete) return;
     setEditOrder(o);
     setBillMsg("");
     setBillKaarigerName(o.kaarigerName);
@@ -959,6 +973,7 @@ export default function RecordsPage() {
   }
 
   async function deleteOrderRecord(o: KaarigerOrder) {
+    if (!canEditDelete) return;
     if (!confirm(`Delete order "${orderProductsLabel(o)}" for ${o.kaarigerName}? Related payments will also be removed. Repairing on this bill goes back to pending.`)) return;
     await cascadeDeleteOrder(o);
     setOrders((prev) => prev.filter((x) => x.id !== o.id));
@@ -967,6 +982,7 @@ export default function RecordsPage() {
   }
 
   async function deletePickupRecord(rec: PickupRecord) {
+    if (!canEditDelete) return;
     const qty = qtyBreakdown(rec.clarisQuantity, rec.blissQuantity, rec.quantity);
     if (!confirm(`Delete pickup (${qty}) via ${rec.partner || "—"}?`)) return;
     await deleteDoc(doc(getDb(), "pickup_records", rec.id));
@@ -975,6 +991,7 @@ export default function RecordsPage() {
   }
 
   async function deleteReturnRecord(rec: ReturnRecord) {
+    if (!canEditDelete) return;
     const qty = qtyBreakdown(rec.clarisQuantity, rec.blissQuantity, rec.quantity);
     if (!confirm(`Delete return (${qty}) via ${rec.partner || "—"}?`)) return;
     await deleteDoc(doc(getDb(), "return_records", rec.id));
@@ -1047,6 +1064,7 @@ export default function RecordsPage() {
   }
 
   async function deleteSelectedRecords() {
+    if (!canEditDelete) return;
     const ids = selection.selectedIds;
     if (ids.length === 0) return;
     const label =
@@ -1211,17 +1229,19 @@ export default function RecordsPage() {
         />
       )}
 
-      <BulkSelectBar
-        selectedCount={selection.selectedCount}
-        totalVisible={visibleIds.length}
-        allVisibleSelected={selection.allVisibleSelected}
-        someVisibleSelected={selection.someVisibleSelected}
-        onToggleAll={selection.toggleAllVisible}
-        onClear={selection.clear}
-        onDelete={() => void deleteSelectedRecords()}
-        deleting={bulkDeleting}
-        noun={tab === "kaariger" ? "bill" : tab === "pickups" ? "pickup" : "return"}
-      />
+      {canEditDelete && (
+        <BulkSelectBar
+          selectedCount={selection.selectedCount}
+          totalVisible={visibleIds.length}
+          allVisibleSelected={selection.allVisibleSelected}
+          someVisibleSelected={selection.someVisibleSelected}
+          onToggleAll={selection.toggleAllVisible}
+          onClear={selection.clear}
+          onDelete={() => void deleteSelectedRecords()}
+          deleting={bulkDeleting}
+          noun={tab === "kaariger" ? "bill" : tab === "pickups" ? "pickup" : "return"}
+        />
+      )}
 
       {/* Kaariger orders — table on desktop, cards on mobile. Click a row to see the full bill breakdown. */}
       {tab === "kaariger" && (
@@ -1271,14 +1291,16 @@ export default function RecordsPage() {
                       <td className="text-[var(--text-muted)]">{o.kaarigerName}</td>
                       <td className="text-right font-semibold">₹{o.totalDealAmount.toLocaleString("en-IN")}</td>
                       <td className="text-right">
-                        <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
-                            <Pencil size={14} />
-                          </button>
-                          <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                        {canEditDelete && (
+                          <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
+                              <Pencil size={14} />
+                            </button>
+                            <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1318,12 +1340,16 @@ export default function RecordsPage() {
                         <p className="text-sm text-[var(--text-muted)]">{o.kaarigerName}</p>
                       </div>
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
-                          <Pencil size={14} />
-                        </button>
-                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
-                          <Trash2 size={14} />
-                        </button>
+                        {canEditDelete && (
+                          <>
+                            <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openOrderEdit(o)} aria-label="Edit">
+                              <Pencil size={14} />
+                            </button>
+                            <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteOrderRecord(o)} aria-label="Delete">
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -1388,12 +1414,16 @@ export default function RecordsPage() {
                       <td className="text-[var(--text-muted)]">{formatDisplayDate(p.date)} {formatDisplayTime(p.time)}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
-                          <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
-                            <Pencil size={14} />
-                          </button>
-                          <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
-                            <Trash2 size={14} />
-                          </button>
+                          {canEditDelete && (
+                            <>
+                              <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
+                                <Pencil size={14} />
+                              </button>
+                              <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1420,12 +1450,16 @@ export default function RecordsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-display font-bold">{p.partner || "—"}</p>
                       <div className="flex items-center gap-1">
-                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
-                          <Pencil size={14} />
-                        </button>
-                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
-                          <Trash2 size={14} />
-                        </button>
+                        {canEditDelete && (
+                          <>
+                            <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openPickupEdit(p)} aria-label="Edit">
+                              <Pencil size={14} />
+                            </button>
+                            <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deletePickupRecord(p)} aria-label="Delete">
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -1503,12 +1537,16 @@ export default function RecordsPage() {
                       <td className="max-w-[200px] truncate text-[var(--text-muted)]">{r.notes || "—"}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">
-                          <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
-                            <Pencil size={14} />
-                          </button>
-                          <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
-                            <Trash2 size={14} />
-                          </button>
+                          {canEditDelete && (
+                            <>
+                              <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
+                                <Pencil size={14} />
+                              </button>
+                              <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1535,12 +1573,16 @@ export default function RecordsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-display font-bold">{r.partner || "—"}</p>
                       <div className="flex items-center gap-1">
-                        <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
-                          <Pencil size={14} />
-                        </button>
-                        <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
-                          <Trash2 size={14} />
-                        </button>
+                        {canEditDelete && (
+                          <>
+                            <button type="button" className="btn-icon !h-8 !w-8" onClick={() => openReturnEdit(r)} aria-label="Edit">
+                              <Pencil size={14} />
+                            </button>
+                            <button type="button" className="btn-icon !h-8 !w-8 !text-danger" onClick={() => deleteReturnRecord(r)} aria-label="Delete">
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -1746,26 +1788,30 @@ export default function RecordsPage() {
                   <MessageCircle className="h-3.5 w-3.5" />
                   Share WhatsApp
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    openOrderEdit(viewOrder);
-                    setViewOrder(null);
-                    setShowWhatsAppBill(false);
-                  }}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit Bill
-                </button>
-                <button
-                  type="button"
-                  className="btn !bg-danger/10 !text-danger hover:!bg-danger/20"
-                  onClick={() => deleteOrderRecord(viewOrder)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </button>
+                {canEditDelete && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        openOrderEdit(viewOrder);
+                        setViewOrder(null);
+                        setShowWhatsAppBill(false);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit Bill
+                    </button>
+                    <button
+                      type="button"
+                      className="btn !bg-danger/10 !text-danger hover:!bg-danger/20"
+                      onClick={() => deleteOrderRecord(viewOrder)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1842,14 +1888,16 @@ export default function RecordsPage() {
                       className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm"
                     >
                       <p className="min-w-0 truncate font-medium">{item.name}</p>
-                      <button
-                        type="button"
-                        className="btn btn-ghost shrink-0 p-2 text-red-600"
-                        onClick={() => deleteListItem(item)}
-                        aria-label={`Delete ${item.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {canEditDelete && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost shrink-0 p-2 text-red-600"
+                          onClick={() => deleteListItem(item)}
+                          aria-label={`Delete ${item.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </li>
                   ))
                 )}

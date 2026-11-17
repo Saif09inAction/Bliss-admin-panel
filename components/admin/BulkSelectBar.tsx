@@ -25,7 +25,7 @@ export default function BulkSelectBar({
   someVisibleSelected: boolean;
   onToggleAll: () => void;
   onClear: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   deleting?: boolean;
   noun?: string;
   onApprove?: () => void;
@@ -86,15 +86,17 @@ export default function BulkSelectBar({
             {rejecting ? "Rejecting…" : `Reject ${selectedCount}`}
           </button>
         )}
-        <button
-          type="button"
-          className="btn btn-sm !bg-danger !text-white hover:!brightness-95"
-          onClick={onDelete}
-          disabled={busy}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {deleting ? "Deleting…" : `Delete ${selectedCount} ${noun}${selectedCount === 1 ? "" : "s"}`}
-        </button>
+        {onDelete && (
+          <button
+            type="button"
+            className="btn btn-sm !bg-danger !text-white hover:!brightness-95"
+            onClick={onDelete}
+            disabled={busy}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {deleting ? "Deleting…" : `Delete ${selectedCount} ${noun}${selectedCount === 1 ? "" : "s"}`}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { BookOpen, Pencil, Plus, Trash2, X } from "lucide-react";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import BulkSelectBar, { SelectCheckbox } from "@/components/admin/BulkSelectBar";
 import PageToolbar from "@/components/admin/PageToolbar";
-import { useAuth } from "@/lib/auth-context";
+import { isSupervisorSession, useAuth } from "@/lib/auth-context";
 import { formatRupee, uuid } from "@/lib/csv";
 import { getDb } from "@/lib/firebase";
 import type { CatalogProduct } from "@/lib/types";
@@ -16,6 +16,8 @@ type FormMode = "closed" | "add" | "edit";
 
 export default function CatalogPage() {
   const { session } = useAuth();
+  const canEditDelete =
+    !isSupervisorSession(session) || Boolean(session.access.editDelete);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [productName, setProductName] = useState("");
   const [productPrice, setProductPrice] = useState("");
@@ -80,6 +82,14 @@ export default function CatalogPage() {
     setMessage("");
   }
 
+  function openEditGuarded(product: CatalogProduct) {
+    if (!canEditDelete) {
+      setMessage("Edit access is off for this supervisor. Ask an admin to enable Edit & delete.");
+      return;
+    }
+    openEdit(product);
+  }
+
   function openEdit(product: CatalogProduct) {
     setFormMode("edit");
     setEditingId(product.id);
@@ -97,6 +107,10 @@ export default function CatalogPage() {
 
   async function saveProduct(e: React.FormEvent) {
     e.preventDefault();
+    if (formMode === "edit" && !canEditDelete) {
+      setMessage("Edit access is off for this supervisor. Ask an admin to enable Edit & delete.");
+      return;
+    }
     const name = productName.trim();
     if (!name) {
       setMessage("Enter a product name.");
@@ -161,6 +175,10 @@ export default function CatalogPage() {
   }
 
   async function removeProduct(product: CatalogProduct) {
+    if (!canEditDelete) {
+      setMessage("Delete access is off for this supervisor. Ask an admin to enable Edit & delete.");
+      return;
+    }
     if (!confirm(`Delete "${product.name}" from the catalog?`)) return;
     try {
       await deleteDoc(doc(getDb(), "product_catalog", product.id));
@@ -172,6 +190,10 @@ export default function CatalogPage() {
   }
 
   async function deleteSelected() {
+    if (!canEditDelete) {
+      setMessage("Delete access is off for this supervisor. Ask an admin to enable Edit & delete.");
+      return;
+    }
     const ids = selection.selectedIds;
     if (ids.length === 0) return;
     if (!confirm(`Delete ${ids.length} selected catalog product${ids.length === 1 ? "" : "s"}?`)) return;
@@ -216,17 +238,19 @@ export default function CatalogPage() {
         </p>
       )}
 
-      <BulkSelectBar
-        selectedCount={selection.selectedCount}
-        totalVisible={visibleIds.length}
-        allVisibleSelected={selection.allVisibleSelected}
-        someVisibleSelected={selection.someVisibleSelected}
-        onToggleAll={selection.toggleAllVisible}
-        onClear={selection.clear}
-        onDelete={() => void deleteSelected()}
-        deleting={bulkDeleting}
-        noun="product"
-      />
+      {canEditDelete && (
+        <BulkSelectBar
+          selectedCount={selection.selectedCount}
+          totalVisible={visibleIds.length}
+          allVisibleSelected={selection.allVisibleSelected}
+          someVisibleSelected={selection.someVisibleSelected}
+          onToggleAll={selection.toggleAllVisible}
+          onClear={selection.clear}
+          onDelete={() => void deleteSelected()}
+          deleting={bulkDeleting}
+          noun="product"
+        />
+      )}
 
       {loading ? (
         <div className="surface py-14 text-center text-sm text-[var(--text-muted)]">
@@ -253,26 +277,32 @@ export default function CatalogPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th className="w-10" />
+                    {canEditDelete && <th className="w-10" />}
                     <th>Product</th>
                     <th className="text-right">Price / pc</th>
                     <th>Added by</th>
-                    <th className="text-right">Actions</th>
+                    {canEditDelete && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredProducts.map((product) => (
                     <tr
                       key={product.id}
-                      className={selection.isSelected(product.id) ? "bg-jade-soft/30" : undefined}
+                      className={
+                        canEditDelete && selection.isSelected(product.id)
+                          ? "bg-jade-soft/30"
+                          : undefined
+                      }
                     >
-                      <td>
-                        <SelectCheckbox
-                          checked={selection.isSelected(product.id)}
-                          onChange={() => selection.toggle(product.id)}
-                          label={`Select ${product.name}`}
-                        />
-                      </td>
+                      {canEditDelete && (
+                        <td>
+                          <SelectCheckbox
+                            checked={selection.isSelected(product.id)}
+                            onChange={() => selection.toggle(product.id)}
+                            label={`Select ${product.name}`}
+                          />
+                        </td>
+                      )}
                       <td className="font-semibold capitalize">{product.name}</td>
                       <td className="text-right tabular-nums">
                         {product.price && product.price > 0 ? (
@@ -284,26 +314,28 @@ export default function CatalogPage() {
                         )}
                       </td>
                       <td className="text-[var(--text-muted)]">{product.createdBy || "—"}</td>
-                      <td className="text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            className="btn-icon !h-8 !w-8"
-                            onClick={() => openEdit(product)}
-                            aria-label={`Edit ${product.name}`}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-icon !h-8 !w-8 !text-danger"
-                            onClick={() => removeProduct(product)}
-                            aria-label={`Delete ${product.name}`}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
+                      {canEditDelete && (
+                        <td className="text-right">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="btn-icon !h-8 !w-8"
+                              onClick={() => openEditGuarded(product)}
+                              aria-label={`Edit ${product.name}`}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-icon !h-8 !w-8 !text-danger"
+                              onClick={() => removeProduct(product)}
+                              aria-label={`Delete ${product.name}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -316,14 +348,16 @@ export default function CatalogPage() {
               <div
                 key={product.id}
                 className={`surface flex items-center gap-3 p-4 ${
-                  selection.isSelected(product.id) ? "ring-2 ring-jade/40" : ""
+                  canEditDelete && selection.isSelected(product.id) ? "ring-2 ring-jade/40" : ""
                 }`}
               >
-                <SelectCheckbox
-                  checked={selection.isSelected(product.id)}
-                  onChange={() => selection.toggle(product.id)}
-                  label={`Select ${product.name}`}
-                />
+                {canEditDelete && (
+                  <SelectCheckbox
+                    checked={selection.isSelected(product.id)}
+                    onChange={() => selection.toggle(product.id)}
+                    label={`Select ${product.name}`}
+                  />
+                )}
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-jade-soft text-jade-deep">
                   <BookOpen size={18} />
                 </div>
@@ -335,22 +369,26 @@ export default function CatalogPage() {
                       : "No price set"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="btn-icon !h-8 !w-8"
-                  onClick={() => openEdit(product)}
-                  aria-label={`Edit ${product.name}`}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="btn-icon !h-8 !w-8 !text-danger"
-                  onClick={() => removeProduct(product)}
-                  aria-label={`Delete ${product.name}`}
-                >
-                  <Trash2 size={14} />
-                </button>
+                {canEditDelete && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-icon !h-8 !w-8"
+                      onClick={() => openEditGuarded(product)}
+                      aria-label={`Edit ${product.name}`}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-icon !h-8 !w-8 !text-danger"
+                      onClick={() => removeProduct(product)}
+                      aria-label={`Delete ${product.name}`}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>

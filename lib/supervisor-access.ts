@@ -7,6 +7,7 @@ export type SupervisorPermissionKey =
   | "catalog"
   | "materials"
   | "pickupReturn"
+  | "editDelete"
   | "inventory"
   | "kaariger"
   | "repairing"
@@ -26,6 +27,7 @@ export const SUPERVISOR_PERMISSION_LABELS: Record<SupervisorPermissionKey, strin
   catalog: "Product catalog",
   materials: "Raw materials",
   pickupReturn: "Pickup & return",
+  editDelete: "Edit & delete (pickup, return, catalog)",
   inventory: "Store inventory",
   kaariger: "Kaariger",
   repairing: "Repairing",
@@ -44,6 +46,8 @@ export const DEFAULT_SUPERVISOR_ACCESS: SupervisorAccess = {
   catalog: true,
   materials: true,
   pickupReturn: true,
+  /** Off by default — supervisors can add pickup/return/products but not change or remove them. */
+  editDelete: false,
   inventory: false,
   kaariger: false,
   repairing: false,
@@ -129,4 +133,9 @@ export function supervisorDefaultPath(access: SupervisorAccess): string {
 
 export function isPayrollRole(role: string | undefined): boolean {
   return role === "STAFF" || role === "SUPERVISOR" || !role;
+}
+
+/** Admins always can; supervisors need the editDelete web-access toggle. */
+export function canEditDeleteRecords(access?: SupervisorAccess | null): boolean {
+  return Boolean(access?.editDelete);
 }
