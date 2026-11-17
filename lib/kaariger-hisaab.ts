@@ -59,14 +59,12 @@ export function orderKharchaUnpaid(order: KaarigerOrder, paidOnOrder: number): n
 
 /**
  * Carry into next week from this bill’s leftover AFTER payments.
- * Only unpaid LEFT carries (negative carryIn next week).
- * Overpay / Extra stays on this week — it must NOT shrink the next bill’s box
- * (that was putting live weeks into minus after big settlement pays).
+ * Underpay LEFT → negative carryIn (grows next box).
+ * Overpay / Extra → positive carryIn (shrinks next box).
+ * Example: 10k left, pay 15k → Extra −5k; next 10k bill becomes 5k left.
  */
 export function orderKharchaCarryOut(order: KaarigerOrder, paidOnOrder: number): number {
-  const left = orderKharchaBalance(order, paidOnOrder);
-  if (left > 0) return Math.round(-left * 100) / 100;
-  return 0;
+  return Math.round(-orderKharchaBalance(order, paidOnOrder) * 100) / 100;
 }
 
 /**
