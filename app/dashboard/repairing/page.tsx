@@ -98,6 +98,22 @@ type ProductOption = {
   price: number;
 };
 
+type AddRepairLine = {
+  id: string;
+  productId: string;
+  faultyQuantity: string;
+  faultyPricePerPiece: string;
+};
+
+function emptyAddLine(): AddRepairLine {
+  return {
+    id: uuid(),
+    productId: "",
+    faultyQuantity: "",
+    faultyPricePerPiece: "",
+  };
+}
+
 export default function RepairingPage() {
   const { session } = useAuth();
   const [repairs, setRepairs] = useState<OrderRepair[]>([]);
@@ -116,10 +132,8 @@ export default function RepairingPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addKaarigerId, setAddKaarigerId] = useState("");
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
-  const [addProductId, setAddProductId] = useState("");
+  const [addLines, setAddLines] = useState<AddRepairLine[]>([emptyAddLine()]);
   const [addForm, setAddForm] = useState({
-    faultyQuantity: "",
-    faultyPricePerPiece: "",
     notes: "",
     applyNow: true,
   });
@@ -175,9 +189,8 @@ export default function RepairingPage() {
   }, []);
 
   useEffect(() => {
-    setAddProductId("");
+    setAddLines([emptyAddLine()]);
   }, [addKaarigerId]);
-
 
   const productOptions: ProductOption[] = useMemo(
     () =>
@@ -190,100 +203,128 @@ export default function RepairingPage() {
     [catalogProducts]
   );
 
-  const selectedProduct = productOptions.find((p) => p.id === addProductId) || null;
+  const validAddLines = useMemo(() => {
+    return addLines
+      .map((line) => {
+        const product = productOptions.find((p) => p.id === line.productId) || null;
+        const qty = Number(line.faultyQuantity) || 0;
+        const price = Number(line.faultyPricePerPiece) || 0;
+        return { line, product, qty, price };
+      })
+      .filter((row) => row.product && row.qty > 0);
+  }, [addLines, productOptions]);
+
+  const addLinesTotal = useMemo(
+    () =>
+      validAddLines.reduce(
+        (s, row) => s + Math.round(row.qty * row.price * 100) / 100,
+        0
+      ),
+    [validAddLines]
+  );
 
   function openAdd() {
     setShowAdd(true);
     setMsg("");
     setAddKaarigerId("");
-    setAddProductId("");
+    setAddLines([emptyAddLine()]);
     setAddForm({
-      faultyQuantity: "",
-      faultyPricePerPiece: "",
       notes: "",
       applyNow: true,
     });
   }
 
-  function onPickProduct(id: string) {
-    setAddProductId(id);
-    const picked = productOptions.find((p) => p.id === id);
-    if (picked && picked.price > 0) {
-      setAddForm((prev) => ({
-        ...prev,
-        faultyPricePerPiece: String(picked.price),
-      }));
-    }
+  function updateAddLine(id: string, patch: Partial<AddRepairLine>) {
+    setAddLines((list) => list.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+  }
+
+  function onPickProductLine(lineId: string, productId: string) {
+    const picked = productOptions.find((p) => p.id === productId);
+    updateAddLine(lineId, {
+      productId,
+      ...(picked && picked.price > 0
+        ? { faultyPricePerPiece: String(picked.price) }
+        : {}),
+    });
   }
 
   async function saveAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedProduct || !addKaarigerId) {
-      setMsg("Select a kaariger and product.");
+    if (!addKaarigerId) {
+      setMsg("Select a kaariger.");
       return;
     }
-    const qty = Number(addForm.faultyQuantity) || 0;
-    const price = Number(addForm.faultyPricePerPiece) || 0;
-    if (qty <= 0) {
-      setMsg("Quantity must be greater than 0.");
+    if (validAddLines.length === 0) {
+      setMsg("Add at least one product with quantity.");
       return;
     }
-    if (price < 0) {
-      setMsg("Price cannot be negative.");
-      return;
-    }
-    if (addForm.applyNow && price <= 0) {
-      setMsg("Enter ₹/pc to apply deduction now.");
-      return;
+    for (const row of validAddLines) {
+      if (row.price < 0) {
+        setMsg("Price cannot be negative.");
+        return;
+      }
+      if (addForm.applyNow && row.price <= 0) {
+        setMsg(`Enter ₹/pc for ${row.product?.productName || "each product"} to apply now.`);
+        return;
+      }
     }
 
     const kaariger = kaarigers.find((k) => (k.phone || k.id) === addKaarigerId);
     const orderId = STANDALONE_REPAIR_ORDER_ID;
     const kaarigerId = addKaarigerId;
     const kaarigerName = kaariger?.name || "Kaariger";
-    const faultyTotal = Math.round(qty * price * 100) / 100;
-    const id = uuid();
     const now = Date.now();
     const status: RepairStatus = addForm.applyNow ? "APPROVED" : "PENDING";
     const createdBy = session?.name || "Admin";
+    const notes = addForm.notes.trim();
 
     setSaving(true);
     setMsg("");
     try {
       const deferToNextBill = status === "APPROVED";
-      await setDoc(doc(getDb(), "order_repairs", id), {
-        id,
-        orderId,
-        kaarigerId,
-        kaarigerName,
-        productName: selectedProduct.productName,
-        faultyQuantity: qty,
-        faultyPricePerPiece: price,
-        faultyTotal,
-        items: [],
-        totalRepairCost: faultyTotal,
-        originalDealAmount: 0,
-        dealAfterThisRepair: 0,
-        createdBy,
-        createdAt: now,
-        status,
-        deferToNextBill,
-        ...(addForm.notes.trim() ? { notes: addForm.notes.trim() } : {}),
-        ...(status === "APPROVED"
-          ? { reviewedBy: createdBy, reviewedAt: now }
-          : {}),
-      });
+      await Promise.all(
+        validAddLines.map(async (row, index) => {
+          const id = uuid();
+          const faultyTotal = Math.round(row.qty * row.price * 100) / 100;
+          await setDoc(doc(getDb(), "order_repairs", id), {
+            id,
+            orderId,
+            kaarigerId,
+            kaarigerName,
+            productName: row.product!.productName,
+            faultyQuantity: row.qty,
+            faultyPricePerPiece: row.price,
+            faultyTotal,
+            items: [],
+            totalRepairCost: faultyTotal,
+            originalDealAmount: 0,
+            dealAfterThisRepair: 0,
+            createdBy,
+            createdAt: now + index,
+            status,
+            deferToNextBill,
+            ...(notes ? { notes } : {}),
+            ...(status === "APPROVED"
+              ? { reviewedBy: createdBy, reviewedAt: now }
+              : {}),
+          });
+        })
+      );
 
       const attachedLabel = status === "APPROVED"
         ? "approved — add to bill from Hisaab when ready (not deducted yet)"
         : "";
+      const countLabel =
+        validAddLines.length === 1
+          ? "1 product"
+          : `${validAddLines.length} products`;
 
       setShowAdd(false);
       setTab(status === "APPROVED" ? "APPROVED" : "PENDING");
       setMsg(
         status === "APPROVED"
-          ? `Repairing added — ${money(faultyTotal)} ${attachedLabel}.`
-          : `Repairing saved as pending for ${kaarigerName}. Set ₹/pc on approve if needed.`
+          ? `Repairing added (${countLabel}) — ${money(addLinesTotal)} ${attachedLabel}.`
+          : `Repairing saved as pending for ${kaarigerName} (${countLabel}). Set ₹/pc on approve if needed.`
       );
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to add repairing.");
@@ -1000,67 +1041,107 @@ export default function RepairingPage() {
                 />
               </div>
 
-              <div>
-                <label className="label">Product *</label>
-                <select
-                  className="input"
-                  value={addProductId}
-                  onChange={(e) => onPickProduct(e.target.value)}
-                  disabled={!addKaarigerId || productOptions.length === 0}
-                  required
-                >
-                  <option value="">
-                    {!addKaarigerId
-                      ? "Select kaariger first"
-                      : productOptions.length === 0
-                        ? "No catalog products — add some in Catalog"
-                        : "Select product"}
-                  </option>
-                  {productOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.productName}
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="label !mb-0">Products *</label>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={!addKaarigerId || productOptions.length === 0}
+                    onClick={() => setAddLines((list) => [...list, emptyAddLine()])}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add product
+                  </button>
+                </div>
+                {!addKaarigerId ? (
+                  <p className="text-xs text-[var(--text-muted)]">Select kaariger first</p>
+                ) : productOptions.length === 0 ? (
+                  <p className="text-xs text-[var(--text-muted)]">
+                    No catalog products — add some in Catalog
+                  </p>
+                ) : (
+                  addLines.map((line, index) => (
+                    <div
+                      key={line.id}
+                      className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                          Product {index + 1}
+                        </p>
+                        {addLines.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn-icon !h-8 !w-8 !text-danger"
+                            onClick={() =>
+                              setAddLines((list) => list.filter((row) => row.id !== line.id))
+                            }
+                            aria-label={`Remove product ${index + 1}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        className="input"
+                        value={line.productId}
+                        onChange={(e) => onPickProductLine(line.id, e.target.value)}
+                        required
+                      >
+                        <option value="">Select product</option>
+                        {productOptions.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.productName}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="label">Faulty qty *</label>
+                          <input
+                            className="input"
+                            type="number"
+                            min={0}
+                            step="any"
+                            inputMode="decimal"
+                            value={line.faultyQuantity}
+                            onChange={(e) =>
+                              updateAddLine(line.id, { faultyQuantity: e.target.value })
+                            }
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="label">
+                            ₹ / pc {addForm.applyNow ? "*" : "(on approve)"}
+                          </label>
+                          <input
+                            className="input"
+                            type="number"
+                            min={0}
+                            step="any"
+                            inputMode="decimal"
+                            value={line.faultyPricePerPiece}
+                            onChange={(e) =>
+                              updateAddLine(line.id, { faultyPricePerPiece: e.target.value })
+                            }
+                            required={addForm.applyNow}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Faulty qty *</label>
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    step="any"
-                    inputMode="decimal"
-                    value={addForm.faultyQuantity}
-                    onChange={(e) => setAddForm({ ...addForm, faultyQuantity: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="label">
-                    ₹ / pc {addForm.applyNow ? "*" : "(on approve)"}
-                  </label>
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    step="any"
-                    inputMode="decimal"
-                    value={addForm.faultyPricePerPiece}
-                    onChange={(e) => setAddForm({ ...addForm, faultyPricePerPiece: e.target.value })}
-                    required={addForm.applyNow}
-                  />
-                </div>
-              </div>
-
-              {(Number(addForm.faultyQuantity) || 0) > 0 && (
+              {validAddLines.length > 0 && (
                 <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">
-                  Deduction: −
-                  {money((Number(addForm.faultyQuantity) || 0) * (Number(addForm.faultyPricePerPiece) || 0))}
+                  Deduction: −{money(addLinesTotal)}
                   {addForm.applyNow ? " (applied now)" : " (pending — set ₹/pc on approve)"}
-                  {selectedProduct ? " · hisaab" : ""}
+                  {validAddLines.length > 1
+                    ? ` · ${validAddLines.length} products`
+                    : " · hisaab"}
                 </p>
               )}
 
@@ -1095,8 +1176,16 @@ export default function RepairingPage() {
                 <button type="button" className="btn btn-secondary flex-1" onClick={() => setShowAdd(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary flex-1" disabled={saving || !selectedProduct}>
-                  {saving ? "Saving…" : "Add repairing"}
+                <button
+                  type="submit"
+                  className="btn btn-primary flex-1"
+                  disabled={saving || !addKaarigerId || validAddLines.length === 0}
+                >
+                  {saving
+                    ? "Saving…"
+                    : validAddLines.length > 1
+                      ? `Add ${validAddLines.length} repairing`
+                      : "Add repairing"}
                 </button>
               </div>
             </form>
