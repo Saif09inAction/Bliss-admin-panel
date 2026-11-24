@@ -1014,7 +1014,7 @@ export default function RepairingPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <form
               onSubmit={saveAdd}
-              className="surface max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto p-5"
+              className="surface max-h-[90vh] w-full max-w-2xl space-y-4 overflow-y-auto p-5"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-start justify-between gap-3">
@@ -1041,7 +1041,7 @@ export default function RepairingPage() {
                 />
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <label className="label !mb-0">Products *</label>
                   <button
@@ -1061,60 +1061,55 @@ export default function RepairingPage() {
                     No catalog products — add some in Catalog
                   </p>
                 ) : (
-                  addLines.map((line, index) => (
-                    <div
-                      key={line.id}
-                      className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface-mist)]/40 p-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                          Product {index + 1}
-                        </p>
-                        {addLines.length > 1 && (
-                          <button
-                            type="button"
-                            className="btn-icon !h-8 !w-8 !text-danger"
-                            onClick={() =>
-                              setAddLines((list) => list.filter((row) => row.id !== line.id))
-                            }
-                            aria-label={`Remove product ${index + 1}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                      <select
-                        className="input"
-                        value={line.productId}
-                        onChange={(e) => onPickProductLine(line.id, e.target.value)}
-                        required
+                  <>
+                    <div className="hidden grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_2rem] gap-2 px-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] sm:grid">
+                      <span>Product</span>
+                      <span>Qty</span>
+                      <span>₹ / pc</span>
+                      <span />
+                    </div>
+                    {addLines.map((line, index) => (
+                      <div
+                        key={line.id}
+                        className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_2rem]"
                       >
-                        <option value="">Select product</option>
-                        {productOptions.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.productName}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="grid grid-cols-2 gap-3">
+                        <div className="min-w-0">
+                          <label className="label sm:hidden">Product *</label>
+                          <select
+                            className="input"
+                            value={line.productId}
+                            onChange={(e) => onPickProductLine(line.id, e.target.value)}
+                            required
+                            aria-label={`Product ${index + 1}`}
+                          >
+                            <option value="">Select product</option>
+                            {productOptions.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.productName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <div>
-                          <label className="label">Faulty qty *</label>
+                          <label className="label sm:hidden">Qty *</label>
                           <input
                             className="input"
                             type="number"
                             min={0}
                             step="any"
                             inputMode="decimal"
+                            placeholder="Qty"
                             value={line.faultyQuantity}
                             onChange={(e) =>
                               updateAddLine(line.id, { faultyQuantity: e.target.value })
                             }
                             required
+                            aria-label={`Qty ${index + 1}`}
                           />
                         </div>
                         <div>
-                          <label className="label">
-                            ₹ / pc {addForm.applyNow ? "*" : "(on approve)"}
+                          <label className="label sm:hidden">
+                            ₹ / pc {addForm.applyNow ? "*" : ""}
                           </label>
                           <input
                             className="input"
@@ -1122,16 +1117,34 @@ export default function RepairingPage() {
                             min={0}
                             step="any"
                             inputMode="decimal"
+                            placeholder="₹/pc"
                             value={line.faultyPricePerPiece}
                             onChange={(e) =>
                               updateAddLine(line.id, { faultyPricePerPiece: e.target.value })
                             }
                             required={addForm.applyNow}
+                            aria-label={`Price ${index + 1}`}
                           />
                         </div>
+                        <div className="flex justify-end pb-0.5">
+                          {addLines.length > 1 ? (
+                            <button
+                              type="button"
+                              className="btn-icon !h-9 !w-9 !text-danger"
+                              onClick={() =>
+                                setAddLines((list) => list.filter((row) => row.id !== line.id))
+                              }
+                              aria-label={`Remove product ${index + 1}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <span className="hidden h-9 w-9 sm:block" aria-hidden />
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </>
                 )}
               </div>
 
