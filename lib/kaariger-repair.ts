@@ -100,7 +100,7 @@ export async function syncOrderRepairAndRemaining(orderId: string): Promise<void
   if (deltaClosing === 0 || !order.kaarigerId) return;
   const empSnap = await getDoc(doc(db, "employees", order.kaarigerId));
   if (!empSnap.exists()) return;
-  const opening = (empSnap.data().openingBalance as number) || 0;
+  const opening = (empSnap.data().openingBalance as number) ?? 0;
   await updateDoc(doc(db, "employees", order.kaarigerId), {
     openingBalance: Math.round((opening + deltaClosing) * 100) / 100,
   });

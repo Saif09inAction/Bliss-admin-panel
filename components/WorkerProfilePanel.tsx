@@ -152,11 +152,11 @@ export default function WorkerProfilePanel({
   const [hisaabLoading, setHisaabLoading] = useState(false);
 
   const grossOpening = useMemo(() => {
-    if (localEmployee.role !== "KAARIGER") return Math.max(0, localEmployee.openingBalance || 0);
+    if (localEmployee.role !== "KAARIGER") return Math.max(0, localEmployee.openingBalance ?? 0);
     return grossOpeningBeforePays({
       orders: kaarigerOrders,
       payments: kaarigerPayments,
-      openingBalance: localEmployee.openingBalance || 0,
+      openingBalance: localEmployee.openingBalance ?? 0,
     });
   }, [localEmployee, kaarigerOrders, kaarigerPayments]);
 
@@ -164,7 +164,7 @@ export default function WorkerProfilePanel({
     if (localEmployee.role !== "KAARIGER") return 0;
     return totalRemainingAmount({
       openingBalance:
-        (localEmployee.openingBalance || 0) + Math.max(0, localEmployee.oldKharcha || 0),
+        (localEmployee.openingBalance ?? 0) + Math.max(0, localEmployee.oldKharcha || 0),
       creditBalance: localEmployee.creditBalance || 0,
     });
   }, [localEmployee]);
@@ -678,7 +678,7 @@ export default function WorkerProfilePanel({
         amount,
         remarks: payForm.remarks.trim() || undefined,
         createdBy: session.name,
-        openingBalance: localEmployee.openingBalance || 0,
+        openingBalance: localEmployee.openingBalance ?? 0,
         creditBalance: localEmployee.creditBalance || 0,
         standaloneRepairTotal,
       });
@@ -686,7 +686,7 @@ export default function WorkerProfilePanel({
       const data = snap.data() || {};
       const next: Employee = {
         ...localEmployee,
-        openingBalance: (data.openingBalance as number) || 0,
+        openingBalance: (data.openingBalance as number) ?? 0,
         creditBalance: (data.creditBalance as number) || 0,
       };
       const paySnap = await getDocs(
@@ -713,7 +713,7 @@ export default function WorkerProfilePanel({
           grossOpeningBeforePays({
             orders: kaarigerOrders,
             payments: freshPayments,
-            openingBalance: next.openingBalance || 0,
+            openingBalance: next.openingBalance ?? 0,
           })
         )
       );

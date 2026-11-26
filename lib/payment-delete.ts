@@ -50,7 +50,7 @@ export async function deleteKaarigerPayments(
   if (!empSnap.exists()) throw new Error("Kaariger not found.");
 
   const emp = empSnap.data();
-  let openingBalance = (emp.openingBalance as number) || 0;
+  let openingBalance = (emp.openingBalance as number) ?? 0;
   let creditBalance = (emp.creditBalance as number) || 0;
   let oldKharcha = (emp.oldKharcha as number) || 0;
 

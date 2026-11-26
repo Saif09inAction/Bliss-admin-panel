@@ -319,7 +319,7 @@ export default function OrdersPage() {
           attendancePercentage: 0,
           role: "KAARIGER" as const,
           creditBalance: (d.data().creditBalance as number) || 0,
-          openingBalance: (d.data().openingBalance as number) || 0,
+          openingBalance: (d.data().openingBalance as number) ?? 0,
           oldKharcha: (d.data().oldKharcha as number) || 0,
         }))
     );
@@ -424,7 +424,7 @@ export default function OrdersPage() {
             k.phone === kaarigerId
               ? {
                   ...k,
-                  openingBalance: (data.openingBalance as number) || 0,
+                  openingBalance: (data.openingBalance as number) ?? 0,
                   oldKharcha: (data.oldKharcha as number) || 0,
                   creditBalance: (data.creditBalance as number) || 0,
                 }
@@ -444,7 +444,7 @@ export default function OrdersPage() {
     () => kaarigers.find((k) => k.phone === kaarigerId),
     [kaarigers, kaarigerId]
   );
-  const currentOpening = selectedKaariger?.openingBalance || 0;
+  const currentOpening = selectedKaariger?.openingBalance ?? 0;
   const currentOldKharcha = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const currentCredit = Math.max(0, selectedKaariger?.creditBalance || 0);
 
@@ -536,7 +536,7 @@ export default function OrdersPage() {
         const remainingOnly = approvedStandaloneRepairs.filter((r) => !r.deferToNextBill);
         const standaloneRepairTotal = remainingOnly.reduce((s, r) => s + r.totalRepairCost, 0);
 
-        const openingBalance = selectedKaariger.openingBalance || 0;
+        const openingBalance = selectedKaariger.openingBalance ?? 0;
         const oldKharcha = Math.max(0, selectedKaariger.oldKharcha || 0);
         const creditBalance = Math.max(0, selectedKaariger.creditBalance || 0);
         const total = totalRemainingAmount({
@@ -747,7 +747,7 @@ export default function OrdersPage() {
       const empData = empSnap.exists() ? empSnap.data() : null;
       const liveOpening = Math.max(
         0,
-        empData ? (empData.openingBalance as number) || 0 : kaariger.openingBalance || 0
+        empData ? (empData.openingBalance as number) ?? 0 : kaariger.openingBalance ?? 0
       );
       const liveOldKharcha = Math.max(
         0,

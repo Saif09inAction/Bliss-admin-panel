@@ -94,7 +94,7 @@ export default function WorkersPage() {
           attendancePercentage: (data.attendancePercentage as number) || 0,
           role: ((data.role as Role) || "STAFF") as Role,
           creditBalance: (data.creditBalance as number) || 0,
-          openingBalance: (data.openingBalance as number) || 0,
+          openingBalance: (data.openingBalance as number) ?? 0,
           dailySignInTime: (data.dailySignInTime as string) || "",
           dailySignOutTime: (data.dailySignOutTime as string) || "",
           shiftHistory: parseShiftHistory(data.shiftHistory),
@@ -242,7 +242,9 @@ export default function WorkersPage() {
       }
 
       if (resolvedRole === "KAARIGER") {
-        data.openingBalance = Math.max(0, Number(form.openingBalance) || 0);
+        const opening = Number(form.openingBalance);
+        // Allow negative remaining (over-settled bills); only fall back when not a number.
+        data.openingBalance = Number.isFinite(opening) ? opening : 0;
       }
 
       if (resolvedRole === "STAFF" || resolvedRole === "SUPERVISOR") {

@@ -196,7 +196,7 @@ export default function HisaabPage() {
         attendancePercentage: 0,
         role: "KAARIGER" as const,
         creditBalance: (d.data().creditBalance as number) || 0,
-        openingBalance: (d.data().openingBalance as number) || 0,
+        openingBalance: (d.data().openingBalance as number) ?? 0,
         oldKharcha: (d.data().oldKharcha as number) || 0,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -603,7 +603,7 @@ export default function HisaabPage() {
         amount,
         remarks: payForm.remarks.trim() || undefined,
         createdBy: session.name,
-        openingBalance: k.openingBalance || 0,
+        openingBalance: k.openingBalance ?? 0,
         creditBalance: k.creditBalance || 0,
         oldKharcha: k.oldKharcha || 0,
         orders,
@@ -708,7 +708,7 @@ export default function HisaabPage() {
 
   // Opening (old pending + bill closings) − credit − repairs = Total Remaining.
   // Can be negative when kharcha / pays exceed ADD. Do not floor at 0.
-  const openingBal = selectedKaariger?.openingBalance || 0;
+  const openingBal = selectedKaariger?.openingBalance ?? 0;
   const oldKharchaBal = Math.max(0, selectedKaariger?.oldKharcha || 0);
   const creditBal = Math.max(0, selectedKaariger?.creditBalance || 0);
   const standaloneRepairs = useMemo(
@@ -2528,7 +2528,7 @@ function GrandTotalBox({
   const opening =
     order.openingAtCreation != null
       ? order.openingAtCreation
-      : (openingBalance || 0) - addBalance + weekKharcha;
+      : (openingBalance ?? 0) - addBalance + weekKharcha;
   const subtotal = opening + productsTotal;
   const grossClosing = opening + addBalance - weekKharcha;
   const old = Math.max(0, oldKharcha || 0);

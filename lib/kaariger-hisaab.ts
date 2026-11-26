@@ -165,7 +165,7 @@ export function orderAddBalance(order: KaarigerOrder): number {
 
 /** Closing snapshot before storing: opening + ADD − week kharcha given. */
 export function orderClosingAfterKharcha(openingBalance: number, order: KaarigerOrder): number {
-  return (openingBalance || 0) + orderAddBalance(order) - orderWeekKharcha(order);
+  return (openingBalance ?? 0) + orderAddBalance(order) - orderWeekKharcha(order);
 }
 
 /**
@@ -183,7 +183,7 @@ export function totalRemainingAmount(opts: {
   standaloneRepairTotal?: number;
 }): number {
   return (
-    (opts.openingBalance || 0) -
+    (opts.openingBalance ?? 0) -
     Math.max(0, opts.creditBalance || 0) -
     Math.max(0, opts.standaloneRepairTotal || 0)
   );
@@ -372,7 +372,7 @@ export function buildHisaabLedger(opts: {
   const foldTotal = orders.reduce((s, o) => s + Math.max(0, o.kharchaCarriedForward || 0), 0);
 
   const startOpening =
-    (opts.openingBalance || 0) +
+    (opts.openingBalance ?? 0) +
     openingPaidTotal -
     billNetTotal +
     creditSettledOnBills -
@@ -639,7 +639,7 @@ export function buildHisaabLedger(opts: {
 
   // Keep last Remaining in sync with the header formula (float / reconstruction drift).
   const liveRemaining = totalRemainingAmount({
-    openingBalance: (opts.openingBalance || 0) + Math.max(0, opts.oldKharcha || 0),
+    openingBalance: (opts.openingBalance ?? 0) + Math.max(0, opts.oldKharcha || 0),
     creditBalance: creditBal,
     standaloneRepairTotal: opts.standaloneRepairTotal,
   });
@@ -679,7 +679,7 @@ export function grossOpeningBeforePays(opts: {
     0
   );
   return (
-    (opts.openingBalance || 0) +
+    (opts.openingBalance ?? 0) +
     openingPaidTotal -
     billNetTotal +
     creditSettledOnBills -

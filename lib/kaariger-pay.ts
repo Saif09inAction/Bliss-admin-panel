@@ -330,7 +330,7 @@ export async function payKaarigerKharcha(opts: {
   }
 
   let repairCover = Math.max(0, opts.standaloneRepairTotal || 0);
-  const opening = Math.max(0, opts.openingBalance || 0);
+  const opening = Math.max(0, opts.openingBalance ?? 0);
   const openingCoveredByRepair = Math.min(opening, repairCover);
   repairCover -= openingCoveredByRepair;
   const openingDue = Math.max(0, opening - openingCoveredByRepair);
