@@ -73,6 +73,25 @@ export function paymentLabel(
   return orderNameById.get(p.orderId) || "Week kharcha";
 }
 
+/** Default remarks written when admin leaves the note blank — hide these in the UI. */
+const DEFAULT_PAYMENT_REMARKS = new Set([
+  "week kharcha payment",
+  "old kharcha payment",
+  "opening balance payment",
+  "opening / old remaining payment",
+  "old remaining payment",
+  "extra kharcha — carried as credit",
+  "extra kharcha - carried as credit",
+]);
+
+/** Admin-entered note only (skips system default remarks). */
+export function paymentDisplayNote(p: { remarks?: string }): string {
+  const note = (p.remarks || "").trim();
+  if (!note) return "";
+  if (DEFAULT_PAYMENT_REMARKS.has(note.toLowerCase())) return "";
+  return note;
+}
+
 export type PaymentGroup = {
   id: string;
   payments: KaarigerPayment[];

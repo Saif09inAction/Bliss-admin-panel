@@ -36,6 +36,7 @@ import {
   groupPayments,
   orderNetDeal,
   payKaarigerKharcha,
+  paymentDisplayNote,
   paymentKind,
   paymentLabel,
 } from "@/lib/kaariger-pay";
@@ -1223,6 +1224,11 @@ export default function HisaabPage() {
                       .filter((p) => paymentKind(p) === "credit")
                       .reduce((s, p) => s + p.amount, 0);
                     const isDeleting = g.payments.some((p) => deletingPaymentId === p.id);
+                    const notes = [
+                      ...new Set(
+                        g.payments.map((p) => paymentDisplayNote(p)).filter(Boolean)
+                      ),
+                    ];
                     return (
                       <div key={g.id} className="flex items-start justify-between gap-3 p-3 text-sm">
                         <div className="min-w-0">
@@ -1231,13 +1237,22 @@ export default function HisaabPage() {
                             {formatDisplayDate(g.date)} · {formatDisplayTime(g.time)}
                             {g.createdBy ? ` · by ${g.createdBy}` : ""}
                           </p>
+                          {notes.length > 0 && (
+                            <p className="mt-1 text-xs text-[var(--text)]">
+                              Note: {notes.join(" · ")}
+                            </p>
+                          )}
                           {g.payments.length > 1 && (
                             <div className="mt-1 space-y-0.5">
-                              {g.payments.map((p) => (
-                                <p key={p.id} className="text-xs text-[var(--text-muted)]">
-                                  {paymentLabel(p, orderNameById)} · {money(p.amount)}
-                                </p>
-                              ))}
+                              {g.payments.map((p) => {
+                                const note = paymentDisplayNote(p);
+                                return (
+                                  <p key={p.id} className="text-xs text-[var(--text-muted)]">
+                                    {paymentLabel(p, orderNameById)} · {money(p.amount)}
+                                    {note ? ` · ${note}` : ""}
+                                  </p>
+                                );
+                              })}
                             </div>
                           )}
                           {creditPart > 0 && (
@@ -2700,7 +2715,7 @@ function GrandTotalBox({
                       <p className="font-medium text-[var(--text)]">
                         {formatDisplayDate(p.date)}
                         {p.time ? ` · ${formatDisplayTime(p.time)}` : ""}
-                        {p.remarks ? ` · ${p.remarks}` : ""}
+                        {paymentDisplayNote(p) ? ` · ${paymentDisplayNote(p)}` : ""}
                       </p>
                     </div>
                     <span className="shrink-0 font-bold text-danger">−{money(p.amount)}</span>
