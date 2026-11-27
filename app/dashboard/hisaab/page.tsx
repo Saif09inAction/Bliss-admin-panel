@@ -1224,11 +1224,11 @@ export default function HisaabPage() {
                       .filter((p) => paymentKind(p) === "credit")
                       .reduce((s, p) => s + p.amount, 0);
                     const isDeleting = g.payments.some((p) => deletingPaymentId === p.id);
-                    const notes = [
-                      ...new Set(
+                    const notes = Array.from(
+                      new Set(
                         g.payments.map((p) => paymentDisplayNote(p)).filter(Boolean)
-                      ),
-                    ];
+                      )
+                    );
                     return (
                       <div key={g.id} className="flex items-start justify-between gap-3 p-3 text-sm">
                         <div className="min-w-0">
